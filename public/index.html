@@ -66,6 +66,7 @@
         <label for="memberRole">Role</label><input id="memberRole" required maxlength="80">
         <label for="memberGroup">Desk group</label><select id="memberGroup"><option value="leadership">Leadership</option><option value="marketing">Marketing &amp; Business</option><option value="engineering">Engineering &amp; Design</option><option value="service">Customer Service</option></select>
         <label for="memberGender">Avatar</label><select id="memberGender"><option value="female">Female</option><option value="male">Male</option></select>
+        <label for="memberManager">Reports to <span>(blank = owner)</span></label><select id="memberManager"></select>
         <label class="check" for="memberAI"><input type="checkbox" id="memberAI"> AI agent drafts this member's tasks</label>
         <div id="memberAIFields" hidden><label for="memberModel">AI model <span>(router list)</span></label><select id="memberModel" aria-describedby="memberModelStatus"></select>
         <p class="task-note" id="memberModelStatus"></p>
@@ -82,7 +83,7 @@
         <button class="task-primary" type="submit">Add task</button><p class="task-note" id="saveNote">Saved in this browser. Export tasks to keep a copy.</p><button type="button" id="exportTasks">Export tasks</button>
       </form>
       <section aria-labelledby="taskListHeading"><h2 id="taskListHeading">Task list</h2>
-        <div class="task-filters"><div><label for="taskFilter">Status</label><select id="taskFilter"><option value="all">All statuses</option><option value="queued">Queued</option><option value="active">In progress</option><option value="blocked">Needs decision</option><option value="review">Needs review</option><option value="done">Done</option></select></div><div><label for="agentFilter">Assignee</label><select id="agentFilter"><option value="all">All characters</option></select></div></div>
+        <div class="task-filters"><div><label for="taskFilter">Status</label><select id="taskFilter"><option value="all">All statuses</option><option value="queued">Queued</option><option value="active">In progress</option><option value="blocked">Needs decision</option><option value="manager-review">Manager review</option><option value="review">Needs review</option><option value="done">Done</option></select></div><div><label for="agentFilter">Assignee</label><select id="agentFilter"><option value="all">All characters</option></select></div></div>
         <p id="taskSummary"></p><div id="taskList"></div>
       </section>
     </div>

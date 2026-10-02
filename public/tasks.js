@@ -56,6 +56,34 @@
     fillModelSelect(select, agent.model);
     modelStatus(`${displayName(el('taskAssignee').value)} uses ${agent.model}. Change it here; saved on server.`);
   }
+  function chainFor(name) {
+    const chain = [];
+    const seen = new Set([name]);
+    let cur = roster.find(m => m.n === name)?.manager ?? null;
+    while (cur) {
+      if (seen.has(cur)) break;
+      seen.add(cur);
+      chain.push(cur);
+      cur = roster.find(m => m.n === cur)?.manager ?? null;
+    }
+    return chain;
+  }
+  function chainText(name) {
+    return [displayName(name), ...chainFor(name).map(displayName)].join(' → ');
+  }
+  function syncMemberManager() {
+    const sel = el('memberManager'); if (!sel) return;
+    const cur = editingMember ? roster.find(m => m.n === editingMember)?.manager ?? '' : '';
+    sel.replaceChildren();
+    const owner = node('option', 'Owner (no manager)'); owner.value = ''; sel.append(owner);
+    for (const m of roster) {
+      if (m.n === editingMember) continue;
+      const o = node('option', `${m.initials} · ${m.n}`); o.value = m.n;
+      if (m.n === cur) o.selected = true;
+      sel.append(o);
+    }
+    if (cur && ![...sel.options].some(o => o.value === cur)) { const o = node('option', cur); o.value = cur; o.selected = true; sel.append(o); }
+  }
   function syncMemberModel() {
     const select = el('memberModel');
     if (!select || !el('memberAI').checked) return;
@@ -93,7 +121,7 @@
     list.replaceChildren();
     for (const m of roster) {
       const row = node('div', undefined, 'member-row');
-      row.append(node('strong', `${m.initials} · ${m.n}`), node('span', `${m.role}${m.ai?.on ? ` · AI · ${m.ai.model}` : ' · manual'}`, 'task-meta'));
+      row.append(node('strong', `${m.initials} · ${m.n}`), node('span', `${m.role} · reports to ${m.manager || '—'}${m.ai?.on ? ` · AI · ${m.ai.model}` : ' · manual'}`, 'task-meta'));
       row.append(action('Edit', () => openMemberForm(m.n)));
       row.append(action('Delete', () => deleteMember(m.n)));
       list.append(row);
@@ -106,6 +134,7 @@
     el('memberName').value = m?.n || ''; el('memberInitials').value = m?.initials || '';
     el('memberRole').value = m?.role || ''; el('memberGroup').value = m?.group || 'marketing';
     el('memberGender').value = m?.gender || 'female';
+    syncMemberManager();
     el('memberAI').checked = !!m?.ai?.on;
     el('memberSystem').value = m?.ai?.system || '';
     el('memberAIFields').hidden = !el('memberAI').checked;
@@ -115,7 +144,7 @@
   }
   async function saveMember(event) {
     event.preventDefault();
-    const body = {n: el('memberName').value.trim(), initials: el('memberInitials').value.trim(), role: el('memberRole').value.trim(), group: el('memberGroup').value, gender: el('memberGender').value};
+    const body = {n: el('memberName').value.trim(), initials: el('memberInitials').value.trim(), role: el('memberRole').value.trim(), group: el('memberGroup').value, gender: el('memberGender').value, manager: el('memberManager').value || null};
     if (el('memberAI').checked) body.ai = {on: true, model: el('memberModel').value, system: el('memberSystem').value.trim()};
     else if (editingMember) body.ai = null;
     try {
@@ -176,7 +205,7 @@
       task.title.length <= 160 && typeof task.assignee === 'string' && task.assignee.trim() &&
       Object.hasOwn(states, task.status) && typeof task.brief === 'string' && task.brief.length <= 5000 &&
       typeof task.result === 'string' && task.result.length <= 10000 &&
-      (!['review','done'].includes(task.status) || task.result.trim()) && typeof task.createdAt === 'string';
+      (!['review','manager-review','done'].includes(task.status) || task.result.trim()) && typeof task.createdAt === 'string';
   }
   function node(tag, text, className) {
     const item = document.createElement(tag);
@@ -227,7 +256,7 @@
         if(!persist(next))return;
         changed(task.assignee,action==='approve'?'done':'queued',task.title);
       }
-      draftClear(draftKey(task,'review'));render();feedback(action==='approve'?'Draft approved.':'Revision requested. The previous draft stays in history.');
+      draftClear(draftKey(task,'review'));draftClear(draftKey(task,'manager-review'));render();feedback(action==='approve'?'Draft approved.':action==='manager-approve'?'Sent to owner review.':'Revision requested. The previous draft stays in history.');
     }catch(error){feedback(error.message);}
   }
   function reviewControls(task,article){
@@ -238,6 +267,17 @@
     input.oninput=()=>{input.setCustomValidity('');draftWrite(key,input.value);};
     const submit=node('button','Request revision');submit.type='submit';
     form.append(label,input,submit);form.onsubmit=e=>{e.preventDefault();if(!input.value.trim()){input.setCustomValidity('Describe the changes needed.');input.reportValidity();return;}reviewTask(task,'revise',input.value.trim());};article.append(form);
+  }
+  function managerReviewControls(task,article){
+    article.append(node('div',task.result,'task-result'));
+    const who = chainFor(task.assignee)[0];
+    if (who) article.append(node('p', `Waiting on ${displayName(who)} (manager). Anyone opening this browser approves as manager (local trust).`, 'task-agent'));
+    const approve=action('Manager approve',()=>reviewTask(task,'manager-approve'));approve.className='task-primary';article.append(approve);
+    const form=node('form'),label=node('label','Request changes (back to staff)'),input=node('textarea'),key=draftKey(task,'manager-review');
+    input.id=`manager-review-${task.id}`;label.htmlFor=input.id;input.required=true;input.maxLength=5000;input.rows=3;input.value=draftRead(key);
+    input.oninput=()=>{input.setCustomValidity('');draftWrite(key,input.value);};
+    const submit=node('button','Request changes');submit.type='submit';
+    form.append(label,input,submit);form.onsubmit=e=>{e.preventDefault();if(!input.value.trim()){input.setCustomValidity('Describe the changes needed.');input.reportValidity();return;}reviewTask(task,'manager-reject',input.value.trim());};article.append(form);
   }
   // An agent that asked instead of guessing: show its questions and take the answers.
   async function answerTask(task,answer){
@@ -256,6 +296,7 @@
   function agentActions(task, article, actions) {
     const agent = agentFor(task.assignee);
     if (task.status === 'blocked') answerControls(task, article);
+    else if (task.status === 'manager-review') managerReviewControls(task, article);
     else if (task.status === 'queued' && task.error) {
       article.append(node('p', `The agent could not finish: ${task.error}`, 'task-error'));
       actions.append(action('Try again', () => update(task.id, 'queued')));
@@ -282,7 +323,7 @@
     for (const task of visible) {
       const article = node('article', undefined, 'task-item');
       const agent = agentFor(task.assignee);
-      article.append(node('h3', task.title), node('div', `${displayName(task.assignee)} · ${states[task.status]}${agent ? ` · AI agent${agent.mode === 'claude' ? ` · ${agent.model}` : ''}` : ''}`, 'task-meta'));
+      article.append(node('h3', task.title), node('div', `${chainText(task.assignee)} · ${states[task.status]}${agent ? ` · AI agent${agent.mode === 'claude' ? ` · ${agent.model}` : ''}` : ''}`, 'task-meta'));
       if (task.brief) article.append(node('p', task.brief));
       if(task.history?.length){const history=node('details'),summary=node('summary',`Draft history (${task.history.length})`);history.append(summary);task.history.forEach((draft,i)=>{history.append(node('h4',`Draft ${i+1} · ${draft.by||'Saved'}`));if(draft.feedback)history.append(node('p',`Revision brief: ${draft.feedback}`));history.append(node('div',draft.result,'task-result'));});article.append(history);}
       const actions = node('div', undefined, 'task-actions');
