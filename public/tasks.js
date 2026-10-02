@@ -1,6 +1,6 @@
 (() => {
   const storageKey = 'kantor-ai.tasks.v1';
-  const states = {queued: 'Queued', active: 'In progress', blocked: 'Needs decision', review: 'Needs review', done: 'Done'};
+  const states = {queued: 'Queued', active: 'In progress', blocked: 'Needs decision', 'manager-review': 'Manager review', review: 'Needs review', done: 'Done'};
   const el = id => document.getElementById(id);
   let tasks = [], team = [], changed, locate;
   let storageHealthy = true;
@@ -166,7 +166,7 @@
     for (const task of list) {
       const old = before.get(task.id);
       // A fast agent can go from queued to done between two polls; still log that it started.
-      if (old && old.status === 'queued' && ['blocked','review','done'].includes(task.status)) changed(task.assignee, 'active', task.title);
+      if (old && old.status === 'queued' && ['blocked','manager-review','review','done'].includes(task.status)) changed(task.assignee, 'active', task.title);
       if (old && old.status !== task.status) changed(task.assignee, task.status, task.title);
       if (old && old.assignee !== task.assignee) changed(old.assignee);
     }

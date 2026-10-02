@@ -54,9 +54,9 @@ const waitFor = async (check, ms = 20000) => { const end = Date.now() + ms; whil
     const manual = (await api2('/api/tasks', {method: 'POST', body: JSON.stringify({title: 'Manual job', assignee: 'Koh Wira'})})).body;
     await new Promise(r => setTimeout(r, 1500));
     assert.equal((await api2('/api/tasks')).body.find(t => t.id === manual.id).status, 'queued');
-    // Toggle AI on: the mock drafts it.
+    // Toggle AI on: the mock drafts it (manager-review for staff with a manager).
     assert.equal((await api2('/api/team/Koh%20Wira', {method: 'PATCH', body: JSON.stringify({ai: {on: true, model: 'mock-model', system: 'Reply exactly: MOCK DRAFT'}})})).status, 200);
-    const drafted = await waitFor(async () => { const t = (await api2('/api/tasks')).body.find(t => t.id === manual.id); return t.status === 'review' ? t : null; });
+    const drafted = await waitFor(async () => { const t = (await api2('/api/tasks')).body.find(t => t.id === manual.id); return (t.status === 'review' || t.status === 'manager-review') ? t : null; });
     assert.equal(drafted.by, 'mock-model');
     assert.match(drafted.result, /MOCK DRAFT/);
     // Review Focus: delete + reassign mid-run; the late mock result must not overwrite.

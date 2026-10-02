@@ -1627,13 +1627,13 @@
   };
   canvas.addEventListener('wheel',onWheel,{passive:false});$('labels').addEventListener('wheel',onWheel,{passive:false});
   addEventListener('resize',()=>{if(transition)stepTransition(Infinity);if(innerWidth<=1000&&!$('log').hidden)syncLog(false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);resetCamera();});
-  const TASK_LOG={active:'started task',done:'finished task',blocked:'needs a decision before continuing',review:'submitted draft for review',queued:'moved task back to the queue'};
+  const TASK_LOG={active:'started task',done:'finished task',blocked:'needs a decision before continuing',review:'submitted draft for review','manager-review':'sent draft to manager',queued:'moved task back to the queue'};
   document.addEventListener('officetasks:server',()=>{
     for(const a of agents)a.label.classList.toggle('ai',!!window.officeTasks.agentFor(a.n));
     if(selected)selectAgent(selected);
   });
   // Speech bubbles for real task events: a short line on start and finish, and a steady one while an AI agent drafts.
-  const SAY={active:'On it!',blocked:'Quick question!',review:'Ready for review',done:'Done!'};
+  const SAY={active:'On it!',blocked:'Quick question!',review:'Ready for review','manager-review':'Sent to manager!',done:'Done!'};
   function say(agent,text,seconds=3.5){agent.sayText=text;agent.sayUntil=performance.now()+seconds*1000;}
   function sayingNow(agent){
     if(agent.sayUntil>performance.now())return agent.sayText;
@@ -1662,7 +1662,7 @@
       ctx.fillStyle='#1e2230';ctx.font='500 30px Archivo, system-ui, sans-serif';
       let title=task.title;while(ctx.measureText(title).width>640&&title.length>4)title=title.slice(0,-2);if(title!==task.title)title=title.trimEnd()+'…';
       ctx.fillText(title,142,y+1);
-      const [chip,ink,label]={active:['#fdeee9','#c24a31','In progress'],blocked:['#fff1d6','#9a6212','Question'],review:['#e8f3ec','#2f6b47','Review']}[task.status]||['#f0ece5','#6b6f7b','Queued'];
+      const [chip,ink,label]={active:['#fdeee9','#c24a31','In progress'],blocked:['#fff1d6','#9a6212','Question'],'manager-review':['#e9e4f7','#5b4a9e','Mgr review'],review:['#e8f3ec','#2f6b47','Review']}[task.status]||['#f0ece5','#6b6f7b','Queued'];
       ctx.fillStyle=chip;ctx.beginPath();ctx.roundRect(W-212,y-20,176,40,20);ctx.fill();
       ctx.fillStyle=ink;ctx.font='600 22px Archivo, system-ui, sans-serif';ctx.textAlign='center';ctx.fillText(label,W-124,y+1);ctx.textAlign='left';
     });
