@@ -8,16 +8,26 @@ const ASK_QUESTIONS = [
 const GROUPS = new Set(['leadership', 'marketing', 'engineering', 'service']);
 const GENDERS = new Set(['male', 'female']);
 
-function defaultSystem(role) {
-  return [
-    `You are the ${role} on a 13-person team working in a virtual office called Kantor Kita.`,
+function defaultSystem(role, isManager) {
+  const base = [
+    `You are the ${role} on a team working in a virtual office called Kantor Kita.`,
     'You receive tasks from teammates and return drafts that a human will review before anything is published.',
     'Write in the language of the task (Indonesian or English). If the task mixes both, follow the brief.',
+  ];
+  if (isManager) base.push(
+    'You also lead your direct reports: when a task is too big, say so in one line and list the subtasks you would delegate.',
+    'When you review a draft from your team, check facts first, then tone, then completeness.',
+  );
+  else base.push(
     'Structure your answer as: a short summary line, then the draft, then any notes or questions for the reviewer.',
+    'Your draft goes to your manager first; write so your manager can approve it in one read.',
+  );
+  base.push(
     'Never claim that you posted, scheduled or sent anything. Never invent facts about the company, products, prices or people; if something is missing, list it under notes as a question.',
     'Keep the whole answer under 600 words.',
     ASK_QUESTIONS
-  ].join('\n');
+  );
+  return base.join('\n');
 }
 
 const SEED = [
@@ -94,9 +104,55 @@ function validateMember(input, team, isNew) {
   return {ok: true, member: out};
 }
 
+function managerChain(roster, name) {
+  const byName = new Map(roster.map(m => [m.n, m]));
+  const chain = [];
+  const seen = new Set([name]);
+  let cur = byName.get(name)?.manager ?? null;
+  while (cur) {
+    if (seen.has(cur)) break;
+    seen.add(cur);
+    chain.push(cur);
+    cur = byName.get(cur)?.manager ?? null;
+  }
+  return chain;
+}
+
+function isManagerOf(roster, actor, target) {
+  if (actor === target) return false;
+  const actorRec = roster.find(m => m.n === actor);
+  if (!actorRec) return false;
+  if (actorRec.manager == null) return true; // owner kuasa atas semua
+  return managerChain(roster, target).includes(actor);
+}
+
+function validateManagerAssignment(roster, selfName, managerName) {
+  if (managerName === null || managerName === undefined || managerName === '') return {ok: true, manager: null};
+  const m = String(managerName).trim();
+  if (!roster.some(x => x.n === m)) return {ok: false, error: 'Unknown manager.', code: 'bad'};
+  if (m === selfName) return {ok: false, error: 'A member cannot manage themselves.', code: 'bad'};
+  if (managerChain(roster, m).includes(selfName)) return {ok: false, error: 'That would create a management cycle.', code: 'dup'};
+  return {ok: true, manager: m};
+}
+
 function cascadeRename(tasks, oldName, newName) {
   for (const t of tasks) if (t.assignee === oldName) t.assignee = newName;
 }
+
+function cascadeRenameMember(roster, tasks, oldName, newName) {
+  for (const m of roster) if (m.manager === oldName) m.manager = newName;
+  cascadeRename(tasks, oldName, newName);
+}
+
+function reassignSubordinates(roster, deletedName, fallback) {
+  let count = 0;
+  for (const m of roster) {
+    if (m.manager === deletedName) { m.manager = fallback ?? null; count++; }
+  }
+  return {count};
+}
+
+module.exports = {SEED, GROUPS: [...GROUPS], validateMember, cascadeRename, cascadeRenameMember, reassignTasks, reassignSubordinates, managerChain, isManagerOf, validateManagerAssignment, defaultSystem, ASK_QUESTIONS};
 
 function reassignTasks(tasks, from, to) {
   let moved = 0;
@@ -109,5 +165,3 @@ function reassignTasks(tasks, from, to) {
   }
   return {moved};
 }
-
-module.exports = {SEED, GROUPS: [...GROUPS], validateMember, cascadeRename, reassignTasks, defaultSystem, ASK_QUESTIONS};
