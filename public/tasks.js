@@ -17,6 +17,41 @@
   const agentFor = name => server?.members[name] ? {...server.members[name], mode: server.mode} : null;
 
   function feedback(message) { el('taskFeedback').textContent = message; }
+  function modelStatus(message) { const s = el('modelStatus'); if (s) s.textContent = message || ''; }
+  let modelIds = [];
+  async function loadModels() {
+    const select = el('taskModel');
+    if (!select || !server) return;
+    if (server.mode !== 'claude') { modelStatus('Set an API key to load router models.'); return; }
+    try {
+      const response = await fetch('/api/models', {cache: 'no-store'});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Router error ${response.status}`);
+      modelIds = Array.isArray(data) ? data : data.data?.map(m => m.id).filter(Boolean) || [];
+    } catch (error) { modelStatus(`Could not load router models: ${error.message}`); return; }
+    if (!modelIds.length) { modelStatus('Router returned no models.'); return; }
+    modelStatus(`${modelIds.length} router models. Pick one per AI assignee; saved on server.`);
+    syncModelSelect();
+  }
+  function syncModelSelect() {
+    const select = el('taskModel');
+    if (!select || !server) return;
+    const agent = agentFor(el('taskAssignee').value);
+    if (!agent) { select.replaceChildren(); if (server.mode === 'claude') modelStatus('Manual member, no AI model.'); return; }
+    const ids = modelIds.includes(agent.model) ? modelIds : [agent.model, ...modelIds];
+    select.replaceChildren();
+    for (const id of ids) { const option = node('option', id); option.value = id; if (id === agent.model) option.selected = true; select.append(option); }
+  }
+  async function saveModel() {
+    const name = el('taskAssignee').value, model = el('taskModel').value;
+    if (!agentFor(name) || !model) return;
+    try {
+      await call('PATCH', `/api/agents/${encodeURIComponent(name)}`, {model});
+      server.members[name].model = model;
+      modelStatus(`${displayName(name)} now uses ${model}.`);
+      render();
+    } catch (error) { feedback(error.message); }
+  }
   function persist(next) {
     if (!storageHealthy) {
       feedback('Saved data cannot be read. Changes are blocked so the old data is not overwritten.');
@@ -216,6 +251,8 @@
     }
     server = info;
     tasks = list;
+    await loadModels();
+    syncModelSelect();
     const names = Object.keys(info.members).map(displayName).join(', ');
     el('taskNote').textContent = info.mode === 'claude'
       ? `${names} works with Claude and submits drafts for your review. Everyone else is a simulation; change their status by hand.`
@@ -240,6 +277,7 @@
       if (name) el('taskAssignee').value = name;
       el('agentFilter').value = name || 'all';
       el('taskFilter').value = status; render();
+      syncModelSelect();
       el('taskDialog').showModal();
       el('taskTitle').focus();
     },
@@ -264,6 +302,8 @@
       }
       el('closeTasks').onclick = () => el('taskDialog').close();
       el('taskFilter').onchange = render; el('agentFilter').onchange = render;
+      el('taskAssignee').onchange = syncModelSelect;
+      el('taskModel').onchange = saveModel;
       el('taskForm').onsubmit = async event => {
         event.preventDefault();
         const title = el('taskTitle').value.trim();

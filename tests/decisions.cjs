@@ -11,7 +11,7 @@ const api=(p,opts={})=>fetch(`http://127.0.0.1:${PORT}${p}`,{...opts,headers:{'c
  const browser=await chromium.launch();
  try{
   const members=(await api('/api/agents')).body.members;
-  assert.equal(members['Kak Rani'].model,'claude-sonnet-5-5');assert.equal(members['Kak Sinta'].model,'claude-haiku-4-5-20251001');
+  assert.equal(members['Kak Rani'].model,'TH/qwen3.8-flash:free');assert.equal(members['Kak Sinta'].model,'TH/deepseek-v4-flash:free');
   const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(`http://127.0.0.1:${PORT}`);await page.waitForFunction(()=>window.officeScene);
   await page.waitForFunction(()=>document.querySelectorAll('.name-label.ai').length===2);

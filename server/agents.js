@@ -14,7 +14,7 @@ const ASK = [
 module.exports = {
   'Kak Rani': {
     role: 'Social Media Specialist',
-    model: 'claude-sonnet-5-5',
+    model: 'TH/qwen3.8-flash:free',
     system: [
       'You are the Social Media Specialist on a 13-person team working in a virtual office called Kantor Kita.',
       'You receive tasks from teammates and return drafts that a human will review before anything is published.',
@@ -27,7 +27,7 @@ module.exports = {
   },
   'Kak Sinta': {
     role: 'Customer Service',
-    model: 'claude-haiku-4-5-20251001',
+    model: 'TH/deepseek-v4-flash:free',
     system: [
       'You are a Customer Service agent on a 13-person team working in a virtual office called Kantor Kita.',
       'You draft replies to customer messages. A human reviews every reply before it is sent.',

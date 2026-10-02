@@ -17,6 +17,7 @@ const HOST = '127.0.0.1', PORT = Number(process.env.PORT) || 3000;
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 const API_URL = `${process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'}/v1/messages`;
+const MODELS_URL = `${process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'}/v1/models`;
 const DRY_RUN = !API_KEY || process.env.ANTHROPIC_DRY_RUN === '1';
 const STATES = new Set(['queued', 'active', 'blocked', 'review', 'done']);
 // Which model a member uses: their own, else the .env default.
@@ -39,6 +40,9 @@ function save() {
 const now = () => new Date().toISOString();
 const MEMBERS = new Set(['Koh Arman','Koh Wira','Kak Rani','Kak Dewi','Mira','Tari','Bagas Pratama Putra','Rizky Hakim','Yoga','Bang Eko','Gilang','Kak Sinta','Kak Laras']);
 const text = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
+// Model picks from the task dialog survive restarts.
+const MODELS_FILE = path.join(DATA_DIR, 'models.json');
+try { const saved = JSON.parse(fs.readFileSync(MODELS_FILE, 'utf8')); for (const [name, model] of Object.entries(saved || {})) if (agents[name] && typeof model === 'string' && model.trim()) agents[name].model = model.trim(); } catch { /* no saved model picks */ }
 
 // ---- agent worker: one task at a time per connected member, oldest first ----
 const busy = new Set();
@@ -48,7 +52,7 @@ async function askClaude(agent, task) {
     const response = await fetch(API_URL, {
       method: 'POST', signal: controller.signal,
       headers: {'content-type': 'application/json', 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01'},
-      body: JSON.stringify({model: modelOf(agent), max_tokens: 2000, system: agent.system,
+      body: JSON.stringify({model: modelOf(agent), max_tokens: 2000, stream: false, system: agent.system,
         messages: [{role: 'user', content: `Task: ${task.title}\n\nBrief:\n${task.brief || '(no brief given)'}${task.feedback ? `\n\nPrevious draft:\n${task.result}\n\nRevision requested:\n${task.feedback}` : ''}`}]})
     });
     const body = await response.json().catch(() => ({}));
@@ -111,6 +115,29 @@ function newTask(input) {
   return {id: crypto.randomUUID(), title, assignee, brief: text(input.brief, 5000), status: ['done','review'].includes(status) && !result ? 'queued' : status, result, createdAt: now()};
 }
 async function api(req, res, url) {
+  if (url.pathname === '/api/models' && req.method === 'GET') {
+    try {
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch(MODELS_URL, {signal: controller.signal, headers: {'x-api-key': API_KEY, 'anthropic-version': '2023-06-01'}});
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body?.error?.message || `Models API returned ${response.status}`);
+        return send(res, 200, Array.isArray(body.data) ? body.data.map(m => m.id).filter(Boolean) : body);
+      } finally { clearTimeout(timer); }
+    } catch (error) { return send(res, 502, {error: error.name === 'AbortError' ? 'Router took too long to answer.' : error.message === 'fetch failed' ? 'Could not reach the router. Check ANTHROPIC_BASE_URL.' : error.message}); }
+  }
+  const modelMatch = url.pathname.match(/^\/api\/agents\/([^/]+)$/);
+  if (modelMatch && req.method === 'PATCH') {
+    const name = decodeURIComponent(modelMatch[1]);
+    if (!agents[name]) return send(res, 404, {error: 'Unknown AI member.'});
+    const input = await readJson(req);
+    const model = text(input?.model, 200);
+    if (!model) return send(res, 400, {error: 'Pick a model from the router list.'});
+    agents[name].model = model;
+    try { fs.writeFileSync(MODELS_FILE, JSON.stringify(Object.fromEntries(Object.entries(agents).map(([n, a]) => [n, a.model])), null, 2)); } catch (error) { return send(res, 500, {error: 'Could not save the model pick.'}); }
+    kick();
+    return send(res, 200, {[name]: {role: agents[name].role, model}});
+  }
   if (url.pathname === '/api/agents' && req.method === 'GET')
     return send(res, 200, {mode: DRY_RUN ? 'dry-run' : 'claude', model: DRY_RUN ? null : MODEL, members: Object.fromEntries(Object.entries(agents).map(([name, a]) => [name, {role: a.role, model: modelOf(a)}]))});
   if (url.pathname === '/api/tasks' && req.method === 'GET') return send(res, 200, tasks);
