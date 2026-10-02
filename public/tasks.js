@@ -18,7 +18,14 @@
 
   function feedback(message) { el('taskFeedback').textContent = message; }
   function modelStatus(message) { const s = el('modelStatus'); if (s) s.textContent = message || ''; }
-  let modelIds = [];
+  let modelIds = [], roster = [], editingMember = null;
+  function showTab(which) {
+    const tasks = which === 'tasks';
+    el('tabTasks').setAttribute('aria-selected', String(tasks));
+    el('tabTeam').setAttribute('aria-selected', String(!tasks));
+    document.querySelector('.task-layout').hidden = !tasks;
+    el('teamPanel').hidden = tasks;
+  }
   async function loadModels() {
     const select = el('taskModel');
     if (!select || !server) return;
@@ -28,19 +35,33 @@
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Router error ${response.status}`);
       modelIds = Array.isArray(data) ? data : data.data?.map(m => m.id).filter(Boolean) || [];
-    } catch (error) { modelStatus(`Could not load router models: ${error.message}`); return; }
+    } catch (error) { modelStatus(`Could not load router models: ${error.message}. Reopen the dialog to retry.`); return; }
     if (!modelIds.length) { modelStatus('Router returned no models.'); return; }
     modelStatus(`${modelIds.length} router models. Pick one per AI assignee; saved on server.`);
     syncModelSelect();
+    syncMemberModel();
+  }
+  function fillModelSelect(select, current) {
+    const ids = current && !modelIds.includes(current) ? [current, ...modelIds] : modelIds;
+    select.replaceChildren();
+    for (const id of ids) { const option = node('option', id); option.value = id; if (id === current) option.selected = true; select.append(option); }
   }
   function syncModelSelect() {
     const select = el('taskModel');
     if (!select || !server) return;
     const agent = agentFor(el('taskAssignee').value);
+    select.disabled = !!server && !agent;
     if (!agent) { select.replaceChildren(); if (server.mode === 'claude') modelStatus('Manual member, no AI model.'); return; }
-    const ids = modelIds.includes(agent.model) ? modelIds : [agent.model, ...modelIds];
-    select.replaceChildren();
-    for (const id of ids) { const option = node('option', id); option.value = id; if (id === agent.model) option.selected = true; select.append(option); }
+    if (!modelIds.length) { select.replaceChildren(); modelStatus('Loading router models…'); loadModels(); return; }
+    fillModelSelect(select, agent.model);
+    modelStatus(`${displayName(el('taskAssignee').value)} uses ${agent.model}. Change it here; saved on server.`);
+  }
+  function syncMemberModel() {
+    const select = el('memberModel');
+    if (!select || !el('memberAI').checked) return;
+    const current = editingMember ? roster.find(m => m.n === editingMember)?.ai?.model : server.model;
+    fillModelSelect(select, current);
+    el('memberModelStatus').textContent = modelIds.length ? `${modelIds.length} router models.` : 'Loading router models…';
   }
   async function saveModel() {
     const name = el('taskAssignee').value, model = el('taskModel').value;
@@ -50,6 +71,73 @@
       server.members[name].model = model;
       modelStatus(`${displayName(name)} now uses ${model}.`);
       render();
+    } catch (error) { feedback(error.message); }
+  }
+  async function loadTeam() {
+    if (!server) return;
+    roster = await call('GET', '/api/team').catch(() => []);
+    buildAssigneeOptions(); renderTeam();
+    document.dispatchEvent(new CustomEvent('officetasks:team', {detail: roster.map(m => ({...m}))}));
+  }
+  function buildAssigneeOptions() {
+    const makeOption = (text, value) => { const o = node('option', text); o.value = value; return o; };
+    for (const id of ['taskAssignee', 'agentFilter']) {
+      const sel = el(id), keep = sel.value;
+      sel.replaceChildren(...(id === 'agentFilter' ? [makeOption('All characters', 'all')] : []));
+      for (const p of roster) sel.append(makeOption(`${p.initials} · ${p.role}`, p.n));
+      sel.value = [...sel.options].some(o => o.value === keep) ? keep : (id === 'agentFilter' ? 'all' : roster[0]?.n || '');
+    }
+  }
+  function renderTeam() {
+    const list = el('teamList'); if (!list) return;
+    list.replaceChildren();
+    for (const m of roster) {
+      const row = node('div', undefined, 'member-row');
+      row.append(node('strong', `${m.initials} · ${m.n}`), node('span', `${m.role}${m.ai?.on ? ` · AI · ${m.ai.model}` : ' · manual'}`, 'task-meta'));
+      row.append(action('Edit', () => openMemberForm(m.n)));
+      row.append(action('Delete', () => deleteMember(m.n)));
+      list.append(row);
+    }
+  }
+  function openMemberForm(name) {
+    editingMember = name || null;
+    el('memberFormTitle').textContent = name ? `Edit ${name}` : 'Add member';
+    const m = name ? roster.find(m => m.n === name) : null;
+    el('memberName').value = m?.n || ''; el('memberInitials').value = m?.initials || '';
+    el('memberRole').value = m?.role || ''; el('memberGroup').value = m?.group || 'marketing';
+    el('memberGender').value = m?.gender || 'female';
+    el('memberAI').checked = !!m?.ai?.on;
+    el('memberSystem').value = m?.ai?.system || '';
+    el('memberAIFields').hidden = !el('memberAI').checked;
+    el('memberForm').hidden = false;
+    syncMemberModel();
+    el('memberName').focus();
+  }
+  async function saveMember(event) {
+    event.preventDefault();
+    const body = {n: el('memberName').value.trim(), initials: el('memberInitials').value.trim(), role: el('memberRole').value.trim(), group: el('memberGroup').value, gender: el('memberGender').value};
+    if (el('memberAI').checked) body.ai = {on: true, model: el('memberModel').value, system: el('memberSystem').value.trim()};
+    else if (editingMember) body.ai = null;
+    try {
+      if (editingMember) await call('PATCH', `/api/team/${encodeURIComponent(editingMember)}`, body);
+      else await call('POST', '/api/team', body);
+      el('memberForm').hidden = true;
+      feedback(editingMember ? 'Member updated. The 3D office reloads.' : 'Member added. The 3D office reloads.');
+      await loadTeam();
+    } catch (error) { feedback(error.message); }
+  }
+  async function deleteMember(name) {
+    const open = tasks.filter(t => t.assignee === name && t.status !== 'done');
+    let to = '';
+    if (open.length) {
+      to = prompt(`${open.length} open tasks belong to ${name}. Type a team member name to move them to (Cancel aborts):`, roster.find(m => m.n !== name)?.n || '');
+      if (to === null) return;
+      if (!roster.some(m => m.n === to && to !== name)) { feedback('Pick another team member.'); return; }
+    } else if (!confirm(`Remove ${name} from the team?`)) return;
+    try {
+      await call('DELETE', `/api/team/${encodeURIComponent(name)}${to ? `?reassignTo=${encodeURIComponent(to)}` : ''}`);
+      feedback(`${name} removed. The 3D office reloads.`);
+      await loadTeam();
     } catch (error) { feedback(error.message); }
   }
   function persist(next) {
@@ -199,7 +287,7 @@
       if(task.history?.length){const history=node('details'),summary=node('summary',`Draft history (${task.history.length})`);history.append(summary);task.history.forEach((draft,i)=>{history.append(node('h4',`Draft ${i+1} · ${draft.by||'Saved'}`));if(draft.feedback)history.append(node('p',`Revision brief: ${draft.feedback}`));history.append(node('div',draft.result,'task-result'));});article.append(history);}
       const actions = node('div', undefined, 'task-actions');
       if (!team.some(person => person.n === task.assignee)) {
-        article.append(node('p', 'This assignee comes from an old prototype. Pick a team member to continue.'));
+        article.append(node('p', 'This member is no longer on the team. Pick a team member to continue.'));
         const select = node('select'); select.setAttribute('aria-label', `New assignee for ${task.title}`);
         for (const person of team) { const option = node('option', displayName(person.n)); option.value = person.n; select.append(option); }
         actions.append(action('Move task', () => reassign(task.id, select.value)));
@@ -252,6 +340,7 @@
     server = info;
     tasks = list;
     await loadModels();
+    await loadTeam();
     syncModelSelect();
     const names = Object.keys(info.members).map(displayName).join(', ');
     el('taskNote').textContent = info.mode === 'claude'
@@ -273,11 +362,13 @@
     activeFor: name => tasks.find(t => t.assignee === name && t.status === 'active'),
     list: () => tasks.map(t => ({...t})),
     agentFor,
+    team: () => roster.map(m => ({...m})),
     open(name, status = 'all') {
       if (name) el('taskAssignee').value = name;
       el('agentFilter').value = name || 'all';
       el('taskFilter').value = status; render();
       syncModelSelect();
+      if (server) loadModels();
       el('taskDialog').showModal();
       el('taskTitle').focus();
     },
@@ -304,6 +395,12 @@
       el('taskFilter').onchange = render; el('agentFilter').onchange = render;
       el('taskAssignee').onchange = syncModelSelect;
       el('taskModel').onchange = saveModel;
+      el('tabTasks').onclick = () => showTab('tasks');
+      el('tabTeam').onclick = () => showTab('team');
+      el('addMember').onclick = () => openMemberForm(null);
+      el('memberAI').onchange = () => { el('memberAIFields').hidden = !el('memberAI').checked; syncMemberModel(); };
+      el('memberForm').onsubmit = saveMember;
+      el('memberCancel').onclick = () => { el('memberForm').hidden = true; };
       el('taskForm').onsubmit = async event => {
         event.preventDefault();
         const title = el('taskTitle').value.trim();

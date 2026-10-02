@@ -58,6 +58,21 @@
     <header class="task-header"><div><h1 id="taskHeading">Office tasks</h1><p>Manage your team's work in the virtual office.</p></div><button type="button" id="closeTasks">Close</button></header>
     <p class="task-note" id="taskNote">Status is changed by hand. Characters are a simulation and do not run AI yet.</p>
     <p id="taskFeedback" role="status" aria-live="polite"></p>
+    <div class="task-tabs" role="tablist"><button type="button" id="tabTasks" role="tab" aria-selected="true">Tasks</button><button type="button" id="tabTeam" role="tab" aria-selected="false">Team</button></div>
+    <section id="teamPanel" hidden><h2>Team</h2><div id="teamList"></div><button type="button" id="addMember">+ Add member</button>
+      <form id="memberForm" hidden><h3 id="memberFormTitle">Add member</h3>
+        <label for="memberName">Name</label><input id="memberName" required maxlength="80">
+        <label for="memberInitials">Initials</label><input id="memberInitials" required maxlength="4">
+        <label for="memberRole">Role</label><input id="memberRole" required maxlength="80">
+        <label for="memberGroup">Desk group</label><select id="memberGroup"><option value="leadership">Leadership</option><option value="marketing">Marketing &amp; Business</option><option value="engineering">Engineering &amp; Design</option><option value="service">Customer Service</option></select>
+        <label for="memberGender">Avatar</label><select id="memberGender"><option value="female">Female</option><option value="male">Male</option></select>
+        <label class="check" for="memberAI"><input type="checkbox" id="memberAI"> AI agent drafts this member's tasks</label>
+        <div id="memberAIFields" hidden><label for="memberModel">AI model <span>(router list)</span></label><select id="memberModel" aria-describedby="memberModelStatus"></select>
+        <p class="task-note" id="memberModelStatus"></p>
+        <label for="memberSystem">System prompt <span>(blank = role template)</span></label><textarea id="memberSystem" rows="4" maxlength="5000"></textarea></div>
+        <div class="task-actions"><button class="task-primary" type="submit" id="memberSave">Save member</button><button type="button" id="memberCancel">Cancel</button></div>
+      </form>
+    </section>
     <div class="task-layout">
       <form id="taskForm"><h2>Create a task</h2><label for="taskTitle">Task</label><input id="taskTitle" required maxlength="160" placeholder="Example: Draft the content calendar">
         <label for="taskAssignee">Assignee</label><select id="taskAssignee" required></select>
