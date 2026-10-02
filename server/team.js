@@ -31,9 +31,9 @@ function defaultSystem(role, isManager) {
 }
 
 const SEED = [
-  {n: 'Koh Arman', initials: 'KA', gender: 'male', role: 'CEO', group: 'leadership', ai: null},
-  {n: 'Koh Wira', initials: 'KW', gender: 'male', role: 'CTO', group: 'leadership', ai: null},
-  {n: 'Kak Rani', initials: 'KR', gender: 'female', role: 'Social Media Specialist', group: 'marketing', ai: {on: true, model: 'TH/qwen3.8-flash:free', system: [
+  {manager: null, n: 'Koh Arman', initials: 'KA', gender: 'male', role: 'CEO', group: 'leadership', ai: null},
+  {manager: 'Koh Arman', n: 'Koh Wira', initials: 'KW', gender: 'male', role: 'CTO', group: 'leadership', ai: null},
+  {manager: 'Kak Dewi', n: 'Kak Rani', initials: 'KR', gender: 'female', role: 'Social Media Specialist', group: 'marketing', ai: {on: true, model: 'TH/qwen3.8-flash:free', system: [
     'You are the Social Media Specialist on a 13-person team working in a virtual office called Kantor Kita.',
     'You receive tasks from teammates and return drafts that a human will review before anything is published.',
     'Write in the language of the task (Indonesian or English). If the task mixes both, follow the brief.',
@@ -42,15 +42,15 @@ const SEED = [
     'Keep the whole answer under 600 words.',
     ASK_QUESTIONS
   ].join('\n')}},
-  {n: 'Kak Dewi', initials: 'KD', gender: 'female', role: 'Digital Marketing', group: 'marketing', ai: null},
-  {n: 'Mira', initials: 'M', gender: 'female', role: 'Business Development', group: 'marketing', ai: null},
-  {n: 'Tari', initials: 'T', gender: 'female', role: 'Social Media Intern', group: 'marketing', ai: null},
-  {n: 'Bagas Pratama Putra', initials: 'BPP', gender: 'male', role: 'Frontend Engineer', group: 'engineering', ai: null},
-  {n: 'Rizky Hakim', initials: 'RH', gender: 'male', role: 'Backend Engineer', group: 'engineering', ai: null},
-  {n: 'Yoga', initials: 'Y', gender: 'male', role: 'Product Design', group: 'engineering', ai: null},
-  {n: 'Bang Eko', initials: 'BE', gender: 'male', role: 'Graphic Designer', group: 'engineering', ai: null},
-  {n: 'Gilang', initials: 'G', gender: 'male', role: 'Customer Service Leader', group: 'service', ai: null},
-  {n: 'Kak Sinta', initials: 'KS', gender: 'female', role: 'Customer Service', group: 'service', ai: {on: true, model: 'TH/deepseek-v4-flash:free', system: [
+  {manager: 'Koh Arman', n: 'Kak Dewi', initials: 'KD', gender: 'female', role: 'Digital Marketing', group: 'marketing', ai: null},
+  {manager: 'Kak Dewi', n: 'Mira', initials: 'M', gender: 'female', role: 'Business Development', group: 'marketing', ai: null},
+  {manager: 'Kak Dewi', n: 'Tari', initials: 'T', gender: 'female', role: 'Social Media Intern', group: 'marketing', ai: null},
+  {manager: 'Koh Wira', n: 'Bagas Pratama Putra', initials: 'BPP', gender: 'male', role: 'Frontend Engineer', group: 'engineering', ai: null},
+  {manager: 'Koh Wira', n: 'Rizky Hakim', initials: 'RH', gender: 'male', role: 'Backend Engineer', group: 'engineering', ai: null},
+  {manager: 'Koh Wira', n: 'Yoga', initials: 'Y', gender: 'male', role: 'Product Design', group: 'engineering', ai: null},
+  {manager: 'Koh Wira', n: 'Bang Eko', initials: 'BE', gender: 'male', role: 'Graphic Designer', group: 'engineering', ai: null},
+  {manager: 'Koh Arman', n: 'Gilang', initials: 'G', gender: 'male', role: 'Customer Service Leader', group: 'service', ai: null},
+  {manager: 'Gilang', n: 'Kak Sinta', initials: 'KS', gender: 'female', role: 'Customer Service', group: 'service', ai: {on: true, model: 'TH/deepseek-v4-flash:free', system: [
     'You are a Customer Service agent on a 13-person team working in a virtual office called Kantor Kita.',
     'You draft replies to customer messages. A human reviews every reply before it is sent.',
     'Reply in the customer\'s language. Be warm, short and concrete: acknowledge the issue, give the next step, and close politely.',
@@ -59,7 +59,7 @@ const SEED = [
     'Keep the whole answer under 250 words.',
     ASK_QUESTIONS
   ].join('\n')}},
-  {n: 'Kak Laras', initials: 'KL', gender: 'female', role: 'Customer Service', group: 'service', ai: null}
+  {manager: 'Gilang', n: 'Kak Laras', initials: 'KL', gender: 'female', role: 'Customer Service', group: 'service', ai: null}
 ];
 
 // isNew=true (POST): all fields required. false (PATCH): only present fields validated.

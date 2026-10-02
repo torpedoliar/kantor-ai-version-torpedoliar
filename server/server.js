@@ -56,6 +56,15 @@ try {
     if (m && typeof model === 'string' && model.trim() && m.ai) m.ai.model = model.trim();
   }
 } catch { /* no saved model picks */ }
+// Migrate old rosters: members without a manager key get the SEED default (else owner).
+{
+  const seedManager = new Map(team.SEED.map(m => [m.n, m.manager ?? null]));
+  let migrated = false;
+  for (const m of roster) {
+    if (!Object.hasOwn(m, 'manager')) { m.manager = seedManager.get(m.n) ?? null; migrated = true; }
+  }
+  if (migrated) saveTeam();
+}
 function saveTeam() {
   const tmp = `${TEAM_FILE}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(roster, null, 2));
@@ -155,7 +164,10 @@ async function api(req, res, url) {
     const input = await readJson(req);
     const v = team.validateMember(input, roster, true);
     if (!v.ok) return send(res, v.code === 'dup' ? 409 : 400, {error: v.error});
-    const member = {ai: null, ...v.member};
+    const mv = team.validateManagerAssignment(roster, v.member.n, input.manager ?? null);
+    if (!mv.ok) return send(res, mv.code === 'dup' ? 409 : 400, {error: mv.error});
+    const member = {ai: null, ...v.member, manager: mv.manager};
+    if (member.ai && !String(input.ai?.system ?? '').trim()) member.ai.system = team.defaultSystem(member.role, mv.manager !== null);
     roster.push(member); saveTeam(); kick(); return send(res, 201, member);
   }
   const teamMatch = url.pathname.match(/^\/api\/team\/(.+)$/);
@@ -172,15 +184,24 @@ async function api(req, res, url) {
         if (!hasMember(to) || to === name) return send(res, 400, {error: 'Pick another team member.'});
         moved = team.reassignTasks(tasks, name, to).moved; save();
       } else if (open.length) return send(res, 409, {error: 'Tasks still assigned.'});
+      const leavingManager = member.manager ?? null;
+      let subordinates = 0;
+      for (const m of roster) if (m.manager === name) { m.manager = leavingManager; subordinates++; }
       roster.splice(roster.indexOf(member), 1); saveTeam(); kick();
-      return send(res, 200, {removed: name, moved});
+      return send(res, 200, {removed: name, moved, subordinates});
     }
     const input = await readJson(req);
     const v = team.validateMember({...input, _self: name}, roster, false);
     if (!v.ok) return send(res, v.code === 'dup' ? 409 : 400, {error: v.error});
+    if (input.manager !== undefined) {
+      const mv = team.validateManagerAssignment(roster, name, input.manager);
+      if (!mv.ok) return send(res, mv.code === 'dup' ? 409 : 400, {error: mv.error});
+      v.member.manager = mv.manager;
+    }
+    if (v.member.ai && !String(input.ai?.system ?? '').trim()) v.member.ai.system = team.defaultSystem(v.member.role || member.role, (v.member.manager ?? member.manager ?? null) !== null);
     const oldName = member.n;
     Object.assign(member, v.member);
-    if (v.member.n && v.member.n !== oldName) { team.cascadeRename(tasks, oldName, member.n); save(); }
+    if (v.member.n && v.member.n !== oldName) { team.cascadeRenameMember(roster, tasks, oldName, member.n); save(); }
     saveTeam(); kick(); return send(res, 200, member);
   }
   const modelMatch = url.pathname.match(/^\/api\/agents\/([^/]+)$/);
@@ -197,7 +218,7 @@ async function api(req, res, url) {
     return send(res, 200, {[name]: {role: member.role, model}});
   }
   if (url.pathname === '/api/agents' && req.method === 'GET')
-    return send(res, 200, {mode: DRY_RUN ? 'dry-run' : 'claude', model: DRY_RUN ? null : MODEL, members: Object.fromEntries(roster.filter(m => m.ai?.on).map(m => [m.n, {role: m.role, model: m.ai.model || MODEL, ai: true}]))});
+    return send(res, 200, {mode: DRY_RUN ? 'dry-run' : 'claude', model: DRY_RUN ? null : MODEL, members: Object.fromEntries(roster.filter(m => m.ai?.on).map(m => [m.n, {role: m.role, model: m.ai.model || MODEL, ai: true, manager: m.manager ?? null, chain: team.managerChain(roster, m.n)}]))});
   if (url.pathname === '/api/tasks' && req.method === 'GET') return send(res, 200, tasks);
   if (url.pathname === '/api/tasks' && req.method === 'POST') {
     const input=await readJson(req);
