@@ -40,7 +40,8 @@
     engineering: {name:'Engineering & Design', x:-5.5, z:6.5, color:0x3f7a58},
     service: {name:'Customer Service', x:5.5, z:6.5, color:0x74598c}
   };
-  const TEAM = [
+  // Static-host fallback: the server roster replaces this via /api/team when present.
+  let TEAM = [
     {n:'Koh Arman', initials:'KA', gender:'male', role:'CEO', group:'leadership'},
     {n:'Koh Wira', initials:'KW', gender:'male', role:'CTO', group:'leadership'},
     {n:'Kak Rani', initials:'KR', gender:'female', role:'Social Media Specialist', group:'marketing'},
@@ -55,6 +56,13 @@
     {n:'Kak Sinta', initials:'KS', gender:'female', role:'Customer Service', group:'service'},
     {n:'Kak Laras', initials:'KL', gender:'female', role:'Customer Service', group:'service'}
   ];
+  try {
+    const teamResponse = await fetch('/api/team', {cache: 'no-store'});
+    if (teamResponse.ok) {
+      const list = await teamResponse.json();
+      if (Array.isArray(list) && list.length) TEAM = list;
+    }
+  } catch { /* static host: keep the fallback roster */ }
   const softShapes=new Map();
   const floors = {}, materials = new Map(), agents = [];
   let root, activeFloor = 3, selected = null, paused = false, simTime = 0;
@@ -104,6 +112,12 @@
       const a=i*2.4,leaf=oval(.32*scale,.68*scale,.12*scale,i%2?0x64825b:0x839769,x+Math.cos(a)*.25*scale,y+(.75+i*.1)*scale,z+Math.sin(a)*.25*scale);
       leaf.rotation.set(.35, a,Math.sin(a)*.6);
     }
+  }
+  function bench(x,z,color) {
+    // Waiting bench for the 5th+ member of a group: seat plus a laptop, pose stays 'sit'.
+    mesh(softBox(1.1,.45,.55),mix(color,0xd5d8bf,.42),x,.22,z,root,false);
+    for(const dx of [-.45,.45])box(.08,.22,.08,DARK,x+dx,0,z);
+    mesh(softBox(.35,.04,.45),0xe6dbc4,x,.48,z-.1,root,false).rotation.x=-.2;
   }
   function chair(x,z,f,color=DARK) {
     cylinder(.055,.15,.46,0x595d54,x,0,z);
@@ -317,12 +331,19 @@
     table(group.x,group.z,6.4,full?2.3:1.7);
     textPlane(group.name.toUpperCase(),group.x,group.z>0?10.35:.35,8);
     people.forEach((person,index)=>{
-      const side=people.length===2?1:(index<cols?-1:1),f=-side;
-      const x=group.x+(index%cols===0?-1.65:1.65),z=group.z+side*2.05;
-      chair(x,z,f,group.color);screen(x,group.z+side*.38,f,key==='engineering');
-      const notebook=mesh(softBox(.35,.04,.45),0xe6dbc4,x-.8,.99,group.z+side*.65,root,false);notebook.rotation.y=.12;
-      plant(x+.95,group.z+side*.1,.24,.97);
-      desks[person.n]=seat(x,z,f,3,group.x<0?-10.5:key==='marketing'?9:10);
+      if (index < 4) {
+        const side=people.length===2?1:(index<cols?-1:1),f=-side;
+        const x=group.x+(index%cols===0?-1.65:1.65),z=group.z+side*2.05;
+        chair(x,z,f,group.color);screen(x,group.z+side*.38,f,key==='engineering');
+        const notebook=mesh(softBox(.35,.04,.45),0xe6dbc4,x-.8,.99,group.z+side*.65,root,false);notebook.rotation.y=.12;
+        plant(x+.95,group.z+side*.1,.24,.97);
+        desks[person.n]=seat(x,z,f,3,group.x<0?-10.5:key==='marketing'?9:10);
+      } else {
+        // Waiting bench behind the group table: table + rug stay sized for 4.
+        const bx=group.x+(index-4)*1.3-((people.length-5)*1.3)/2,bz=group.z+(group.z>0?3.6:-3.6),bf=group.z>0?-1:1;
+        bench(bx,bz,group.color);
+        desks[person.n]=seat(bx,bz,bf,3,group.x<0?-10.5:key==='marketing'?9:10);
+      }
     });
     // Pendants hang from the ceiling beam above each team table.
     for(const dx of [-1.6,1.6]){box(.03,.88,.03,DARK,group.x+dx,2.4,group.z);cylinder(.07,.34,.3,0x5f7d68,group.x+dx,2.12,group.z);oval(.16,.16,.16,0xfff1cf,group.x+dx,2.1,group.z);}
@@ -1317,7 +1338,7 @@
   function moveTeam(level) {
     // Rooftop spots are dealt out at random, so different people end up at the billiard table and coffee bar.
     const roofOrder=level===4?shuffle([...roofSpots]):[];
-    agents.forEach((agent,i)=>setPath(agent,level===3?agent.desk:level===2?dining[i]:roofOrder[i]));
+    agents.forEach((agent,i)=>setPath(agent,level===3?agent.desk:level===2?(dining[i]||agent.desk):(roofOrder[i]||agent.desk)));
     const message=level===3?'Simulation: the team heads back to their desks.':level===2?'Simulation: the team goes down for lunch.':'Simulation: the team heads up to the rooftop.';
     status(message);log(message.replace('Simulation: t','T'));
   }
@@ -1665,6 +1686,9 @@
   }
   $('decisions').onclick=()=>window.officeTasks.open(null,'blocked');
   document.addEventListener('officetasks:change',()=>{drawBoard();drawStats();});
+  // Roster changed in the Team tab: drafts live in sessionStorage and tasks on the
+  // server, so a reload is the cheapest correct 3D rebuild. Camera resets, v1 accepted.
+  document.addEventListener('officetasks:team', () => location.reload());
   window.officeTasks.init(TEAM,(name,state,title)=>{const a=agents.find(a=>a.n===name);if(a&&window.officeTasks.activeFor(name))setPath(a,a.desk);if(a&&SAY[state])say(a,SAY[state]);if(a&&state)log(`${name} ${TASK_LOG[state]}: ${title}`,a.group);},name=>{const a=agents.find(a=>a.n===name);if(a)selectAgent(a);});
   const projected=new THREE.Vector3(),world=new THREE.Vector3();let last=performance.now();
   function frame(now) {
