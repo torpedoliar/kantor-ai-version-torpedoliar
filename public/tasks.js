@@ -119,6 +119,8 @@
   function renderTeam() {
     const list = el('teamList'); if (!list) return;
     list.replaceChildren();
+    const brandMeta = document.querySelector('.brand-meta');
+    if (brandMeta && roster.length) brandMeta.textContent = `${roster.length} people · 4 floors`;
     for (const m of roster) {
       const row = node('div', undefined, 'member-row');
       row.append(node('strong', `${m.initials} · ${m.n}`), node('span', `${m.role} · reports to ${m.manager || '—'}${m.ai?.on ? ` · AI · ${m.ai.model}` : ' · manual'}`, 'task-meta'));
