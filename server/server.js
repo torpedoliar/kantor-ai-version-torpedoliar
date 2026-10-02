@@ -1,5 +1,5 @@
-// Kantor Kita server: serves public/ and a small task API. Tasks assigned to a connected
-// team member (server/agents.js) are worked by Claude, or by a labelled dry run when no API key is set.
+// Kantor Kita server: serves public/ and a small task API. Tasks assigned to an AI-enabled
+// team member (roster ai.on in data/team.json) are worked by Claude, or by a labelled dry run when no API key is set.
 // No login yet, so it only listens on this machine.
 const http = require('node:http');
 const fs = require('node:fs');
@@ -9,7 +9,6 @@ const crypto = require('node:crypto');
 const ROOT = path.resolve(__dirname, '..');
 try { process.loadEnvFile(process.env.ENV_FILE || path.join(ROOT, '.env')); } catch { /* no .env file: dry run */ }
 
-const agents = require('./agents');
 const PUBLIC = path.join(ROOT, 'public');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
@@ -20,8 +19,6 @@ const API_URL = `${process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
 const MODELS_URL = `${process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'}/v1/models`;
 const DRY_RUN = !API_KEY || process.env.ANTHROPIC_DRY_RUN === '1';
 const STATES = new Set(['queued', 'active', 'blocked', 'review', 'done']);
-// Which model a member uses: their own, else the .env default.
-const modelOf = agent => agent.model || MODEL;
 
 // ---- storage: one JSON file, written atomically ----
 fs.mkdirSync(DATA_DIR, {recursive: true});
@@ -38,21 +35,46 @@ function save() {
   } catch(error) { tasks=JSON.parse(durable); throw error; }
 }
 const now = () => new Date().toISOString();
-const MEMBERS = new Set(['Koh Arman','Koh Wira','Kak Rani','Kak Dewi','Mira','Tari','Bagas Pratama Putra','Rizky Hakim','Yoga','Bang Eko','Gilang','Kak Sinta','Kak Laras']);
 const text = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
-// Model picks from the task dialog survive restarts.
+// Team roster: canonical member store. Agents' AI config lives here, not in agents.js.
+const team = require('./team');
+const TEAM_FILE = path.join(DATA_DIR, 'team.json');
 const MODELS_FILE = path.join(DATA_DIR, 'models.json');
-try { const saved = JSON.parse(fs.readFileSync(MODELS_FILE, 'utf8')); for (const [name, model] of Object.entries(saved || {})) if (agents[name] && typeof model === 'string' && model.trim()) agents[name].model = model.trim(); } catch { /* no saved model picks */ }
+let roster = [];
+try {
+  roster = JSON.parse(fs.readFileSync(TEAM_FILE, 'utf8'));
+  if (!Array.isArray(roster) || !roster.length) throw new Error('empty roster');
+} catch (error) {
+  if (error.code === 'ENOENT') roster = structuredClone(team.SEED);
+  else { console.error(`Cannot read ${TEAM_FILE}: ${error.message}. Fix or move the file, then restart.`); process.exit(1); }
+}
+// One-time merge: model picks saved in models.json move into the roster, then ignored.
+try {
+  const saved = JSON.parse(fs.readFileSync(MODELS_FILE, 'utf8'));
+  for (const [name, model] of Object.entries(saved || {})) {
+    const m = roster.find(m => m.n === name);
+    if (m && typeof model === 'string' && model.trim() && m.ai) m.ai.model = model.trim();
+  }
+} catch { /* no saved model picks */ }
+function saveTeam() {
+  const tmp = `${TEAM_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(roster, null, 2));
+  fs.renameSync(tmp, TEAM_FILE);
+}
+if (!fs.existsSync(TEAM_FILE)) saveTeam();
+const hasMember = name => roster.some(m => m.n === name);
+const isAI = name => roster.find(m => m.n === name)?.ai?.on === true;
+const aiOf = name => roster.find(m => m.n === name)?.ai || null;
 
-// ---- agent worker: one task at a time per connected member, oldest first ----
+// ---- agent worker: one AI member at a time, oldest queued task first ----
 const busy = new Set();
-async function askClaude(agent, task) {
+async function askClaude(member, task) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 120000);
   try {
     const response = await fetch(API_URL, {
       method: 'POST', signal: controller.signal,
       headers: {'content-type': 'application/json', 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01'},
-      body: JSON.stringify({model: modelOf(agent), max_tokens: 2000, stream: false, system: agent.system,
+      body: JSON.stringify({model: member.ai.model || MODEL, max_tokens: 2000, stream: false, system: member.ai.system,
         messages: [{role: 'user', content: `Task: ${task.title}\n\nBrief:\n${task.brief || '(no brief given)'}${task.feedback ? `\n\nPrevious draft:\n${task.result}\n\nRevision requested:\n${task.feedback}` : ''}`}]})
     });
     const body = await response.json().catch(() => ({}));
@@ -62,14 +84,16 @@ async function askClaude(agent, task) {
     return answer;
   } finally { clearTimeout(timer); }
 }
-async function dryRun(agent, task) {
+async function dryRun(member, task) {
   await new Promise(resolve => setTimeout(resolve, Number(process.env.DRY_RUN_DELAY_MS ?? 4000)));
   // Dry runs ask back when the brief is nearly empty, so the "Needs decision" flow can be tried without a key.
   if ((task.brief || '').trim().length < 12) return 'QUESTIONS:\n1. DRY RUN: who is this for, and what should it say?\n2. DRY RUN: any facts, links or deadlines to include?';
-  return `DRY RUN: no ANTHROPIC_API_KEY is set, so this is placeholder text, not AI output.\n\n${agent.role} would draft: "${task.title}".\nBrief received: ${task.brief || '(none)'}${task.feedback ? `\nRevision requested: ${task.feedback}` : ''}`;
+  return `DRY RUN: no ANTHROPIC_API_KEY is set, so this is placeholder text, not AI output.\n\n${member.role} would draft: "${task.title}".\nBrief received: ${task.brief || '(none)'}${task.feedback ? `\nRevision requested: ${task.feedback}` : ''}`;
 }
 async function work(name) {
   if (busy.has(name)) return;
+  const member = roster.find(m => m.n === name);
+  if (!member?.ai?.on) return;
   const task = tasks.filter(t => t.assignee === name && t.status === 'queued' && !t.error).sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
   if (!task || tasks.some(t => t.assignee === name && t.status === 'active')) return;
   busy.add(name);
@@ -77,11 +101,11 @@ async function work(name) {
   try {
     Object.assign(task, {status: 'active', runId, version:(task.version||0)+1, updatedAt: now()}); save();
     const input=structuredClone(task);
-    const answer = DRY_RUN ? await dryRun(agents[name], input) : await askClaude(agents[name], input);
+    const answer = DRY_RUN ? await dryRun(member, input) : await askClaude(member, input);
     const current = tasks.find(t => t.id === task.id);
     // The task may have been moved back to the queue or reassigned while the agent worked.
     if (current && current.status === 'active' && current.assignee === name && current.runId === runId) {
-      const by=DRY_RUN?'dry-run':modelOf(agents[name]),asked=answer.match(/^QUESTIONS:\s*([\s\S]+)/);
+      const by=DRY_RUN?'dry-run':(member.ai.model || MODEL),asked=answer.match(/^QUESTIONS:\s*([\s\S]+)/);
       // The agent asked instead of guessing: park the task until someone answers.
       if(asked){Object.assign(current,{status:'blocked',questions:asked[1].trim().slice(0,2000),askedBy:by,runId:null,version:(current.version||0)+1,updatedAt:now()});save();return;}
       const draft={result:answer.slice(0,10000),by,createdAt:now(),feedback:input.feedback||''};
@@ -93,7 +117,7 @@ async function work(name) {
     console.error(`Agent ${name} failed on "${task.title}": ${error.message}`);
   } finally { busy.delete(name); setImmediate(() => work(name)); }
 }
-const kick = () => Object.keys(agents).forEach(work);
+const kick = () => roster.filter(m => m.ai?.on).forEach(m => work(m.n));
 
 // ---- HTTP ----
 function send(res, status, body) {
@@ -126,27 +150,61 @@ async function api(req, res, url) {
       } finally { clearTimeout(timer); }
     } catch (error) { return send(res, 502, {error: error.name === 'AbortError' ? 'Router took too long to answer.' : error.message === 'fetch failed' ? 'Could not reach the router. Check ANTHROPIC_BASE_URL.' : error.message}); }
   }
+  if (url.pathname === '/api/team' && req.method === 'GET') return send(res, 200, roster);
+  if (url.pathname === '/api/team' && req.method === 'POST') {
+    const input = await readJson(req);
+    const v = team.validateMember(input, roster, true);
+    if (!v.ok) return send(res, v.code === 'dup' ? 409 : 400, {error: v.error});
+    const member = {ai: null, ...v.member};
+    roster.push(member); saveTeam(); kick(); return send(res, 201, member);
+  }
+  const teamMatch = url.pathname.match(/^\/api\/team\/(.+)$/);
+  if (teamMatch && (req.method === 'PATCH' || req.method === 'DELETE')) {
+    const name = decodeURIComponent(teamMatch[1]);
+    const member = roster.find(m => m.n === name);
+    if (!member) return send(res, 404, {error: 'Unknown team member.'});
+    if (req.method === 'DELETE') {
+      const to = new URL(req.url, 'http://x').searchParams.get('reassignTo');
+      const open = tasks.filter(t => t.assignee === name && t.status !== 'done');
+      if (open.length && !to) return send(res, 409, {error: `${open.length} tasks still assigned. Pick a member to move them to.`});
+      let moved = 0;
+      if (to) {
+        if (!hasMember(to) || to === name) return send(res, 400, {error: 'Pick another team member.'});
+        moved = team.reassignTasks(tasks, name, to).moved; save();
+      } else if (open.length) return send(res, 409, {error: 'Tasks still assigned.'});
+      roster.splice(roster.indexOf(member), 1); saveTeam(); kick();
+      return send(res, 200, {removed: name, moved});
+    }
+    const input = await readJson(req);
+    const v = team.validateMember({...input, _self: name}, roster, false);
+    if (!v.ok) return send(res, v.code === 'dup' ? 409 : 400, {error: v.error});
+    const oldName = member.n;
+    Object.assign(member, v.member);
+    if (v.member.n && v.member.n !== oldName) { team.cascadeRename(tasks, oldName, member.n); save(); }
+    saveTeam(); kick(); return send(res, 200, member);
+  }
   const modelMatch = url.pathname.match(/^\/api\/agents\/([^/]+)$/);
   if (modelMatch && req.method === 'PATCH') {
     const name = decodeURIComponent(modelMatch[1]);
-    if (!agents[name]) return send(res, 404, {error: 'Unknown AI member.'});
+    const member = roster.find(m => m.n === name);
+    if (!member?.ai) return send(res, 404, {error: 'Unknown AI member.'});
     const input = await readJson(req);
     const model = text(input?.model, 200);
     if (!model) return send(res, 400, {error: 'Pick a model from the router list.'});
-    agents[name].model = model;
-    try { fs.writeFileSync(MODELS_FILE, JSON.stringify(Object.fromEntries(Object.entries(agents).map(([n, a]) => [n, a.model])), null, 2)); } catch (error) { return send(res, 500, {error: 'Could not save the model pick.'}); }
+    member.ai.model = model;
+    try { saveTeam(); } catch { return send(res, 500, {error: 'Could not save the model pick.'}); }
     kick();
-    return send(res, 200, {[name]: {role: agents[name].role, model}});
+    return send(res, 200, {[name]: {role: member.role, model}});
   }
   if (url.pathname === '/api/agents' && req.method === 'GET')
-    return send(res, 200, {mode: DRY_RUN ? 'dry-run' : 'claude', model: DRY_RUN ? null : MODEL, members: Object.fromEntries(Object.entries(agents).map(([name, a]) => [name, {role: a.role, model: modelOf(a)}]))});
+    return send(res, 200, {mode: DRY_RUN ? 'dry-run' : 'claude', model: DRY_RUN ? null : MODEL, members: Object.fromEntries(roster.filter(m => m.ai?.on).map(m => [m.n, {role: m.role, model: m.ai.model || MODEL, ai: true}]))});
   if (url.pathname === '/api/tasks' && req.method === 'GET') return send(res, 200, tasks);
   if (url.pathname === '/api/tasks' && req.method === 'POST') {
     const input=await readJson(req);
     if(input?.status!==undefined&&!STATES.has(input.status))return send(res,400,{error:'Unknown status.'});
     const task = newTask(input); if (!task) return send(res, 400, {error: 'A task needs a title and an assignee.'});
-    if(!MEMBERS.has(task.assignee))return send(res,400,{error:'Unknown assignee.'});
-    if(task.status==='review'||task.status==='blocked'||(agents[task.assignee]&&task.status!=='queued'))return send(res,409,{error:'AI drafts must be generated before review.'});
+    if(!hasMember(task.assignee))return send(res,400,{error:'Unknown assignee.'});
+    if(task.status==='review'||task.status==='blocked'||(isAI(task.assignee)&&task.status!=='queued'))return send(res,409,{error:'AI drafts must be generated before review.'});
     if(task.status==='active'&&tasks.some(t=>t.assignee===task.assignee&&t.status==='active'))return send(res,409,{error:'This member already has an active task.'});
     tasks.unshift(task); save(); send(res, 201, task); setImmediate(kick); return;
   }
@@ -179,12 +237,12 @@ async function api(req, res, url) {
       Object.assign(task,{status:input.action==='approve'?'done':'queued',feedback:input.action==='revise'?text(input.feedback,5000):'',reviewedAt:input.action==='approve'?now():null,runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
       save();send(res,200,task);setImmediate(kick);return;
     }
-    if (input.assignee !== undefined) { change.assignee = text(input.assignee, 80); if (!MEMBERS.has(change.assignee)) return send(res, 400, {error: 'Pick an assignee.'}); if (task.status !== 'done') change.status = 'queued'; }
+    if (input.assignee !== undefined) { change.assignee = text(input.assignee, 80); if (!hasMember(change.assignee)) return send(res, 400, {error: 'Pick an assignee.'}); if (task.status !== 'done') change.status = 'queued'; }
     if (input.status !== undefined) {
       if (!STATES.has(input.status)||input.status==='review'||input.status==='blocked') return send(res, 400, {error: 'Unknown status.'});
       const assignee = change.assignee || task.assignee;
       if(task.status==='review'&&!change.assignee)return send(res,409,{error:'Approve this draft or request a revision.'});
-      if (agents[assignee] && input.status !== 'queued') return send(res, 409, {error: 'This member is connected to an AI agent; it starts and finishes its own tasks.'});
+      if (isAI(assignee) && input.status !== 'queued') return send(res, 409, {error: 'This member is connected to an AI agent; it starts and finishes its own tasks.'});
       if (input.status === 'active' && tasks.some(t => t.id !== task.id && t.assignee === assignee && t.status === 'active')) return send(res, 409, {error: 'This member already has an active task.'});
       if (input.status === 'done' && !text(input.result, 10000)) return send(res, 400, {error: 'Write a result before finishing.'});
       change.status = input.status; change.result = input.status === 'done' ? text(input.result, 10000) : '';
@@ -213,8 +271,8 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(PORT, HOST, () => {
   console.log(`Kantor Kita: http://${HOST}:${PORT}`);
-  console.log(DRY_RUN ? 'AI agents: dry run (set ANTHROPIC_API_KEY in .env to use Claude)' : `AI agents: ${Object.entries(agents).map(([name, a]) => `${name} → ${modelOf(a)}`).join(', ')}`);
+  console.log(DRY_RUN ? 'AI agents: dry run (set ANTHROPIC_API_KEY in .env to use Claude)' : `AI agents: ${roster.filter(m => m.ai?.on).map(m => `${m.n} → ${m.ai.model || MODEL}`).join(', ') || 'none (all manual)'}`);
   // Tasks left active by a previous run go back to the queue and are picked up again.
-  let reset = false; tasks.forEach(task => { if (task.status === 'active' && agents[task.assignee]) { task.status = 'queued'; reset = true; } }); if (reset) save();
+  let reset = false; tasks.forEach(task => { if (task.status === 'active' && isAI(task.assignee)) { task.status = 'queued'; reset = true; } }); if (reset) save();
   kick();
 });
