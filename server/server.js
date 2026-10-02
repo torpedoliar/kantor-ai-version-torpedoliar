@@ -18,7 +18,7 @@ const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 const API_URL = `${process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'}/v1/messages`;
 const MODELS_URL = `${process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'}/v1/models`;
 const DRY_RUN = !API_KEY || process.env.ANTHROPIC_DRY_RUN === '1';
-const STATES = new Set(['queued', 'active', 'blocked', 'review', 'done']);
+const STATES = new Set(['queued', 'active', 'blocked', 'manager-review', 'review', 'done']);
 
 // ---- storage: one JSON file, written atomically ----
 fs.mkdirSync(DATA_DIR, {recursive: true});
@@ -118,7 +118,8 @@ async function work(name) {
       // The agent asked instead of guessing: park the task until someone answers.
       if(asked){Object.assign(current,{status:'blocked',questions:asked[1].trim().slice(0,2000),askedBy:by,runId:null,version:(current.version||0)+1,updatedAt:now()});save();return;}
       const draft={result:answer.slice(0,10000),by,createdAt:now(),feedback:input.feedback||''};
-      Object.assign(current, {status:'review',result:draft.result,by:draft.by,history:[...(current.history||[]),draft],runId:null,version:(current.version||0)+1,updatedAt:now()});save();
+      const needsManager = (roster.find(m => m.n === name)?.manager ?? null) !== null;
+      Object.assign(current, {status: needsManager ? 'manager-review' : 'review', result:draft.result,by:draft.by,history:[...(current.history||[]),draft],runId:null,version:(current.version||0)+1,updatedAt:now()});save();
     }
   } catch (error) {
     const current = tasks.find(t => t.id === task.id);
@@ -145,7 +146,7 @@ function newTask(input) {
   const title = text(input.title, 160), assignee = text(input.assignee, 80);
   if (!title || !assignee) return null;
   const status = STATES.has(input.status) ? input.status : 'queued', result = text(input.result, 10000);
-  return {id: crypto.randomUUID(), title, assignee, brief: text(input.brief, 5000), status: ['done','review'].includes(status) && !result ? 'queued' : status, result, createdAt: now()};
+  return {id: crypto.randomUUID(), title, assignee, brief: text(input.brief, 5000), status: ['done','review','manager-review'].includes(status) && !result ? 'queued' : status, result, createdAt: now()};
 }
 async function api(req, res, url) {
   if (url.pathname === '/api/models' && req.method === 'GET') {
@@ -225,7 +226,7 @@ async function api(req, res, url) {
     if(input?.status!==undefined&&!STATES.has(input.status))return send(res,400,{error:'Unknown status.'});
     const task = newTask(input); if (!task) return send(res, 400, {error: 'A task needs a title and an assignee.'});
     if(!hasMember(task.assignee))return send(res,400,{error:'Unknown assignee.'});
-    if(task.status==='review'||task.status==='blocked'||(isAI(task.assignee)&&task.status!=='queued'))return send(res,409,{error:'AI drafts must be generated before review.'});
+    if(task.status==='review'||task.status==='blocked'||task.status==='manager-review'||(isAI(task.assignee)&&task.status!=='queued'))return send(res,409,{error:'AI drafts must be generated before review.'});
     if(task.status==='active'&&tasks.some(t=>t.assignee===task.assignee&&t.status==='active'))return send(res,409,{error:'This member already has an active task.'});
     tasks.unshift(task); save(); send(res, 201, task); setImmediate(kick); return;
   }
@@ -252,17 +253,21 @@ async function api(req, res, url) {
       save();send(res,200,task);setImmediate(kick);return;
     }
     if(input.action!==undefined){
-      if(!['approve','revise'].includes(input.action))return send(res,400,{error:'Unknown action.'});
-      if(task.status!=='review'||input.version!==(task.version||0))return send(res,409,{error:'This draft changed. Refresh and review the latest version.'});
+      if(!['approve','revise','manager-approve','manager-reject'].includes(input.action))return send(res,400,{error:'Unknown action.'});
+      if((input.action==='approve'||input.action==='revise')&&(task.status!=='review'||input.version!==(task.version||0)))return send(res,409,{error:'This draft changed. Refresh and review the latest version.'});
+      if((input.action==='manager-approve'||input.action==='manager-reject')&&(task.status!=='manager-review'||input.version!==(task.version||0)))return send(res,409,{error:'This draft changed. Refresh and review the latest version.'});
       if(input.action==='revise'&&!text(input.feedback,5000))return send(res,400,{error:'Describe the changes needed.'});
-      Object.assign(task,{status:input.action==='approve'?'done':'queued',feedback:input.action==='revise'?text(input.feedback,5000):'',reviewedAt:input.action==='approve'?now():null,runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
+      if(input.action==='manager-reject'&&!text(input.feedback,5000))return send(res,400,{error:'Describe the changes needed.'});
+      if(input.action==='approve')Object.assign(task,{status:'done',feedback:'',reviewedAt:now(),runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
+      if(input.action==='manager-approve')Object.assign(task,{status:'review',managerReviewedAt:now(),runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
+      if(input.action==='revise'||input.action==='manager-reject')Object.assign(task,{status:'queued',feedback:text(input.feedback,5000),runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
       save();send(res,200,task);setImmediate(kick);return;
     }
     if (input.assignee !== undefined) { change.assignee = text(input.assignee, 80); if (!hasMember(change.assignee)) return send(res, 400, {error: 'Pick an assignee.'}); if (task.status !== 'done') change.status = 'queued'; }
     if (input.status !== undefined) {
-      if (!STATES.has(input.status)||input.status==='review'||input.status==='blocked') return send(res, 400, {error: 'Unknown status.'});
+      if (!STATES.has(input.status)||input.status==='review'||input.status==='blocked'||input.status==='manager-review') return send(res, 400, {error: 'Unknown status.'});
       const assignee = change.assignee || task.assignee;
-      if(task.status==='review'&&!change.assignee)return send(res,409,{error:'Approve this draft or request a revision.'});
+      if((task.status==='review'||task.status==='manager-review')&&!change.assignee)return send(res,409,{error:'Approve this draft or request a revision.'});
       if (isAI(assignee) && input.status !== 'queued') return send(res, 409, {error: 'This member is connected to an AI agent; it starts and finishes its own tasks.'});
       if (input.status === 'active' && tasks.some(t => t.id !== task.id && t.assignee === assignee && t.status === 'active')) return send(res, 409, {error: 'This member already has an active task.'});
       if (input.status === 'done' && !text(input.result, 10000)) return send(res, 400, {error: 'Write a result before finishing.'});
