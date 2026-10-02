@@ -73,11 +73,11 @@
       render();
     } catch (error) { feedback(error.message); }
   }
-  async function loadTeam() {
+  async function loadTeam(mutated = false) {
     if (!server) return;
     roster = await call('GET', '/api/team').catch(() => []);
     buildAssigneeOptions(); renderTeam();
-    document.dispatchEvent(new CustomEvent('officetasks:team', {detail: roster.map(m => ({...m}))}));
+    if (mutated) document.dispatchEvent(new CustomEvent('officetasks:team', {detail: roster.map(m => ({...m}))}));
   }
   function buildAssigneeOptions() {
     const makeOption = (text, value) => { const o = node('option', text); o.value = value; return o; };
@@ -123,7 +123,7 @@
       else await call('POST', '/api/team', body);
       el('memberForm').hidden = true;
       feedback(editingMember ? 'Member updated. The 3D office reloads.' : 'Member added. The 3D office reloads.');
-      await loadTeam();
+      await loadTeam(true);
     } catch (error) { feedback(error.message); }
   }
   async function deleteMember(name) {
@@ -137,7 +137,7 @@
     try {
       await call('DELETE', `/api/team/${encodeURIComponent(name)}${to ? `?reassignTo=${encodeURIComponent(to)}` : ''}`);
       feedback(`${name} removed. The 3D office reloads.`);
-      await loadTeam();
+      await loadTeam(true);
     } catch (error) { feedback(error.message); }
   }
   function persist(next) {
