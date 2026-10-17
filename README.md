@@ -87,7 +87,7 @@ Model bawaan adalah `claude-sonnet-5-5`; ganti dengan `ANTHROPIC_MODEL` di `.env
 ## Struktur
 
 - `public/index.html`: struktur halaman dan panel tugas.
-- `public/office.js`: empat lantai 3D, data tim, pergerakan, kamera, dan integrasi tugas.
+- `public/office.js`: empat lantai 3D, data tim, pergerakan, kamera, kustomisasi furnitur, inventaris, dan integrasi tugas.
 - `public/office.css`: navigasi lantai, panel anggota, dan kontrol responsif.
 - `public/tasks.js`: tugas, validasi, penyimpanan, filter, dan ekspor.
 - `public/tasks.css`: panel tugas responsif, fokus keyboard, dan gaya formulir.
@@ -100,6 +100,8 @@ Model bawaan adalah `claude-sonnet-5-5`; ganti dengan `ANTHROPIC_MODEL` di `.env
 `tests/avatar-stairs.cjs` memeriksa varian avatar, inisial, kompatibilitas tugas, posisi 3D saat naik/turun tangga, jeda, perubahan tujuan, kamera yang tetap, musik, volume tersimpan, serta layout 375/768/1440px. Jalankan dengan `node tests/avatar-stairs.cjs`; konfigurasi Playwright sama seperti tes di bawah. `OFFICE_URL` dapat digunakan untuk alamat server selain port 4173.
 
 `tests/office.cjs` menguji jumlah tim, pergantian lantai, klik lantai dari tampilan gedung, kamera karakter (mata, belakang, ikut ke lantai lain, Esc), pintu otomatis, orbit/geser/zoom kamera, rutinitas otomatis (meninggalkan meja, ngobrol, batas empat orang), log kantor, musholla dengan pilihan per orang, pilihan karakter, tugas, perjalanan makan/rooftop/kembali, tampilan responsif, dan pemindahan tugas lama. Jalankan server lokal terlebih dahulu, kemudian `node tests/office.cjs` dengan Playwright dan Chromium tersedia. Jika Playwright terpasang di luar proyek, set `PLAYWRIGHT_MODULE` ke direktori modul tersebut. Tambahkan `--visual` untuk hanya memeriksa lantai dan mengambil tangkapan layar. Browser pengujian memakai konteks terpisah dari data pengguna.
+
+`tests/customize.cjs` menguji mode Kustomisasi Kantor: furnitur terdaftar (6 jenis + meja biliar + papan tugas), pilih lewat klik pointer, sembunyikan putaran untuk benda simetris, pindah + putar 90° + input angka + batal, tolak tumpukan, ganti nama slot + tersimpan setelah reload, kembali ke Default, dan panel 375px. `tests/inventory.cjs` menguji stok global, tambah/kurangi stok, preview lalu Apply/Cancel, kursi ekstra yang dapat dipakai, papan tugas yang dapat digeser, persistensi item tambahan, dan pengembalian dengan konfirmasi. Jalankan dengan server lokal dan `PLAYWRIGHT_MODULE` yang sama. Tes browser menerima `OFFICE_URL` untuk port selain 4173.
 
 ## Member and division instructions
 

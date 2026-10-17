@@ -1,10 +1,11 @@
 const assert=require('node:assert/strict');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
 (async()=>{
  const browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:960}});
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto('http://127.0.0.1:4173');
+ await page.goto(URL);
  await page.waitForFunction(()=>window.officeScene);
  const snap=await page.evaluate(()=>officeScene.snapshot());
  assert.equal(snap.team.length,13);assert.equal(snap.floor,3);
@@ -14,7 +15,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
    await page.locator(`[data-floor="${floor}"]`).click();await page.waitForFunction(()=>!officeScene.snapshot().transitioning);
    assert.deepEqual(await page.evaluate(()=>officeScene.snapshot().visibleFloors),floor?[floor]:[1,2,3,4]);
    assert.equal(await page.evaluate(()=>officeScene.snapshot().sky),floor===0,'city, clouds and birds only in the whole-building view');
-   await page.screenshot({path:`/private/tmp/kantor-floor-${floor}.png`});
+   await page.screenshot({path:require('node:path').join(require('node:os').tmpdir(),`kantor-floor-${floor}.png`)});
  }
  console.log('PASS: 13 team members, roles, 4 floors and building overview');
  await page.locator('[data-floor="0"]').click();await page.waitForFunction(()=>!officeScene.snapshot().transitioning);

@@ -21,6 +21,7 @@
       <div id="teamFaces" aria-label="Team members"></div>
       <button id="bLog" class="btn" aria-controls="log" aria-expanded="true">Log</button>
       <button id="bTasks" class="btn primary">Tasks <span id="taskCount">0</span></button>
+      <button id="bCustom" class="btn" aria-pressed="false">Customize office</button>
     </div>
   </header>
   <nav id="floors" aria-label="Choose a floor">
@@ -48,6 +49,21 @@
   </section>
   <div id="followBar" class="panel" role="group" aria-label="Character camera" hidden><span id="followName"></span><button class="btn" id="fEyes" aria-pressed="false">Eyes</button><button class="btn" id="fChase" aria-pressed="false">Behind</button><button class="btn" id="fExit">Exit camera</button></div>
   <section id="info" class="panel" aria-label="Team member details" hidden></section>
+  <section id="customPanel" class="panel" aria-label="Customize office" hidden>
+    <header class="custom-head"><h2>Customize office</h2><button type="button" id="cClose" class="btn" aria-label="Exit customize mode">×</button></header>
+    <label for="cSlot">Layout</label>
+    <select id="cSlot"></select>
+    <label for="cSlotName">Layout name</label>
+    <div class="custom-row"><input id="cSlotName" maxlength="40" placeholder="Slot name"><button type="button" id="cRename" class="btn">Rename</button></div>
+    <p id="cSelected" aria-live="polite">No selection. Click a table, chair, sofa, meeting table, plant, lamp, lantern or billiard table.</p>
+    <div class="custom-grid"><div><label for="cX">X</label><input id="cX" type="number" step="0.1"></div><div><label for="cZ">Z</label><input id="cZ" type="number" step="0.1"></div></div>
+    <div id="cRotWrap"><label for="cRot">Rotation (degrees)</label><div class="custom-row"><input id="cRot" type="range" min="0" max="359" step="1" value="0"><input id="cRotNum" type="number" min="0" max="359" step="1" value="0" aria-label="Rotation degrees"></div><button type="button" id="cRot90" class="btn">Rotate 90°</button></div>
+    <div class="custom-row"><button type="button" id="cApply" class="btn primary">Apply</button><button type="button" id="cCancel" class="btn">Cancel</button></div>
+    <button type="button" id="cReset" class="btn">Back to Default</button>
+    <section id="inventory" aria-label="Furniture inventory"><h3>Furniture inventory</h3><div id="inventoryList"></div></section>
+    <button type="button" id="cReturn" class="btn" disabled>Return selected to inventory</button>
+    <p id="cMsg" role="status" aria-live="polite"></p>
+  </section>
   <div id="sceneStatus" role="status">Loading the office model…</div>
   <footer id="controls" class="panel">
     <div class="simulation-controls"><button class="btn" id="bPause" aria-pressed="false">Pause</button><button class="btn" id="bRoutine" aria-pressed="true">Routine: on</button><button class="btn" id="bLunch">Lunch</button><button class="btn" id="bRoof">To the rooftop</button><button class="btn" id="bPray">Prayer time</button><button class="btn" id="bWork">Back to work</button></div>
