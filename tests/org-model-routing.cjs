@@ -1,0 +1,3 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {createSettings}=require('../server/settings');const dir=fs.mkdtempSync(path.join(os.tmpdir(),'org-route-'));
+try{const s=createSettings({dataDir:dir,env:{},agents:{}});assert.equal(s.resolve('New agent',{model:'chosen-model'}).modelId,'chosen-model');const e=createSettings({dataDir:dir,env:{ANTHROPIC_API_KEY:'test-key'},agents:{}});assert.equal(e.resolve('New agent',{model:'chosen-model'}).modelId,'chosen-model');console.log('PASS: member model reaches dry-run and environment model routing');}finally{fs.rmSync(dir,{recursive:true,force:true});}

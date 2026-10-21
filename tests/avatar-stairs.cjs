@@ -1,9 +1,12 @@
 const assert=require('node:assert/strict');
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const {launch}=require('./browser.cjs');
+// These tests start from a fresh data dir; keep the first-run organization wizard out of the way.
+const skipWizard=async page=>{await page.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1')}catch{}});return page;};
+
 (async()=>{
-  const browser=await chromium.launch({headless:true});
+  const browser=await launch({headless:true});
   try{
-    const page=await browser.newPage({viewport:{width:1440,height:960}}),errors=[];
+    const page=await browser.newPage({viewport:{width:1440,height:960}}).then(skipWizard),errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     await page.goto(process.env.OFFICE_URL||'http://127.0.0.1:4173');
     await page.waitForFunction(()=>window.officeScene);
@@ -14,13 +17,12 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     assert.deepEqual(initial.team.filter(p=>p.gender==='female').map(p=>p.name).sort(),['Mira','Tari','Kak Rani','Kak Dewi','Kak Laras','Kak Sinta'].sort());
     assert.equal(new Set(initial.team.map(p=>p.initials)).size,13);
     assert.deepEqual(await page.locator('.name-label').allTextContents(),initial.team.map(p=>p.initials));
-    assert.ok(!(await page.locator('#teamSelect').innerText()).includes('Bagas Pratama Putra'));
-    await page.selectOption('#teamSelect','Mira');
+    await page.click('#bTeam');assert.equal(await page.locator('#teamList [data-member]').count(),13);await page.click('#teamList [data-member="Mira"]');
     await page.screenshot({path:'/private/tmp/kantor-block-female.png'});
-    await page.selectOption('#teamSelect','Rizky Hakim');
+    await page.click('#bTeam');await page.click('#teamList [data-member="Rizky Hakim"]');
     await page.screenshot({path:'/private/tmp/kantor-block-male.png'});
     await page.click('#iTasks');assert.equal(await page.inputValue('#taskAssignee'),'Rizky Hakim');
-    await page.fill('#taskTitle','Periksa hasil avatar');await page.click('#taskForm button[type=submit]');
+    await page.fill('#taskTitle','Periksa hasil avatar');await page.click('#taskCreateForm button[type=submit]');
     assert.match(await page.locator('#taskList').innerText(),/RH/);
     await page.keyboard.press('Escape');
     await page.locator('[data-floor="0"]').click();await page.waitForFunction(()=>!officeScene.snapshot().transitioning);
@@ -36,7 +38,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     await page.click('#bMusic');await page.waitForFunction(()=>officeMusic.snapshot().state==='suspended');
     assert.equal(await page.locator('#bMusic').getAttribute('aria-pressed'),'false');
     console.log('PASS: block avatars, 6 female/7 male, unique initials, task identity, music start/volume/stop');
-    await page.click('#bLunch');assert.equal((await snapshot()).floor,0);assert.deepEqual((await snapshot()).camera,overview);
+    await page.click('#moments summary');await page.click('#bLunch');assert.equal((await snapshot()).floor,0);assert.deepEqual((await snapshot()).camera,overview);
     await page.waitForFunction(()=>officeScene.snapshot().team.some(p=>p.state==='stairs'&&p.position[1]>4.7&&p.position[1]<8.5),null,{timeout:90000});
     const middle=await snapshot(),traveller=middle.team.find(p=>p.state==='stairs');
     assert.ok(traveller.visible);assert.ok(traveller.position[0]<=-16);
@@ -46,10 +48,10 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     await page.click('#bPause');
     await page.waitForFunction(()=>officeScene.snapshot().team.every(p=>p.floor===2&&p.state==='break'),null,{timeout:120000});
     assert.deepEqual((await snapshot()).camera,overview);
-    await page.click('#bRoof');assert.equal((await snapshot()).floor,0);
+    await page.click('#moments summary');await page.click('#bRoof');assert.equal((await snapshot()).floor,0);
     await page.waitForFunction(()=>officeScene.snapshot().team.some(p=>p.state==='stairs'),null,{timeout:90000});
     await page.click('#bPause');
-    const before=await snapshot();await page.click('#bWork');const after=await snapshot();
+    const before=await snapshot();await page.click('#moments summary');await page.click('#bWork');const after=await snapshot();
     const person=before.team.find(p=>p.state==='stairs'),same=after.team.find(p=>p.name===person.name);
     assert.deepEqual(same.position,person.position,'retarget must not teleport');
     await page.click('#bPause');
@@ -59,7 +61,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
     for(const p of (await snapshot()).team){const off=Math.abs(Math.atan2(Math.sin(p.heading-p.spotFacing),Math.cos(p.heading-p.spotFacing)));assert.ok(off<.2,`${p.name} faces away from the desk after the stairs`);}
     console.log('PASS: visible descent, intermediate heights, pause, lunch arrival, retarget during flight, return, camera preserved');
     await page.locator('[data-floor="3"]').click();await page.waitForFunction(()=>!officeScene.snapshot().transitioning);const floorCamera=(await snapshot()).camera;
-    await page.click('#bRoof');assert.equal((await snapshot()).floor,3);assert.deepEqual((await snapshot()).camera,floorCamera);
+    await page.click('#moments summary');await page.click('#bRoof');assert.equal((await snapshot()).floor,3);assert.deepEqual((await snapshot()).camera,floorCamera);
     await page.waitForFunction(()=>officeScene.snapshot().team.every(p=>p.floor===4&&p.state==='break'),null,{timeout:150000});
     await page.locator('[data-floor="4"]').click();await page.waitForFunction(()=>!officeScene.snapshot().transitioning);
     await page.screenshot({path:'/private/tmp/kantor-rooftop-arrival.png'});

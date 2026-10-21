@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict');
+const {parseDraft}=require('../server/org-draft');
+const org={divisions:[{id:'x',name:'X',lead:'A',collaboratesWith:[]}],members:[{name:'A',role:'Lead',division:'x',manager:null}]};
+const json=JSON.stringify(org);
+for(const value of [json,'Berikut hasil:\n```JSON\n'+json+'\n```','<think>{"ignore":true}</think>\n'+json,'Contoh {x}, hasil:\n'+json+'\nCatatan {lain}',JSON.stringify({organization:org})])assert.deepEqual(parseDraft(value),org);
+assert.deepEqual(parseDraft('{"divisions":[],"members":[{"name":"literal ,} in string"},],}'),{divisions:[],members:[{name:'literal ,} in string'}]});
+assert.throws(()=>parseDraft('{"divisions":['),/terpotong|JSON/);
+assert.throws(()=>parseDraft('tidak ada organisasi'),/JSON/);
+assert.throws(()=>parseDraft('{"other":[]}'),/divisions|members/);
+console.log('PASS: org draft JSON extraction handles prose, fences, thinking, wrappers and trailing commas; truncated/unrelated output is rejected');

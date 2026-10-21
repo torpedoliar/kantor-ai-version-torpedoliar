@@ -2,7 +2,7 @@
 
 Tampilan terbaru mengikuti referensi kantor hangat: kayu terang, lantai parket, tanaman berdaun, kursi berbantalan dan sofa sage. Avatar chibi memakai kepala oval, rambut bervolume, wajah sederhana, badan membulat serta rig animasi yang sama. Panel putih gading memakai aksen hijau tua. Referensi gambar menjadi arahan gaya, bukan jaminan kesamaan render. Catatan gaya maket/soft block di bawah adalah riwayat perkembangan.
 
-Seluruh teks antarmuka memakai bahasa Inggris.
+Antarmuka utama memakai Bahasa Indonesia; nama tahap teknis dan keluaran provider/runner dapat tetap memakai Bahasa Inggris.
 
 Maket kantor empat lantai dengan 13 anggota tim, ruang kerja terbuka, dan pengelolaan tugas lokal. Nama dan peran mengikuti daftar pengguna. Denah, furnitur, dan figur orang adalah interpretasi ilustratif, bukan pengukuran atau potret asli.
 
@@ -24,7 +24,7 @@ Seret untuk memutar dan memiringkan kamera. Shift + seret atau klik kanan untuk 
 
 Ruang rapat, kedua phone booth, musholla, serta ruang pantry & lounge (berdinding kaca) punya pintu yang terbuka sendiri saat seseorang mendekat, lalu menutup kembali.
 
-Di lantai 3 tim punya rutinitas sendiri: menghampiri rekan untuk ngobrol, ambil minum di pantry, rehat di lounge, menelepon di phone booth, membaca papan ide, rapat kecil berdua atau bertiga, atau berdiri meregangkan badan. Bubble bergantian menandai siapa yang bicara. Paling banyak empat orang meninggalkan meja sekaligus, dan karakter dengan tugas aktif lebih jarang beranjak. **Routine: on/off** menghentikan kegiatan baru; yang sedang berlangsung diselesaikan lalu kembali ke meja. Rutinitas mati secara bawaan bila sistem meminta gerakan dikurangi.
+Tim punya rutinitas sendiri di seluruh kantor: dapat turun untuk makan atau istirahat di lantai 2, mengambil jeda di area masuk lantai 1, beraktivitas di ruang kerja lantai 3, atau menikmati rooftop lantai 4. Di lantai 3 mereka dapat menghampiri rekan untuk ngobrol, ambil minum di pantry, rehat di lounge, menelepon di phone booth, membaca papan ide, rapat kecil berdua atau bertiga, atau berdiri meregangkan badan; rooftop memiliki aktivitas seperti lounge, ping-pong, billiard, chess, yoga, swing, dan coffee bar. Setiap perjalanan otomatis dimulai dari meja lalu kembali ke meja setelah durasi aktivitas selesai. Bubble bergantian menandai siapa yang bicara. Paling banyak empat orang meninggalkan meja sekaligus, dan karakter dengan tugas aktif lebih jarang beranjak. **Routine: on/off** menghentikan kegiatan baru; yang sedang berlangsung diselesaikan lalu kembali ke meja. Rutinitas mati secara bawaan bila sistem meminta gerakan dikurangi. Perintah **Lunch**, **To the rooftop**, dan **Back to work** tetap merupakan perintah manual terpisah.
 
 **Office log** mencatat kegiatan simulasi dan perubahan status tugas, terbaru di atas. Isinya kejadian simulasi, bukan pesan dari AI. Di layar kecil log dibuka lewat tombol **Log**.
 
@@ -44,9 +44,9 @@ Buka http://127.0.0.1:4173. Internet diperlukan untuk memuat Three.js dari CDN d
 
 ## Mengelola tugas
 
-- Klik **Tasks** di bagian atas atau pilih karakter lalu **View / assign tasks**.
-- Isi pekerjaan, penanggung jawab, dan instruksi opsional. Tugas masuk antrean.
-- Klik **Start task**. Satu karakter hanya dapat memiliki satu tugas aktif. Karakter kembali ke mejanya di lantai 3.
+- Buka **Tugas** dari rail kiri, atau pilih anggota lewat **Tim** lalu buka tugasnya dari kartu profil.
+- Klik **+ Tugas**, lalu isi pekerjaan, penanggung jawab, instruksi dan kriteria diterima. Pilih Dokumen atau Aplikasi serta cara kerja langsung/otomatis. Tugas masuk antrean.
+- Klik **Mulai tugas**. Satu karakter hanya dapat memiliki satu tugas aktif. Karakter kembali ke mejanya di lantai 3.
 - Isi hasil pekerjaan, lalu klik **Save result & finish**. Waktu simulasi tidak menyelesaikan tugas secara otomatis.
 - Gunakan filter status atau penanggung jawab untuk mencari tugas. **Show character** menutup panel dan membuka lantai tempat karakter berada.
 - Klik **Export tasks** untuk mengunduh salinan JSON. Impor belum tersedia.
@@ -55,9 +55,19 @@ Tugas disimpan dalam localStorage untuk alamat browser ini. Tidak ada sinkronisa
 
 Tugas dengan nama karakter prototipe lama tetap disimpan dan dapat dipindahkan ke anggota tim baru. Tugas aktif yang dipindahkan kembali ke antrean; hasil tugas selesai tetap dipertahankan.
 
+## Autonomous organization and kanban
+
+Rail kiri membuka ruang kerja Tugas dengan **Papan**, **Alur kerja**, dan **Console**. Papan global memiliki empat kolom: **Tugas / In progress / Review / Selesai**. Tugas yang menunggu jawaban, izin, tim, atau mengalami kegagalan tetap berada di In progress dengan alasannya. Ringkasan owner tersedia sebagai bagian yang dapat dibuka. Drawer Organisasi terpisah dibuka dari rail dan dikunci sekali per sesi dengan PIN owner. The owner can assign a large task only to a division lead; leads split it into same-division child cards, monitor progress, follow up in the card chat, and review completed child work. Parent cards enter review only after every child is done.
+
+Cards support a 0–100 progress value and ordered follow-up messages. Messages and progress are open for collaboration; approving or revising work and changing the organization require the owner PIN session. The UI renders messages as plain text. Legacy tasks receive defaults for division, priority, progress, messages, and kind when read.
+
+The Organization view is the owner-facing control center: it shows Owner → Division → Lead → Members, roster workload, and the lock state. Each member can have an effort profile (`light`, `standard`, or `deep`), a workload capacity from 0–100%, and member-specific operating instructions. These values are edited in the frontend after owner unlock, stored with the roster, shown in the kanban roster inventory, and appended to that member's autonomous agent instructions. They are guidance, not a substitute for server-side task and authorization rules. Browser-only mode displays the same seeded profiles locally without requiring a PIN.
+
+The local server stores the organization in `data/org.json`. The first valid 4–6 digit PIN sets the owner PIN. If the PIN is forgotten, stop the server, remove only the `pinHash` property from `data/org.json`, restart, and set a new PIN. Unlock tokens are held in memory and expire when the server restarts. The browser-only mode stores its organization seed under `kantor-ai.org.v1` and keeps task chat/progress in `kantor-ai.tasks.v1`; no PIN is required without the server.
+
 ## Server tugas dan agen AI
 
-Dengan server, tugas disimpan di `data/tasks.json` dan anggota yang tersambung ke agen AI mengerjakan tugasnya sendiri. Saat ini **Social Media Specialist** dan **Customer Service**; daftarnya ada di `server/agents.js`. Anggota lain tetap simulasi dengan status yang diubah manual.
+Dengan server, tugas, percakapan, keputusan, event, proyek, job, dan read cursor disimpan secara transaksional di `data/workspace.json`. `tasks.json` lama dimigrasikan sekali dan file asal tetap dipertahankan. Anggota yang tersambung ke agen AI mengerjakan tugasnya sendiri. Saat ini **Social Media Specialist** dan **Customer Service**; daftarnya ada di `server/agents.js`. Anggota lain tetap simulasi dengan status yang diubah manual.
 
 ```sh
 cp .env.example .env   # isi ANTHROPIC_API_KEY dari console.anthropic.com → API Keys
@@ -82,26 +92,64 @@ Tugas terlihat langsung di kantor:
 
 Ketiganya juga berjalan tanpa server (tugas dari localStorage).
 
-Model bawaan adalah `claude-sonnet-5-5`; ganti dengan `ANTHROPIC_MODEL` di `.env`. `tests/server.cjs` menguji alur dry run dari awal sampai akhir, tugas manual, penjaga API, persistensi, dan jalur error agen; tes ini menyalakan servernya sendiri.
+Model bawaan adalah `claude-sonnet-5-5`; ganti dengan `ANTHROPIC_MODEL` di `.env`. Settings menyediakan pengaturan provider/model lokal untuk protokol Anthropic-compatible dan OpenAI-compatible. Credential disimpan terenkripsi di server bila `KANTOR_SETTINGS_KEY` tersedia; key tidak pernah masuk localStorage, export, response, atau task file. Server tetap hanya di `127.0.0.1` dan perubahan Settings memerlukan sesi same-origin dengan CSRF token. `tests/server.cjs` menguji alur dry run dari awal sampai akhir, tugas manual, penjaga API, persistensi, dan jalur error agen; `tests/settings.cjs` serta `tests/providers.cjs` menguji penyimpanan terenkripsi, guard Settings, discovery, dan transport provider memakai mock lokal.
+
+## Organisasi: bagan, wizard, dan tata ruang otomatis
+
+**Organisasi** di rail membuka bagan organisasi selebar layar:
+- Setiap divisi adalah kotak berwarna. Lead ada di atas, anggota di bawahnya mengikuti garis atasan → bawahan.
+- **Klik kartu** untuk membuka panel kanan dengan tab Profil, Kerja, dan AI. **Klik judul divisi** untuk mengubah nama, nama area 3D, lead, warna, dan kolaborasi.
+- **Tarik kartu** ke kartu lain untuk mengganti atasan, atau ke area kosong sebuah divisi untuk memindahkannya. Bawahannya tetap di divisi lama, kecuali kamu mencentang "Pindahkan beserta timnya". Atasan yang membuat siklus ditolak.
+- **Hubungkan divisi**: klik dua judul divisi untuk menambah atau menghapus jalur kolaborasi (garis ungu putus-putus).
+- **Menonaktifkan** orang yang masih punya tugas terbuka akan diblokir. Panel menawarkan "Pindahkan semua ke…".
+
+**Wizard** muncul sendiri di instalasi baru (belum ada PIN). Wizard juga bisa dibuka dari tombol **Susun ulang**. Langkahnya:
+1. PIN
+2. Profil perusahaan
+3. Template
+4. Divisi
+5. Orang
+6. Agen AI
+7. Ringkasan, dengan pratinjau denah per lantai
+
+Memilih template saat susun ulang akan mengganti seluruh struktur.
+
+**Setel ulang total** (menu ⋯):
+- Membutuhkan PIN dan teks `RESET`.
+- Tugas diarsipkan ke `data/archive/` dan arsipnya bisa diunduh.
+- PIN dan pengaturan provider tetap.
+
+**Kantor 3D mengikuti organisasi:**
+- Satu area meja per divisi, maksimal 8 kursi per area dan 4 area per lantai kerja.
+- Kalau meja kurang, lantai kerja baru ditambahkan di bawah rooftop. Lantai tambahan dihapus lagi saat organisasi mengecil.
+- Papan nama area memakai "Nama area 3D", atau nama divisi kalau kosong.
+- Furnitur Tata ruang yang tertimpa meja tim disembunyikan, tidak dihapus.
 
 ## Struktur
 
-- `public/index.html`: struktur halaman dan panel tugas.
-- `public/office.js`: empat lantai 3D, data tim, pergerakan, kamera, kustomisasi furnitur, inventaris, dan integrasi tugas.
+- `public/index.html`: struktur halaman, rail, drawer tugas/organisasi/pengaturan, dan kanvas 3D.
+- `public/nav.js`: rail kiri, drawer, guard perubahan, dan navigasi keyboard.
+- `public/office.js`: gedung 3D (lantai kerja dibangun dari organisasi), pergerakan, kamera, kustomisasi furnitur, inventaris, dan integrasi tugas.
+- `public/org-model.js`: logika organisasi murni: pindah anggota, lead, layout bagan, dan rencana tempat duduk.
+- `public/org-chart.js`: bagan organisasi, drag, dan panel samping.
+- `public/org-wizard.js`: wizard 7 langkah dan dialog setel ulang total.
 - `public/office.css`: navigasi lantai, panel anggota, dan kontrol responsif.
 - `public/tasks.js`: tugas, validasi, penyimpanan, filter, dan ekspor.
 - `public/tasks.css`: panel tugas responsif, fokus keyboard, dan gaya formulir.
 - `public/music.js`: komposisi instrumental, kontrol putar/mati, dan volume.
-- `server/server.js`: server lokal (file statis + API tugas) dan pekerja agen AI.
+- `server/server.js`: server lokal (file statis + API tugas/Settings) dan pekerja agen AI.
+- `server/settings.js`: penyimpanan routing provider/model dan credential terenkripsi.
+- `server/providers.js`: transport Anthropic-compatible/OpenAI-compatible, discovery, dan validasi provider.
 - `server/agents.js`: anggota yang tersambung ke agen AI beserta instruksinya.
+- `public/settings.js`: dialog Settings dan preferensi browser yang tidak rahasia.
 
 ## Pemeriksaan browser
 
-`tests/avatar-stairs.cjs` memeriksa varian avatar, inisial, kompatibilitas tugas, posisi 3D saat naik/turun tangga, jeda, perubahan tujuan, kamera yang tetap, musik, volume tersimpan, serta layout 375/768/1440px. Jalankan dengan `node tests/avatar-stairs.cjs`; konfigurasi Playwright sama seperti tes di bawah. `OFFICE_URL` dapat digunakan untuk alamat server selain port 4173.
+`tests/nav.cjs` memeriksa rail, drawer non-modal, PIN sesi, Team popover, toolbar Momen, log lipat, floor counts, dan layout 375/768/1440px. `tests/avatar-stairs.cjs` memeriksa varian avatar, inisial, kompatibilitas tugas, posisi 3D saat naik/turun tangga, jeda, perubahan tujuan, kamera yang tetap, musik, volume tersimpan, serta layout 375/768/1440px. `tests/autonomous-floors.cjs` memeriksa bahwa routine otomatis dapat mengirim pegawai ke aktivitas lintas lantai tanpa mengubah kamera. Jalankan dengan `node tests/avatar-stairs.cjs`; konfigurasi Playwright sama seperti tes di bawah. `OFFICE_URL` dapat digunakan untuk alamat server selain port 4173.
 
 `tests/office.cjs` menguji jumlah tim, pergantian lantai, klik lantai dari tampilan gedung, kamera karakter (mata, belakang, ikut ke lantai lain, Esc), pintu otomatis, orbit/geser/zoom kamera, rutinitas otomatis (meninggalkan meja, ngobrol, batas empat orang), log kantor, musholla dengan pilihan per orang, pilihan karakter, tugas, perjalanan makan/rooftop/kembali, tampilan responsif, dan pemindahan tugas lama. Jalankan server lokal terlebih dahulu, kemudian `node tests/office.cjs` dengan Playwright dan Chromium tersedia. Jika Playwright terpasang di luar proyek, set `PLAYWRIGHT_MODULE` ke direktori modul tersebut. Tambahkan `--visual` untuk hanya memeriksa lantai dan mengambil tangkapan layar. Browser pengujian memakai konteks terpisah dari data pengguna.
 
-`tests/customize.cjs` menguji mode Kustomisasi Kantor: furnitur terdaftar (6 jenis + meja biliar + papan tugas), pilih lewat klik pointer, sembunyikan putaran untuk benda simetris, pindah + putar 90° + input angka + batal, tolak tumpukan, ganti nama slot + tersimpan setelah reload, kembali ke Default, dan panel 375px. `tests/inventory.cjs` menguji stok global, tambah/kurangi stok, preview lalu Apply/Cancel, kursi ekstra yang dapat dipakai, papan tugas yang dapat digeser, persistensi item tambahan, dan pengembalian dengan konfirmasi. Jalankan dengan server lokal dan `PLAYWRIGHT_MODULE` yang sama. Tes browser menerima `OFFICE_URL` untuk port selain 4173.
+`tests/customize.cjs` menguji mode Kustomisasi Kantor: furnitur terdaftar (6 jenis + meja biliar + papan tugas), pilih lewat klik pointer, sembunyikan putaran untuk benda simetris, pindah + putar 90° + input angka + batal, tolak tumpukan, ganti nama slot + tersimpan setelah reload, kembali ke Default, dan panel 375px. `tests/inventory.cjs` menguji stok global, tambah/kurangi stok, preview lalu Apply/Cancel, kursi ekstra yang dapat dipakai, papan tugas yang dapat digeser, persistensi item tambahan, dan pengembalian dengan konfirmasi. `tests/autonomous-floors.cjs` menguji pemilihan routine otomatis lintas lantai. Jalankan dengan server lokal dan `PLAYWRIGHT_MODULE` yang sama. Tes browser menerima `OFFICE_URL` untuk port selain 4173.
 
 ## Member and division instructions
 
@@ -121,6 +169,15 @@ Heads, torsos, limbs, hair and shoes now use rounded block geometry shared betwe
 
 **View whole building** now uses a closer camera, navy panels, warm floor lights and a muted dusk sky. Individual floors keep the warm daylight interior. Navigation thumbnails are captured from the actual 3D floors at startup. Counts show team members currently on each floor, excluding people on the stairs and barber visitors; they are not online-presence indicators. Mobile navigation uses compact floor labels and counts instead of thumbnails. No analytics or account controls are implied.
 
+Tes organisasi:
+- `tests/org-model.cjs`: logika murni (pindah anggota, siklus, lead, layout bagan, rencana tempat duduk).
+- `tests/org-fields.cjs`: `areaName`/`color`, penolakan anggota sibuk, dan endpoint `POST /api/tasks/reassign`.
+- `tests/org-chart.cjs`: bagan, drag, panel, kolaborasi, konflik versi, dan sheet mobile.
+- `tests/org-wizard.cjs`: wizard pertama kali, susun ulang, dan dialog reset dengan arsip.
+- `tests/org-autolayout.cjs`: lantai kerja otomatis, rooftop tetap di atas, tanda area, dan furnitur yang tertimpa meja.
+
+Tes 3D lama memakai `OFFICE_URL` untuk mengganti port 4173, misalnya `OFFICE_URL=http://127.0.0.1:8080 node tests/office.cjs`.
+
 `tests/building-view.cjs` checks thumbnail loading, counts, clicking a floor through the facade, theme switching and 375/768/1440px layouts.
 
 ## Pembaruan review dan keandalan tugas
@@ -130,3 +187,31 @@ Hasil manual dan komentar revisi disimpan sementara di sessionStorage tab browse
 Worker memakai identitas eksekusi: hasil atau error terlambat tidak mengubah tugas yang sudah dialihkan. API memvalidasi penanggung jawab dan batas satu tugas aktif per orang. Jalankan ulang server setelah memperbarui kode backend.
 
 `tests/server.cjs` memeriksa siklus draf, revisi, persetujuan, dan pemulihan tulisan setelah polling/reload dengan dry-run. `tests/worker-reliability.cjs` memakai provider lokal tiruan untuk memeriksa error terlambat setelah pengalihan tugas. Pengujian ini tidak memanggil AI berbayar.
+
+## Komunikasi, aplikasi, dan bukti pengujian
+
+- **Komunikasi** memiliki satu thread per tugas, filter unread/keputusan, gelembung owner/agen/sistem, serta kartu keputusan. Membaca pesan tidak menyelesaikan keputusan. Jawaban dikirim melalui **Kirim & lanjutkan**; Ctrl+Enter juga tersedia. Draf jawaban disimpan per thread di tab ini.
+- Toast persisten menyebut agen dan tugas yang menunggu jawaban. Klik membuka keputusan yang tepat. Izin notifikasi browser hanya diminta setelah klik owner; penolakan tidak mematikan notifikasi dalam aplikasi.
+- Pilih **Otomatis** agar lead merencanakan dan mendelegasikan lewat jalur organisasi yang sah. **Langsung** mempertahankan pekerjaan manual/agen individual. Graf hanya menggambar event yang benar-benar terjadi, bukan seluruh jalur organisasi yang mungkin.
+- Console memuat event bertimestamp dan run id. Jeda membekukan tampilan, bukan penerimaan event; ekspor mengunduh log teks yang disanitasi. Ini bukan chain-of-thought model.
+- Tugas **Aplikasi** menghasilkan revisi sumber immutable. Owner memeriksa sumber dan perintah, lalu menyetujui pengujian untuk hash revisi tersebut. Perubahan sumber/perintah memerlukan persetujuan baru. Tidak ada pemasangan dependensi otomatis.
+- **Windows lokal bukan sandbox**: kode memakai akses akun Windows; akses jaringan mengikuti OS. Kotak pengakuan risiko wajib dicentang. Proses menggunakan argv tanpa shell, env minimum, folder job khusus, timeout dan penghentian process tree.
+- **Docker** memakai image lokal `KANTOR_RUNNER_IMAGE` (default `node:22-alpine`), digest dicatat dalam approval. Server tidak menarik image atau menyalakan daemon. Container non-root, root/source read-only, tanpa privileged/socket, CPU/memori/PID dibatasi, jaringan mati secara default. Docker tidak tersedia tidak pernah beralih diam-diam ke Windows.
+- Tes benar-benar dijalankan. Review memerlukan exit code sukses, kasus TAP non-skipped yang sesuai kriteria, hash revisi yang sama, dan smoke HTTP. Kegagalan dapat memicu maksimal dua revisi perbaikan, masing-masing menunggu persetujuan baru. Restart menandai pekerjaan aplikasi aktif **interrupted**, tidak menjalankannya ulang otomatis.
+- Preview static web berada di port loopback terpisah dan iframe `sandbox="allow-scripts"`, tanpa same-origin. Sumber diunduh per file sebagai attachment; ZIP belum tersedia.
+- **Batas saat ini:** bundle mendukung static JavaScript web dan deklarasi Node web, tetapi smoke/preview Node service belum tersedia sehingga tidak dapat melewati gate Review. Pemeriksaan kriteria TAP bukan pembuktian aplikasi bebas bug; periksa sumber, hasil dan keterbatasan. Runner Docker me-mount sumber read-only, sehingga build yang menulis ke sumber perlu diarahkan ke `/tmp/out`.
+- Reset menolak tugas/job aktif dan membuat arsip task lama plus arsip workspace (pesan, keputusan, event dan referensi evidence). `GET /api/workspace/export` membutuhkan unlock owner dan tidak menyertakan approval/request cache atau credential Settings.
+
+## Pengujian
+
+```sh
+npm test                 # seluruh file secara berurutan, log per file di .superpowers/suite-logs
+npm run test:unit
+npm run test:ui
+npm run test:docker       # fake CLI; live test menulis SKIP kecuali opt-in berikut
+RUN_DOCKER_TESTS=1 npm run test:docker
+```
+
+Pada PowerShell gunakan `$env:RUN_DOCKER_TESTS='1'; npm run test:docker`. Suite memakai DATA_DIR temporer dan provider mock lokal, tidak memakai task live atau menghabiskan token provider. Batas waktu setiap file browser 600 detik; exit code gagal tidak disembunyikan. Tes Windows lokal dilewati di host selain Windows.
+
+File browser memakai `tests/browser.cjs`, yang menyalakan Chromium dengan ANGLE diarahkan ke GPU asli (`--use-angle=d3d11` di Windows, `metal` di macOS, `gl` di Linux). Tanpa itu `chrome-headless-shell` tidak punya GPU dan WebGL jatuh ke rasterizer perangkat lunak SwiftShader: seluruh core CPU terpakai, tiap browser memakan ~450 MB, dan adegan kantor hanya berjalan beberapa frame per detik. Kalau tidak ada GPU yang bisa dipakai, Chrome otomatis kembali ke SwiftShader, jadi flag ini tidak pernah menggagalkan tes.

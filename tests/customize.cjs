@@ -1,14 +1,15 @@
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-
+const { launch } = require('./browser.cjs');
+// Fresh data dirs have no owner PIN; keep the first-run organization wizard out of the way.
+const skipWizard=async page=>{await page.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1')}catch{}});return page;};
 const URL = process.env.OFFICE_URL || 'http://127.0.0.1:4173';
 const shot = name => path.join(os.tmpdir(), name);
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const browser = await launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } }).then(skipWizard);
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(URL);
@@ -39,13 +40,13 @@ const shot = name => path.join(os.tmpdir(), name);
   assert.equal(await page.locator('#customPanel').isVisible(), true);
   assert.equal(await page.locator('#bCustom').getAttribute('aria-pressed'), 'true');
   assert.equal(await page.evaluate(() => officeScene.snapshot().routine), false, 'routine pauses in edit mode');
-  assert.match(await page.locator('#cSelected').innerText(), /No selection|Selected/);
+  assert.match(await page.locator('#cSelected').innerText(), /Belum ada pilihan|Terpilih/);
   console.log('PASS: Mode Edit opens, routine pauses');
 
   // Pick a floor-3 item whose projection avoids the right-side panel.
   const target = await page.evaluate(() => {
     const c = officeScene.customize;
-    const ids = c.list().filter(i => i.floor === 3).map(i => i.id);
+    const ids = c.list().filter(i => i.floor === 3 && !i.generated && i.rotatable && !i.symmetric).map(i => i.id);
     for (const id of ids) {
       const p = c.screen(id);
       if (p && p.x > 60 && p.x < 1000 && p.y > 120 && p.y < 820) return { id, ...p };
@@ -59,7 +60,7 @@ const shot = name => path.join(os.tmpdir(), name);
   assert.equal(await page.evaluate(() => officeScene.customize.selected()), target.id);
   const draft = await page.evaluate(() => officeScene.customize.draft());
   assert.ok(draft && Number.isFinite(draft.x), 'draft created on select');
-  assert.match(await page.locator('#cSelected').innerText(), /Selected/);
+  assert.match(await page.locator('#cSelected').innerText(), /Terpilih/);
   console.log(`PASS: click selects ${target.id}`);
 
   // Symmetric kinds hide the rotation knob.

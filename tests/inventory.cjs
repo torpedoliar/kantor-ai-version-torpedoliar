@@ -1,9 +1,10 @@
 const assert = require('node:assert/strict');
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
-
+const { launch } = require('./browser.cjs');
+// Fresh data dirs have no owner PIN; keep the first-run organization wizard out of the way.
+const skipWizard=async page=>{await page.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1')}catch{}});return page;};
 (async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  const browser = await launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } }).then(skipWizard);
   await page.addInitScript(() => localStorage.clear());
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));

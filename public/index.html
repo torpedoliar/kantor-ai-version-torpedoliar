@@ -1,91 +1,139 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Kantor Kita · Four Floors</title>
+  <title>Kantor Kita · Empat Lantai</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;700&display=swap">
   <link rel="stylesheet" href="office.css">
   <link rel="stylesheet" href="tasks.css">
+  <link rel="stylesheet" href="task-workspace.css">
+  <link rel="stylesheet" href="messenger.css">
 </head>
 <body class="ui">
-  <canvas id="c" aria-label="Interactive model of a four-floor office"></canvas>
+  <canvas id="c" tabindex="0" aria-label="Model interaktif kantor empat lantai"></canvas>
   <div id="labels"></div>
-  <header id="header">
-    <div id="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><circle cx="8" cy="8" r="3.2"/><circle cx="16.5" cy="8.5" r="2.7"/><path d="M2 19c0-3.6 2.7-6 6-6s6 2.4 6 6v1H2z"/><path d="M15 20v-1c0-2-.6-3.7-1.7-5 .9-.6 2-1 3.2-1 3 0 5.5 2.2 5.5 5.5V20z"/></svg></span><div class="brand-name"><strong>Kantor Kita</strong><span class="brand-meta">13 people · 4 floors</span></div><span class="brand-tagline">A virtual office<br>for real teamwork</span></div>
-    <div class="header-card">
-      <div class="team-picker"><label for="teamSelect">Team member</label><select id="teamSelect"><option value="">Pick initials</option></select></div>
-      <div id="teamFaces" aria-label="Team members"></div>
-      <button id="bLog" class="btn" aria-controls="log" aria-expanded="true">Log</button>
-      <button id="bTasks" class="btn primary">Tasks <span id="taskCount">0</span></button>
-      <button id="bCustom" class="btn" aria-pressed="false">Customize office</button>
-    </div>
-  </header>
-  <nav id="floors" aria-label="Choose a floor">
-    <p class="nav-title">Building section</p>
-    <div class="section-stack">
-      <button data-floor="4"><span class="floor-number">FL.04</span><span>Rooftop<small>Fresh air & breaks</small></span></button>
-      <button data-floor="3" aria-pressed="true"><span class="floor-number">FL.03</span><span>Workspace<small>The whole team</small></span></button>
-      <button data-floor="2"><span class="floor-number">FL.02</span><span>Kitchen & dining<small>Shared tables</small></span></button>
-      <button data-floor="1"><span class="floor-number">FL.01</span><span>Barber & parking<small>Entrance</small></span></button>
-    </div>
-    <button data-floor="0" class="building-button">View whole building</button>
+  <nav id="rail" aria-label="Navigasi utama">
+    <div id="railBrand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><circle cx="8" cy="8" r="3.2"/><circle cx="16.5" cy="8.5" r="2.7"/><path d="M2 19c0-3.6 2.7-6 6-6s6 2.4 6 6v1H2z"/><path d="M15 20v-1c0-2-.6-3.7-1.7-5 0.9-.6 2-1 3.2-1 3 0 5.5 2.2 5.5 5.5V20z"/></svg></span><span class="brand-name"><strong>Kantor Kita</strong><span class="brand-meta">13 orang · 4 lantai</span></span></div>
+    <button id="navOffice" class="btn" type="button">Kantor</button>
+    <button id="bTasks" class="btn primary" type="button" data-drawer="taskDialog">Tugas <span id="taskCount">0</span></button>
+    <button id="bCommunications" class="btn" type="button" data-drawer="communicationDialog">Komunikasi <span class="badge"></span><span class="decision-dot" hidden title="Keputusan menunggu"></span></button>
+    <button id="bOrg" class="btn" type="button" data-drawer="orgDialog">Organisasi</button>
+    <button id="bTeam" class="btn" type="button">Tim</button>
+    <button id="bCustom" class="btn" type="button" aria-pressed="false">Tata ruang</button>
+    <details id="railMore"><summary class="btn">Lainnya</summary><div><button id="bSettings" class="btn" type="button" data-drawer="settingsDialog">Pengaturan</button><button id="bLock" class="btn" type="button">Kunci</button></div></details>
+    <button id="decisions" class="btn" type="button" data-drawer="taskDialog" hidden>Keputusan <span class="badge"></span></button>
+    <div id="teamPopover" hidden><input id="teamSearch" type="search" placeholder="Cari nama atau peran"><ul id="teamList"></ul></div>
   </nav>
-  <section id="floorCaption" aria-live="polite">
-    <div class="tb-head"><span>Kantor Kita</span><span id="floorKicker">Sheet 03 / 04</span></div>
-    <h1 id="floorTitle">Room for everyone.</h1>
-    <p id="floorDescription">An open floor with four desk groups, a glass meeting room, phone booths, a pantry, a lounge and a prayer room.</p>
-    <p class="tb-foot">Interpreted floor plan · illustrative characters</p>
-  </section>
-  <section id="log" class="panel" aria-labelledby="logHeading">
-    <div class="log-head"><h2 id="logHeading">Office log</h2><span>Simulated activity</span></div>
-    <div id="logStats" class="log-stats" aria-label="Task summary"></div>
-    <button type="button" id="decisions" class="decisions" hidden></button>
-    <p id="logEmpty">No activity yet. The team starts moving on its own shortly.</p>
-    <ol id="logList"></ol>
-  </section>
-  <div id="followBar" class="panel" role="group" aria-label="Character camera" hidden><span id="followName"></span><button class="btn" id="fEyes" aria-pressed="false">Eyes</button><button class="btn" id="fChase" aria-pressed="false">Behind</button><button class="btn" id="fExit">Exit camera</button></div>
-  <section id="info" class="panel" aria-label="Team member details" hidden></section>
-  <section id="customPanel" class="panel" aria-label="Customize office" hidden>
-    <header class="custom-head"><h2>Customize office</h2><button type="button" id="cClose" class="btn" aria-label="Exit customize mode">×</button></header>
-    <label for="cSlot">Layout</label>
-    <select id="cSlot"></select>
-    <label for="cSlotName">Layout name</label>
-    <div class="custom-row"><input id="cSlotName" maxlength="40" placeholder="Slot name"><button type="button" id="cRename" class="btn">Rename</button></div>
-    <p id="cSelected" aria-live="polite">No selection. Click a table, chair, sofa, meeting table, plant, lamp, lantern or billiard table.</p>
-    <div class="custom-grid"><div><label for="cX">X</label><input id="cX" type="number" step="0.1"></div><div><label for="cZ">Z</label><input id="cZ" type="number" step="0.1"></div></div>
-    <div id="cRotWrap"><label for="cRot">Rotation (degrees)</label><div class="custom-row"><input id="cRot" type="range" min="0" max="359" step="1" value="0"><input id="cRotNum" type="number" min="0" max="359" step="1" value="0" aria-label="Rotation degrees"></div><button type="button" id="cRot90" class="btn">Rotate 90°</button></div>
-    <div class="custom-row"><button type="button" id="cApply" class="btn primary">Apply</button><button type="button" id="cCancel" class="btn">Cancel</button></div>
-    <button type="button" id="cReset" class="btn">Back to Default</button>
-    <section id="inventory" aria-label="Furniture inventory"><h3>Furniture inventory</h3><div id="inventoryList"></div></section>
-    <button type="button" id="cReturn" class="btn" disabled>Return selected to inventory</button>
-    <p id="cMsg" role="status" aria-live="polite"></p>
-  </section>
-  <div id="sceneStatus" role="status">Loading the office model…</div>
-  <footer id="controls" class="panel">
-    <div class="simulation-controls"><button class="btn" id="bPause" aria-pressed="false">Pause</button><button class="btn" id="bRoutine" aria-pressed="true">Routine: on</button><button class="btn" id="bLunch">Lunch</button><button class="btn" id="bRoof">To the rooftop</button><button class="btn" id="bPray">Prayer time</button><button class="btn" id="bWork">Back to work</button></div>
-    <div class="camera-controls"><button class="btn" id="bZoomIn" aria-label="Zoom in">+</button><button class="btn" id="bZoomOut" aria-label="Zoom out">−</button><button class="btn" id="bRotate" aria-label="Rotate camera">Rotate</button><button class="btn" id="bReset">Reset</button><button class="btn" id="bMusic" aria-pressed="false" aria-label="Play relaxing music">Music</button><label class="music-volume" for="musicVolume">Vol.<input type="range" id="musicVolume" min="0" max="100" value="25" aria-label="Music volume"></label></div>
-  </footer>
-  <p id="cameraHint">Drag to rotate · Shift + drag or right-click to pan · Scroll or pinch to zoom · Arrow keys to rotate</p>
-  <dialog id="taskDialog" aria-labelledby="taskHeading">
-    <header class="task-header"><div><h1 id="taskHeading">Office tasks</h1><p>Manage your team's work in the virtual office.</p></div><button type="button" id="closeTasks">Close</button></header>
-    <p class="task-note" id="taskNote">Status is changed by hand. Characters are a simulation and do not run AI yet.</p>
-    <p id="taskFeedback" role="status" aria-live="polite"></p>
-    <div class="task-layout">
-      <form id="taskForm"><h2>Create a task</h2><label for="taskTitle">Task</label><input id="taskTitle" required maxlength="160" placeholder="Example: Draft the content calendar">
-        <label for="taskAssignee">Assignee</label><select id="taskAssignee" required></select>
-        <label for="taskBrief">Instructions <span>(optional)</span></label><textarea id="taskBrief" rows="4" maxlength="5000" placeholder="Describe what is needed and the expected result"></textarea>
-        <button class="task-primary" type="submit">Add task</button><p class="task-note" id="saveNote">Saved in this browser. Export tasks to keep a copy.</p><button type="button" id="exportTasks">Export tasks</button>
-      </form>
-      <section aria-labelledby="taskListHeading"><h2 id="taskListHeading">Task list</h2>
-        <div class="task-filters"><div><label for="taskFilter">Status</label><select id="taskFilter"><option value="all">All statuses</option><option value="queued">Queued</option><option value="active">In progress</option><option value="blocked">Needs decision</option><option value="review">Needs review</option><option value="done">Done</option></select></div><div><label for="agentFilter">Assignee</label><select id="agentFilter"><option value="all">All characters</option></select></div></div>
-        <p id="taskSummary"></p><div id="taskList"></div>
-      </section>
+  <dialog id="communicationDialog" class="drawer drawer-wide" aria-labelledby="communicationHeading">
+    <header class="drawer-header"><h1 id="communicationHeading">Komunikasi</h1><div class="task-header-actions"><button type="button" id="notifyOptIn" hidden>Aktifkan notifikasi browser</button><button type="button" id="closeCommunications">Tutup</button></div></header>
+    <p id="messengerStatus" role="status" aria-live="polite"></p>
+    <div class="messenger">
+      <section class="messenger-inbox" aria-label="Daftar percakapan"><div id="threadFilters" class="thread-filters"><button type="button" data-filter="all" aria-pressed="true">Semua</button><button type="button" data-filter="decision" aria-pressed="false">Butuh jawaban</button><button type="button" data-filter="unread" aria-pressed="false">Belum dibaca</button></div><div id="threadList"></div></section>
+      <section class="messenger-thread" aria-labelledby="threadTitle"><header class="thread-header"><button type="button" id="threadBack" aria-label="Kembali ke daftar">←</button><h2 id="threadTitle">Pilih percakapan</h2></header>
+        <div id="threadStatus" class="thread-status" role="status" aria-live="polite" hidden></div>
+        <div id="messageTimeline" role="log" aria-live="polite"></div>
+        <form id="messageComposer" hidden><label for="composerText">Pesan untuk tugas ini</label><textarea id="composerText" rows="2" maxlength="8000" placeholder="Tulis pesan… (Ctrl+Enter untuk kirim)"></textarea><button class="task-primary" type="submit">Kirim</button></form></section>
+      <aside id="threadContext" class="messenger-context" aria-label="Konteks tugas"></aside>
     </div>
   </dialog>
+  <div id="notificationCenter" aria-live="polite" aria-label="Notifikasi"></div>
+  <dialog id="orgDialog" class="drawer drawer-wide" aria-labelledby="orgHeading"><header class="drawer-header"><h1 id="orgHeading">Organisasi</h1><button type="button" id="closeOrg">Tutup</button></header><section id="orgPanel" class="org-panel" aria-label="Struktur organisasi"></section></dialog>
+  <dialog id="wizardDialog" class="wizard" aria-labelledby="wizardHeading"></dialog>
+  <dialog id="resetDialog" class="wizard reset-dialog" aria-labelledby="resetHeading"></dialog>
+  <dialog id="pinDialog" aria-labelledby="pinHeading"><h2 id="pinHeading">Buka kunci organisasi</h2><form id="pinForm"><label for="orgPin">PIN owner</label><input id="orgPin" type="password" inputmode="numeric" minlength="4" maxlength="6" required><p id="pinMessage" role="status"></p><button id="pinSubmit" type="submit">Buka kunci</button></form></dialog>
+  <nav id="floors" aria-label="Pilih lantai">
+    <p class="nav-title">Bagian gedung</p>
+    <div class="section-stack">
+      <button data-floor="4"><span class="floor-number">FL.04</span><span>Rooftop</span><span class="floor-count">0</span></button>
+      <button data-floor="3" aria-pressed="true"><span class="floor-number">FL.03</span><span>Workspace</span><span class="floor-count">0</span></button>
+      <button data-floor="2"><span class="floor-number">FL.02</span><span>Kitchen & dining</span><span class="floor-count">0</span></button>
+      <button data-floor="1"><span class="floor-number">FL.01</span><span>Barber & parking</span><span class="floor-count">0</span></button>
+    </div>
+    <button data-floor="0" class="building-button">Lihat seluruh gedung</button>
+  </nav>
+  <section id="log" class="panel" aria-labelledby="logHeading">
+    <div class="log-head"><h2 id="logHeading">Log kantor</h2><span>Aktivitas simulasi</span><button type="button" id="logToggle" class="btn" aria-controls="logList" aria-expanded="false">Tampilkan</button></div>
+    <div id="logStats" class="log-stats" aria-label="Ringkasan tugas"></div>
+    <p id="logEmpty">Belum ada aktivitas. Tim akan mulai bergerak sebentar lagi.</p>
+    <ol id="logList"></ol>
+  </section>
+  <div id="followBar" class="panel" role="group" aria-label="Kamera anggota" hidden><span id="followName"></span><button class="btn" id="fEyes" aria-pressed="false">Mata</button><button class="btn" id="fChase" aria-pressed="false">Belakang</button><button class="btn" id="fExit">Keluar kamera</button></div>
+  <section id="info" class="panel" aria-label="Detail anggota" hidden></section>
+  <section id="customPanel" class="panel" aria-label="Tata ruang" hidden>
+    <header class="custom-head"><h2>Tata ruang</h2><button type="button" id="cClose" class="btn" aria-label="Keluar mode tata ruang">×</button></header>
+    <label for="cSlot">Tata letak</label>
+    <select id="cSlot"></select>
+    <label for="cSlotName">Nama tata letak</label>
+    <div class="custom-row"><input id="cSlotName" maxlength="40" placeholder="Nama slot"><button type="button" id="cRename" class="btn">Ganti nama</button></div>
+    <p id="cSelected" aria-live="polite">Belum ada pilihan. Klik meja, kursi, sofa, meja rapat, tanaman, lampu, lentera, atau meja biliar.</p>
+    <div class="custom-grid"><div><label for="cX">X</label><input id="cX" type="number" step="0.1"></div><div><label for="cZ">Z</label><input id="cZ" type="number" step="0.1"></div></div>
+    <div id="cRotWrap"><label for="cRot">Rotasi (derajat)</label><div class="custom-row"><input id="cRot" type="range" min="0" max="359" step="1" value="0"><input id="cRotNum" type="number" min="0" max="359" step="1" value="0" aria-label="Derajat rotasi"></div><button type="button" id="cRot90" class="btn">Putar 90°</button></div>
+    <div class="custom-row"><button type="button" id="cApply" class="btn primary">Terapkan</button><button type="button" id="cCancel" class="btn">Batal</button></div>
+    <button type="button" id="cReset" class="btn">Kembali ke bawaan</button>
+    <section id="inventory" aria-label="Inventaris furnitur"><h3>Inventaris furnitur</h3><div id="inventoryList"></div></section>
+    <button type="button" id="cReturn" class="btn" disabled>Kembalikan ke inventaris</button>
+    <p id="cMsg" role="status" aria-live="polite"></p>
+  </section>
+  <div id="sceneStatus" role="status">Memuat model kantor…</div>
+  <footer id="controls" class="panel">
+    <div class="simulation-controls"><button class="btn" id="bPause" aria-pressed="false">Jeda</button><button class="btn" id="bRoutine" aria-pressed="true">Rutinitas: aktif</button><details id="moments"><summary class="btn">Momen</summary><div class="moment-menu"><button class="btn" id="bLunch">Makan siang</button><button class="btn" id="bRoof">Ke rooftop</button><button class="btn" id="bPray">Waktu salat</button><button class="btn" id="bWork">Kembali kerja</button></div></details><button class="btn" id="bMusic" aria-pressed="false" aria-label="Putar musik santai">Musik</button><label class="music-volume" for="musicVolume">Vol.<input type="range" id="musicVolume" min="0" max="100" value="25" aria-label="Volume musik"></label></div>
+  </footer>
+  <div id="cameraControls" title="Seret untuk memutar · Shift + seret untuk menggeser · Gulir atau cubit untuk memperbesar"><button class="btn" id="bZoomIn" aria-label="Perbesar">+</button><button class="btn" id="bZoomOut" aria-label="Perkecil">−</button><button class="btn" id="bRotate" aria-label="Putar kamera">Putar</button><button class="btn" id="bReset" aria-label="Atur ulang kamera">Atur ulang</button></div>
+  <dialog id="settingsDialog" class="drawer" aria-labelledby="settingsHeading">
+    <header class="settings-header"><div><h1 id="settingsHeading">Pengaturan</h1><p>Atur provider lokal, model, dan preferensi kantor.</p></div><button type="button" id="settingsClose">Tutup</button></header>
+    <p id="settingsMessage" role="status" aria-live="polite"></p>
+    <p id="settingsVersion" class="settings-meta"></p>
+    <section class="settings-section" aria-labelledby="providerSettingsHeading"><h2 id="providerSettingsHeading">Provider dan kredensial</h2><p class="settings-note">Kredensial provider tersimpan di server lokal dan tidak dikirim kembali ke browser.</p><form id="providerForm" class="settings-form"><label for="providerName">Nama provider</label><input id="providerName" maxlength="80" placeholder="Anthropic Cloud"><label for="providerProtocol">Protokol</label><select id="providerProtocol"><option value="anthropic">Anthropic-compatible</option><option value="openai">OpenAI-compatible</option></select><label for="providerBaseUrl">URL dasar</label><input id="providerBaseUrl" maxlength="2048" type="url" placeholder="https://api.anthropic.com"><label for="providerCredential">API key <span>(tidak disimpan di browser)</span></label><input id="providerCredential" maxlength="512" type="password" autocomplete="new-password"><div class="settings-actions"><button type="submit" class="primary">Simpan provider</button><button type="button" id="providerCancel">Kosongkan formulir</button></div></form><div id="settingsProviders"><p>Memuat pengaturan provider…</p></div></section>
+    <section class="settings-section" aria-labelledby="routingSettingsHeading"><h2 id="routingSettingsHeading">Model dan routing</h2><p class="settings-note">Pilih model dari provider yang sudah diambil. Model per orang diatur di tab AI pada Organisasi atau di wizard.</p><div id="settingsRouting"><p>Pilih provider dan model aktif di server lokal.</p></div></section>
+    <section class="settings-section" aria-labelledby="generalSettingsHeading"><h2 id="generalSettingsHeading">Pengaturan umum</h2><label><input type="checkbox" id="settingsRoutine"> Mulai rutinitas otomatis</label><label><input type="checkbox" id="settingsLog"> Buka log saat mulai</label><button type="button" id="settingsGeneralSave" class="btn primary">Simpan preferensi browser</button></section>
+    <section class="settings-section" aria-labelledby="transferSettingsHeading"><h2 id="transferSettingsHeading">Impor, ekspor, dan reset</h2><p class="settings-note">Ekspor tidak pernah menyertakan API key, kredensial, tugas, atau draf.</p><button type="button" class="btn" id="settingsExport">Ekspor pengaturan aman</button><button type="button" class="btn" id="settingsReset">Reset provider dan routing</button></section>
+  </dialog>
+  <dialog id="taskDialog" class="drawer drawer-wide" aria-labelledby="taskHeading">
+    <header class="task-header"><div><h1 id="taskHeading">Tugas kantor</h1><p class="task-note" id="taskNote">Status diubah manual. Karakter adalah simulasi.</p></div>
+      <div class="task-header-actions"><button type="button" id="taskCreate" class="task-primary" aria-expanded="false" aria-controls="taskCreateForm">+ Tugas</button><button type="button" id="closeTasks">Tutup</button></div></header>
+    <p id="taskFeedback" role="status" aria-live="polite"></p>
+    <form id="taskCreateForm" hidden><h2>Tugas baru</h2>
+      <div class="task-create-grid">
+        <div><label for="taskTitle">Tugas</label><input id="taskTitle" required maxlength="160" placeholder="Contoh: Buat kalender konten">
+          <label for="taskAssignee">Penanggung jawab</label><select id="taskAssignee" required></select>
+          <label for="taskBrief">Instruksi <span>(opsional)</span></label><textarea id="taskBrief" rows="4" maxlength="5000" placeholder="Jelaskan kebutuhan dan hasil yang diharapkan"></textarea></div>
+        <div><fieldset class="task-choice"><legend>Hasil</legend><label><input type="radio" name="taskOutput" value="document" checked> Dokumen</label><label><input type="radio" name="taskOutput" value="application"> Aplikasi</label></fieldset>
+          <fieldset class="task-choice"><legend>Cara kerja</legend><label><input type="radio" name="taskMode" value="automatic" checked> Otomatis: lead membagi ke tim lalu mereview</label><label><input type="radio" name="taskMode" value="direct"> Langsung dikerjakan sendiri</label></fieldset>
+          <label for="taskAcceptance">Kriteria diterima <span>(satu per baris, opsional)</span></label><textarea id="taskAcceptance" rows="3" maxlength="5000" placeholder="Contoh: Tombol hitung memberi hasil benar"></textarea>
+          <div id="taskEnvironmentField" hidden><label for="taskEnvironment">Tempat aplikasi diuji</label><select id="taskEnvironment"><option value="docker">Docker (disarankan, terisolasi)</option><option value="windows">Windows lokal (bukan sandbox, butuh persetujuanmu)</option></select></div></div>
+      </div>
+      <div class="task-actions"><button class="task-primary" type="submit">Tambah tugas</button><button type="button" id="taskCreateCancel">Batal</button></div>
+    </form>
+    <div class="task-toolbar">
+      <div><label for="taskFilter">Status</label><select id="taskFilter"><option value="all">Semua status</option><option value="queued">Antre</option><option value="active">Sedang berjalan</option><option value="blocked">Butuh keputusan</option><option value="review">Butuh review</option><option value="done">Selesai</option></select></div>
+      <div><label for="divisionFilter">Divisi</label><select id="divisionFilter"><option value="all">Semua divisi</option></select></div>
+      <div><label for="agentFilter">Orang</label><select id="agentFilter"><option value="all">Semua orang</option></select></div>
+      <p id="taskSummary"></p><button type="button" id="exportTasks">Ekspor</button>
+    </div>
+    <details class="owner-summary-wrap"><summary>Ringkasan owner</summary><div class="owner-summary" aria-label="Ringkasan owner"></div></details>
+    <nav class="task-views" aria-label="Tampilan tugas"><button type="button" data-view="board" aria-pressed="true">Papan</button><button type="button" data-view="flow" aria-pressed="false">Alur kerja</button><button type="button" data-view="console" aria-pressed="false">Console</button></nav>
+    <div class="task-workspace"><div class="task-main">
+      <div id="taskBoard" class="task-board" aria-label="Papan tugas"></div>
+      <section id="taskFlowView" hidden aria-label="Alur kerja"><div class="flow-toolbar"><label for="flowRoot">Tugas utama</label><select id="flowRoot"></select><button type="button" id="flowZoomOut" aria-label="Perkecil">−</button><button type="button" id="flowZoomIn" aria-label="Perbesar">+</button><button type="button" id="flowReset">Pusatkan</button></div>
+        <p class="task-note">Garis hanya muncul untuk delegasi, pertanyaan, jawaban dan hasil yang benar-benar terjadi. Seret untuk menggeser.</p>
+        <div id="taskFlow" class="task-flow"><div class="flow-canvas"></div><div class="flow-rejected"></div></div><div id="flowInspector" class="flow-inspector" hidden></div></section>
+      <section id="taskConsoleView" hidden aria-label="Console"><div class="console-toolbar"><div><label for="consoleAgent">Agen</label><select id="consoleAgent" data-all="Semua agen"><option value="all">Semua agen</option></select></div><div><label for="consoleTask">Tugas</label><select id="consoleTask" data-all="Semua tugas"><option value="all">Semua tugas</option></select></div><div><label for="consoleRun">Run</label><select id="consoleRun" data-all="Semua run"><option value="all">Semua run</option></select></div><button type="button" id="consolePause" aria-pressed="false">Jeda</button><span id="consoleNew" role="status"></span><button type="button" id="consoleExport">Unduh log</button></div>
+        <div id="taskConsole" class="task-console" role="log" aria-live="off"></div></section>
+    </div><aside id="taskDetail" aria-label="Detail tugas"><div id="taskList"></div></aside></div>
+  </dialog>
+  <script src="nav.js"></script>
+  <script src="settings.js"></script>
+  <script src="org-model.js"></script>
+  <script src="org-chart.js"></script>
+  <script src="org-wizard.js"></script>
+  <script src="task-workspace.js"></script>
+  <script src="task-flow.js"></script>
+  <script src="application-panel.js"></script>
+  <script src="messenger.js"></script>
   <script src="tasks.js"></script>
   <script src="music.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>

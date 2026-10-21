@@ -1,0 +1,38 @@
+// Division areaName/color, the busy-member guard and bulk task reassignment.
+const assert=require('node:assert/strict');
+const {spawn}=require('node:child_process');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const PORT=43301,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-org-fields-')),origin=`http://127.0.0.1:${PORT}`;
+const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',DRY_RUN_DELAY_MS:'60000'},stdio:['ignore','pipe','inherit']});
+const start=new Promise((resolve,reject)=>{let ready=false;child.stdout.on('data',d=>{if(String(d).includes('Kantor Kita:')){ready=true;resolve();}});child.on('exit',code=>{if(!ready)reject(new Error(`server exited ${code}`));});});
+(async()=>{await start;try{
+  const csrf=(await (await fetch(origin+'/api/session')).json()).csrf;
+  const call=async(method,pathname,body,extra={})=>{const response=await fetch(origin+pathname,{method,headers:{'content-type':'application/json',origin,'x-kantor-csrf':csrf,...extra},body:body===undefined?undefined:JSON.stringify(body)});return {status:response.status,body:await response.json().catch(()=>null)};};
+  const token=(await call('POST','/api/org/unlock',{pin:'2468'})).body.token,owner={'x-kantor-org':token};
+  const org=(await call('GET','/api/org')).body;
+  assert.equal(org.divisions[0].areaName,'');assert.match(org.divisions[0].color,/^#[0-9a-f]{6}$/);
+  assert.notEqual(org.divisions[0].color,org.divisions[1].color,'palette colors differ per division');
+  const put1=await call('PUT','/api/org',{...org,divisions:org.divisions.map((d,i)=>i===1?{...d,areaName:'Pojok Marketing',color:'#123456'}:d)},owner);
+  assert.equal(put1.status,200);assert.equal(put1.body.divisions[1].areaName,'Pojok Marketing');assert.equal(put1.body.divisions[1].color,'#123456');
+  const bad=await call('PUT','/api/org',{...put1.body,divisions:put1.body.divisions.map((d,i)=>i===1?{...d,color:'red;}'}:d)},owner);
+  assert.equal(bad.status,200);assert.match(bad.body.divisions[1].color,/^#[0-9a-f]{6}$/,'invalid color replaced by palette');
+  const root=await call('POST','/api/tasks',{title:'Launch',assignee:'Kak Rani',division:'marketing',asLead:true,executionMode:'manual',brief:'b'});assert.equal(root.status,201);
+  const t=await call('POST','/api/tasks',{title:'Copy',assignee:'Kak Dewi',division:'marketing',parentId:root.body.id,brief:'b'},owner);assert.equal(t.status,201);
+  const current=(await call('GET','/api/org')).body,deactivate=s=>({...s,members:s.members.map(m=>m.name==='Kak Dewi'?{...m,active:false}:m)});
+  const busy=await call('PUT','/api/org',deactivate(current),owner);
+  assert.equal(busy.status,409);assert.equal(busy.body.code,'ORG_MEMBER_BUSY');assert.deepEqual(busy.body.tasks.map(x=>x.id),[t.body.id]);
+  const removed=await call('POST','/api/org/wizard',{draft:{...current,members:current.members.filter(m=>m.name!=='Kak Dewi')},version:current.version},owner);
+  assert.equal(removed.status,409);assert.equal(removed.body.code,'ORG_MEMBER_BUSY','wizard save is guarded too');
+  assert.equal((await call('POST','/api/tasks/reassign',{from:'Kak Dewi',to:'Mira'})).status,403);
+  assert.equal((await call('POST','/api/tasks/reassign',{from:'Kak Dewi',to:'Nobody'},owner)).status,400);
+  const moved=await call('POST','/api/tasks/reassign',{from:'Kak Dewi',to:'Mira'},owner);assert.equal(moved.status,200);assert.equal(moved.body.moved,1);
+  const task=(await call('GET','/api/tasks')).body.find(x=>x.id===t.body.id);assert.equal(task.assignee,'Mira');assert.equal(task.division,'marketing');assert.equal(task.status,'queued');
+  assert.equal((await call('PUT','/api/org',deactivate(current),owner)).status,200);
+  const latest=(await call('GET','/api/org')).body;
+  const removedDivision={...latest,divisions:latest.divisions.filter(d=>d.id!=='marketing'),members:latest.members.map(m=>m.division==='marketing'?{...m,division:'service',manager:'Gilang'}:m)};
+  const divisionBusy=await call('PUT','/api/org',removedDivision,owner);assert.equal(divisionBusy.status,409,'division with open tasks cannot disappear');assert.equal(divisionBusy.body.code,'ORG_DIVISION_BUSY');
+  const replacement={company:latest.company,divisions:[{id:'new-team',name:'New team',lead:'New Lead',collaboratesWith:[]}],members:[{name:'New Lead',role:'Lead',division:'new-team',manager:null,active:true}]};
+  const replace=await call('POST','/api/org/wizard',{draft:replacement,version:latest.version,reassignments:{'Kak Rani':'New Lead',Mira:'New Lead'}},owner);assert.equal(replace.status,200,'wizard can reassign to a newly drafted member: '+JSON.stringify(replace.body));
+  assert.ok((await call('GET','/api/tasks')).body.filter(t=>t.status!=='done').every(t=>t.assignee==='New Lead'&&t.division==='new-team'));
+  console.log('PASS: division fields, busy guards, bulk and draft-target reassignment');
+}finally{child.kill();fs.rmSync(dir,{recursive:true,force:true});}})().catch(error=>{console.error(error);process.exitCode=1;});

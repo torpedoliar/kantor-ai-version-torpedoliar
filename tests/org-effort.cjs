@@ -1,0 +1,23 @@
+const assert=require('node:assert/strict');
+const http=require('node:http');
+const {spawn}=require('node:child_process');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const settingsKey=Buffer.alloc(32,11).toString('base64');
+const appPort=43200,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-effort-')),origin=`http://127.0.0.1:${appPort}`;
+const waitFor=async(check,ms=10000)=>{const end=Date.now()+ms;while(Date.now()<end){const value=await check();if(value)return value;await new Promise(resolve=>setTimeout(resolve,50));}throw new Error('timed out');};
+(async()=>{let mock,app;try{
+  let requestBody=null;
+  mock=http.createServer((req,res)=>{if(req.url==='/v1/chat/completions'){let raw='';req.on('data',chunk=>raw+=chunk);req.on('end',()=>{requestBody=JSON.parse(raw);res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message:{content:'Configured response'}}]}));});return;}res.writeHead(404);res.end();});
+  await new Promise(resolve=>mock.listen(0,'127.0.0.1',resolve));
+  app=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(appPort),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',KANTOR_SETTINGS_KEY:settingsKey,DRY_RUN_DELAY_MS:'10'},stdio:['ignore','pipe','inherit']});
+  await new Promise((resolve,reject)=>{app.stdout.on('data',data=>{if(String(data).includes('Kantor Kita:'))resolve();});app.on('exit',code=>reject(new Error(`server exited ${code}`)));});
+  const api=async(pathname,options={})=>{const response=await fetch(origin+pathname,options);return {status:response.status,body:await response.json().catch(()=>null)}};
+  const session=await api('/api/session');const headers={'content-type':'application/json','origin':origin,'x-kantor-csrf':session.body.csrf};
+  const settings=await api('/api/settings');const provider={id:'mock-openai',displayName:'Mock OpenAI',protocol:'openai',baseUrl:`http://127.0.0.1:${mock.address().port}`,enabled:true,models:[{id:'mock-model',source:'manual',status:'verified',enabled:true}],credential:'sentinel'};
+  const saved=await api('/api/settings',{method:'PUT',headers,body:JSON.stringify({version:settings.body.version,providers:[provider],defaultRoute:{providerId:provider.id,modelId:'mock-model'},fallbackRoute:null,overrides:{}})});assert.equal(saved.status,200);
+  const org=await api('/api/org',{headers});const unlocked=await api('/api/org/unlock',{method:'POST',headers,body:JSON.stringify({pin:'2468'})});const profile={...org.body,members:org.body.members.map(member=>member.name==='Kak Rani'?{...member,effort:'deep',workloadPct:55,instructions:'Use the approved brand voice.'}:member)};const updated=await api('/api/org',{method:'PUT',headers:{...headers,'x-kantor-org':unlocked.body.token},body:JSON.stringify({...profile,version:org.body.version})});assert.equal(updated.status,200);
+  const root=await api('/api/tasks',{method:'POST',headers,body:JSON.stringify({title:'Parent work',assignee:'Kak Rani',division:'marketing',asLead:true,brief:'Coordinate the campaign.'})});assert.equal(root.status,201);
+  const child=await api('/api/tasks',{method:'POST',headers:{...headers,'x-kantor-org':unlocked.body.token},body:JSON.stringify({title:'Child work',assignee:'Kak Rani',division:'marketing',parentId:root.body.id,asLead:false,brief:'Draft the campaign copy.'})});assert.equal(child.status,201);
+  await waitFor(()=>requestBody);const system=requestBody.messages.find(message=>message.role==='system')?.content||'';assert.match(system,/effort=deep/);assert.match(system,/workload capacity=55%/);assert.match(system,/Use the approved brand voice/);
+  console.log('PASS: per-person effort and instructions reach the configured agent prompt');
+}finally{if(app)app.kill();if(mock)await new Promise(resolve=>mock.close(resolve));fs.rmSync(dir,{recursive:true,force:true});}})().catch(error=>{console.error(error);process.exitCode=1;});

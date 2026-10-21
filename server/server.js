@@ -5,58 +5,134 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const {createSettings}=require('./settings');
+const {createOrg,normalize:normalizeOrg}=require('./org');
+const providers=require('./providers');
+const {parseDraft}=require('./org-draft');
+const {createTaskStore,addMessage,openDecision,threadSummaries,sanitizeText,acknowledge}=require('./task-store');
+const {createOrchestrator}=require('./task-orchestrator');
+const {createProjectWorkspace}=require('./project-workspace');
+const runner=require('./project-runner');
+const {createApplicationWorkflow}=require('./application-workflow');
+const {createPreviewService}=require('./project-preview');
+const {activityFor}=require('./task-activity');
 
 const ROOT = path.resolve(__dirname, '..');
 try { process.loadEnvFile(process.env.ENV_FILE || path.join(ROOT, '.env')); } catch { /* no .env file: dry run */ }
 
-const agents = require('./agents');
+const {buildAgent}=require('./agents');
+// Wizard templates: suggested divisions with placeholder leads the owner renames in the wizard.
+const templateOf=(type,label,divisions)=>({label,company:{name:'',type,description:''},
+  divisions:divisions.map(([id,name],i)=>({id,name,lead:i?`Kepala ${name}`:'Pemilik',collaboratesWith:[]})),
+  members:divisions.map(([id,name,role],i)=>({name:i?`Kepala ${name}`:'Pemilik',initials:i?name.slice(0,2).toUpperCase():'P',role,division:id,manager:i?'Pemilik':null,active:true}))});
+const ORG_TEMPLATES={
+  marketing:templateOf('Marketing office','Kantor marketing',[['leadership','Leadership','Direktur'],['marketing','Marketing','Marketing Lead'],['sales','Sales','Sales Lead']]),
+  'software-dev':templateOf('Software dev','Software house',[['leadership','Leadership','CEO'],['engineering','Engineering','Engineering Lead'],['product','Product & Design','Product Lead']]),
+  'creative-agency':templateOf('Agensi kreatif','Agensi kreatif',[['leadership','Leadership','Creative Director'],['creative','Creative','Art Lead'],['accounts','Client Service','Account Lead']]),
+  retail:templateOf('Toko & retail','Toko & retail',[['leadership','Leadership','Pemilik toko'],['store','Toko','Kepala Toko'],['warehouse','Gudang','Kepala Gudang']]),
+  example:{label:'Kantor Kita (contoh)',...(({company,divisions,members})=>({company,divisions,members}))(require('./org').seed())},
+  empty:{label:'Mulai kosong',company:{name:'',type:'Lainnya',description:''},divisions:[],members:[]}
+};
 const PUBLIC = path.join(ROOT, 'public');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
 const HOST = '127.0.0.1', PORT = Number(process.env.PORT) || 3000;
-const API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
-const API_URL = `${process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'}/v1/messages`;
-const DRY_RUN = !API_KEY || process.env.ANTHROPIC_DRY_RUN === '1';
 const STATES = new Set(['queued', 'active', 'blocked', 'review', 'done']);
-// Which model a member uses: their own, else the .env default.
+const PRIORITIES = new Set(['low','normal','high']);
+const KINDS = new Set(['work','roster-review']);
+const CSRF=crypto.randomBytes(32).toString('hex');
+const settings=createSettings({dataDir:DATA_DIR,env:process.env,agents:{'Kak Rani':{model:'claude-sonnet-5-5'},'Kak Sinta':{model:'claude-haiku-4-5-20251001'}}});
+const agentMembers=()=>Object.fromEntries(org.roster().filter(m=>m.isAgent).map(m=>[m.name,m]));
+const agentFor=name=>agentMembers()[name]||null;
+function archiveTasks(timestamp=Date.now()){const archiveDir=path.join(DATA_DIR,'archive');fs.mkdirSync(archiveDir,{recursive:true});const file=path.join(archiveDir,`tasks-${timestamp}.json`);fs.writeFileSync(file,JSON.stringify(tasks,null,2),{mode:0o600});return file;}
+const org=createOrg({dataDir:DATA_DIR});
 const modelOf = agent => agent.model || MODEL;
+const legacyDryRun=()=>!process.env.ANTHROPIC_API_KEY||process.env.ANTHROPIC_DRY_RUN==='1';
+const serverOrigin=()=>`http://${HOST}:${PORT}`;
+function guardRequest(req){
+  const origin=req.headers.origin;
+  if(origin&&origin!==serverOrigin()) { const error=new Error('Cross-origin requests are not allowed.');error.status=403;throw error; }
+  if(req.method==='GET'||req.method==='HEAD')return;
+  if(req.headers['content-type']?.split(';')[0].trim()!=='application/json'){const error=new Error('JSON requests are required.');error.status=415;throw error;}
+  if(origin!==serverOrigin()||req.headers['x-kantor-csrf']!==CSRF){const error=new Error('A valid local session is required.');error.status=403;throw error;}
+}
 
-// ---- storage: one JSON file, written atomically ----
-fs.mkdirSync(DATA_DIR, {recursive: true});
-let tasks = [];
-try { tasks = JSON.parse(fs.readFileSync(TASKS_FILE, 'utf8')); if (!Array.isArray(tasks)) throw new Error('not a list'); }
-catch (error) { if (error.code !== 'ENOENT') { console.error(`Cannot read ${TASKS_FILE}: ${error.message}. Fix or move the file, then restart.`); process.exit(1); } }
-let durable = JSON.stringify(tasks);
-function save() {
-  try {
-  const tmp = `${TASKS_FILE}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(tasks, null, 2));
-  fs.renameSync(tmp, TASKS_FILE);
-  durable=JSON.stringify(tasks);
-  } catch(error) { tasks=JSON.parse(durable); throw error; }
+// ---- durable workspace: migrate the legacy tasks file once, then commit tasks and events together ----
+const taskStore=createTaskStore({dataDir:DATA_DIR});
+const projects=createProjectWorkspace({dataDir:DATA_DIR});
+const previews=createPreviewService({projects});
+let tasks=taskStore.snapshot().tasks;
+function save(){
+  try{taskStore.saveTasks(tasks);}
+  catch(error){tasks=taskStore.snapshot().tasks;throw error;}
+}
+// Messenger and decision writes: one transaction over the durable state, then refresh the working task list.
+function commit(mutate,options){
+  save();const result=taskStore.transaction(taskStore.snapshot().version,mutate,options);
+  tasks=taskStore.snapshot().tasks;return result;
+}
+// Answering resolves the decision, records the owner's reply and requeues the task in one transaction.
+function answerDecision(id,answer,version,requestKey){
+  return commit((draft,emit)=>{
+    const d=draft.decisions.find(x=>x.id===id);if(!d)throw Object.assign(new Error('Keputusan tidak ditemukan.'),{status:404});
+    if(d.kind==='approval')throw Object.assign(new Error('Persetujuan eksekusi harus melalui panel sumber dan perintah.'),{status:409,code:'APPROVAL_REQUIRED'});
+    if(d.status!=='open'||version!==d.version)throw Object.assign(new Error('Pertanyaan ini sudah berubah. Muat ulang dan jawab yang terbaru.'),{status:409,code:'VERSION_CONFLICT'});
+    const t=draft.tasks.find(x=>x.id===d.taskId);
+    Object.assign(d,{status:'answered',answer,answeredAt:new Date().toISOString(),version:d.version+1});
+    addMessage(draft,emit,{task:t,sender:{type:'owner',name:'Owner'},kind:'text',text:answer,decisionId:d.id});
+    emit({type:'decision.answered',taskId:t.id,rootId:t.rootId||t.id,data:{decisionId:d.id}});
+    Object.assign(t,{status:'queued',blockedReason:null,brief:`${t.brief}\n\nQuestions from ${t.assignee}:\n${t.questions||''}\n\nAnswers:\n${answer}`.trim().slice(0,5000),questions:undefined,askedBy:undefined,error:undefined,runId:null,version:(t.version||0)+1,updatedAt:now()});
+    return {decision:d,task:t};
+  },{requestKey});
+}
+// Bounded conversation passed to the model: who said what, oldest first, never client-chosen authors.
+function conversationFor(taskId){
+  return taskStore.snapshot().messages.filter(m=>m.taskId===taskId).slice(-20).map(m=>`${m.sender.type==='owner'?'Owner':m.sender.name}: ${m.text}`).join('\n').slice(-6000);
 }
 const now = () => new Date().toISOString();
-const MEMBERS = new Set(['Koh Arman','Koh Wira','Kak Rani','Kak Dewi','Mira','Tari','Bagas Pratama Putra','Rizky Hakim','Yoga','Bang Eko','Gilang','Kak Sinta','Kak Laras']);
+// A save that removes or deactivates someone is refused while they still have open tasks.
+function busyMembers(next){
+  const divisions=new Set((next?.divisions||[]).map(d=>d.id));
+  const stranded=tasks.filter(task=>task.status!=='done'&&task.division&&!divisions.has(task.division));
+  if(stranded.length)return {error:'Pindahkan tugas divisi sebelum menghapus divisinya.',code:'ORG_DIVISION_BUSY',tasks:stranded.map(({id,title,assignee,status})=>({id,title,assignee,status}))};
+  const kept=new Set((Array.isArray(next?.members)?next.members:[]).filter(member=>member&&member.active!==false).map(member=>member.name));
+  const open=tasks.filter(task=>task.status!=='done'&&!kept.has(task.assignee)&&org.state.members.some(member=>member.name===task.assignee&&member.active));
+  return open.length?{error:'Pindahkan tugas yang masih terbuka sebelum menghapus atau menonaktifkan anggota.',code:'ORG_MEMBER_BUSY',tasks:open.map(({id,title,assignee,status})=>({id,title,assignee,status}))}:null;
+}
+const LEGACY_MEMBERS = new Set(['Koh Arman','Koh Wira','Kak Rani','Kak Dewi','Mira','Tari','Bagas Pratama Putra','Rizky Hakim','Yoga','Bang Eko','Gilang','Kak Sinta','Kak Laras']);
 const text = (value, max) => typeof value === 'string' ? value.trim().slice(0, max) : '';
+const memberOf = name => org.roster().find(member => member.name === name && member.active) || (LEGACY_MEMBERS.has(name) ? {name,division:null,divisions:[]} : null);
+const divisionOf = name => org.divisionOf(name);
+const divisionsOf = name => org.divisionsOf(name);
+const leadOf = division => org.state.divisions.find(item => item.id === division)?.lead || null;
+const isLeadFor = (name, division) => leadOf(division) === name;
+const taskDivision = task => task.division || divisionOf(task.assignee) || null;
+const normalizeTask = task => ({
+  ...task,
+  version: Number.isInteger(task.version) ? task.version : 0,
+  division: task.division || taskDivision(task),
+  parentId: typeof task.parentId === 'string' && task.parentId ? task.parentId : null,
+  asLead: task.asLead === true,
+  priority: PRIORITIES.has(task.priority) ? task.priority : 'normal',
+  progressPct: Number.isInteger(task.progressPct) ? Math.max(0,Math.min(100,task.progressPct)) : 0,
+  messages: Array.isArray(task.messages) ? task.messages.filter(message=>message&&typeof message.text==='string').map(message=>({by:text(message.by,120),text:text(message.text,2000),at:typeof message.at==='string'?message.at:now()})) : [],
+  kind: KINDS.has(task.kind) ? task.kind : 'work',
+  legacy: task.legacy===true,
+  createdBy: typeof task.createdBy==='string'&&task.createdBy?task.createdBy:'owner'
+});
+const normalizeStoredTasks = list => list.map(normalizeTask);
+tasks = normalizeStoredTasks(tasks);
 
 // ---- agent worker: one task at a time per connected member, oldest first ----
 const busy = new Set();
-async function askClaude(agent, task) {
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 120000);
-  try {
-    const response = await fetch(API_URL, {
-      method: 'POST', signal: controller.signal,
-      headers: {'content-type': 'application/json', 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01'},
-      body: JSON.stringify({model: modelOf(agent), max_tokens: 2000, system: agent.system,
-        messages: [{role: 'user', content: `Task: ${task.title}\n\nBrief:\n${task.brief || '(no brief given)'}${task.feedback ? `\n\nPrevious draft:\n${task.result}\n\nRevision requested:\n${task.feedback}` : ''}`}]})
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(body?.error?.message || `Claude API returned ${response.status}`);
-    const answer = (body.content || []).filter(part => part.type === 'text').map(part => part.text).join('\n').trim();
-    if (!answer) throw new Error('Claude returned an empty answer');
-    return answer;
-  } finally { clearTimeout(timer); }
+async function askConfigured(snapshot, agent, task) {
+  let primaryError;
+  try { return {answer:await providers.generate(snapshot.provider,snapshot.provider.credential,snapshot.modelId,agent,task),route:snapshot.route,fallback:false}; }
+  catch(error){ primaryError=error; }
+  if(snapshot.fallback&&['connection','timeout','unavailable'].includes(providers.classify(primaryError)))
+    return {answer:await providers.generate(snapshot.fallback.provider,snapshot.fallback.provider.credential,snapshot.fallback.modelId,agent,task),route:snapshot.fallback.route,fallback:true,primaryError};
+  throw primaryError;
 }
 async function dryRun(agent, task) {
   await new Promise(resolve => setTimeout(resolve, Number(process.env.DRY_RUN_DELAY_MS ?? 4000)));
@@ -66,30 +142,120 @@ async function dryRun(agent, task) {
 }
 async function work(name) {
   if (busy.has(name)) return;
-  const task = tasks.filter(t => t.assignee === name && t.status === 'queued' && !t.error).sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+  const state=taskStore.snapshot(),rank={high:0,normal:1,low:2};
+  const task = tasks.filter(t => t.assignee === name && t.status === 'queued' && !t.error && !(t.kind === 'work' && t.asLead && !t.parentId && (!t.executionMode||t.executionMode==='manual') && t.outputType!=='application') && orchestrator.eligible(state,t)).sort((a, b) => (rank[a.priority]??1)-(rank[b.priority]??1) || a.createdAt.localeCompare(b.createdAt))[0];
   if (!task || tasks.some(t => t.assignee === name && t.status === 'active')) return;
   busy.add(name);
   const runId=crypto.randomUUID();
+  const profile=org.roster().find(member=>member.name===name)||{};
+  const snapshot=settings.resolve(name,profile);
   try {
-    Object.assign(task, {status: 'active', runId, version:(task.version||0)+1, updatedAt: now()}); save();
-    const input=structuredClone(task);
-    const answer = DRY_RUN ? await dryRun(agents[name], input) : await askClaude(agents[name], input);
+    if(task.outputType==='application'){await applications.generate(task.id);return;}
+    commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);const retry=!!t.retryRequested;Object.assign(t,{status:'active',runId,retryRequested:undefined,version:(t.version||0)+1,updatedAt:now()});emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{from:'queued',to:'active',phase:'active'}});
+      if(retry||!draft.messages.some(m=>m.taskId===t.id&&m.kind==='ack'))acknowledge(draft,emit,t,{retry});});
+    const input={...structuredClone(task),conversation:conversationFor(task.id)};
+    const worker=buildAgent(profile,org.state,snapshot.route||{});
+    modelEvent('model.started',task,runId,{purpose:'work',providerId:snapshot.dryRun?null:snapshot.route?.providerId||null,modelId:snapshot.dryRun?'dry-run':snapshot.route?.modelId||null});
+    let result;
+    try{result = snapshot.dryRun ? {answer:await dryRun(worker, input),route:null,fallback:false} : await askConfigured(snapshot, worker, input);}
+    catch(error){modelEvent('model.failed',task,runId,{purpose:'work',error:sanitizeText(error.message).slice(0,500)});throw error;}
+    modelEvent('model.completed',task,runId,{purpose:'work',providerId:result.route?.providerId||null,modelId:snapshot.dryRun?'dry-run':result.route?.modelId||null,fallback:!!result.fallback});
+    const answer=result.answer;
     const current = tasks.find(t => t.id === task.id);
     // The task may have been moved back to the queue or reassigned while the agent worked.
     if (current && current.status === 'active' && current.assignee === name && current.runId === runId) {
-      const by=DRY_RUN?'dry-run':modelOf(agents[name]),asked=answer.match(/^QUESTIONS:\s*([\s\S]+)/);
+      const by=snapshot.dryRun?'dry-run':result.route?.modelId||worker.model,asked=answer.match(/^QUESTIONS:\s*([\s\S]+)/);
       // The agent asked instead of guessing: park the task until someone answers.
-      if(asked){Object.assign(current,{status:'blocked',questions:asked[1].trim().slice(0,2000),askedBy:by,runId:null,version:(current.version||0)+1,updatedAt:now()});save();return;}
-      const draft={result:answer.slice(0,10000),by,createdAt:now(),feedback:input.feedback||''};
-      Object.assign(current, {status:'review',result:draft.result,by:draft.by,history:[...(current.history||[]),draft],runId:null,version:(current.version||0)+1,updatedAt:now()});save();
+      if(asked){
+        const target=org.escalationTarget(name),questions=asked[1].trim().slice(0,2000).split(/\n+/).map(q=>q.replace(/^\s*\d+[.)]\s*/,'').trim()).filter(Boolean).slice(0,10);
+        commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'blocked',blockedReason:'decision',questions:questions.map((q,i)=>`${i+1}. ${q}`).join('\n'),decisionTarget:target.name,decisionPath:target.path,askedBy:by,providerId:result.route?.providerId||null,modelId:result.route?.modelId||null,usedFallback:!!result.fallback,runId:null,version:(t.version||0)+1,updatedAt:now()});openDecision(draft,emit,{task:t,questions,target:target.name,path:target.path,askedBy:by});});
+        return;
+      }
+      const draft={result:answer.slice(0,10000),by,providerId:result.route?.providerId||null,modelId:result.route?.modelId||null,usedFallback:!!result.fallback,createdAt:now(),feedback:input.feedback||''};
+      // The draft lands in the task's thread in the same commit, so Komunikasi shows what the agent actually sent.
+      commit((store,emit)=>{const t=store.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'review',result:draft.result,by:draft.by,providerId:draft.providerId,modelId:draft.modelId,usedFallback:draft.usedFallback,history:[...(t.history||[]),draft],runId:null,version:(t.version||0)+1,updatedAt:now()});
+        emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{from:'active',to:'review',phase:'review'}});
+        emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:t.parentId?store.tasks.find(x=>x.id===t.parentId)?.assignee||'owner':'owner',runId,data:{draft:true}});
+        addMessage(store,emit,{task:t,sender:{type:'agent',name:t.assignee},kind:'result',text:draft.result});});
     }
   } catch (error) {
     const current = tasks.find(t => t.id === task.id);
-    if (current && current.status === 'active' && current.assignee === name && current.runId === runId) { Object.assign(current, {status: 'queued', runId:null, version:(current.version||0)+1, error: error.name === 'AbortError' ? 'Claude took too long to answer.' : error.message === 'fetch failed' ? 'Could not reach the Claude API. Check the internet connection.' : error.message, updatedAt: now()}); save(); }
+    if (current && current.status === 'active' && current.assignee === name && current.runId === runId) {
+      const reason=sanitizeText(error.name === 'AbortError' ? 'Model terlalu lama menjawab.' : error.message === 'fetch failed' ? 'Provider tidak bisa dihubungi. Periksa koneksi.' : error.message).slice(0,500);
+      // The owner hears about it in the task thread (and Komunikasi alerts), not only from a card label.
+      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'queued',runId:null,version:(t.version||0)+1,error:reason,updatedAt:now()});
+        addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'error',text:`${t.assignee} gagal mengerjakan tugas ini: ${reason}\nBuka tugas lalu klik Coba lagi setelah masalahnya diperbaiki.`});});
+    }
     console.error(`Agent ${name} failed on "${task.title}": ${error.message}`);
   } finally { busy.delete(name); setImmediate(() => work(name)); }
 }
-const kick = () => Object.keys(agents).forEach(work);
+function modelEvent(type,task,runId,data){commit((draft,emit)=>{emit({type,taskId:task.id,rootId:task.rootId||task.id,agent:task.assignee,runId,data});});}
+// Live event streams: owner-only, replay by sequence, explicit resync when the client is too far behind.
+const EVENT_REPLAY=500,streams=new Set();
+taskStore.subscribe(events=>{for(const client of streams)for(const event of events)client.push(event);});
+function openEventStream(req,res,after){
+  res.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-store','x-accel-buffering':'no'});
+  // ponytail: a live client with over 1 MB unsent is dropped; it reconnects and resyncs from its cursor.
+  const write=chunk=>{if(res.writableEnded)return;res.write(chunk);if(res.writableLength>1e6)client.close();};
+  const client={cursor:after,push(event){if(event.seq>client.cursor){client.cursor=event.seq;write(`id: ${event.seq}\nevent: task\ndata: ${JSON.stringify(event)}\n\n`);}},close(){streams.delete(client);clearInterval(beat);res.end();}};
+  const beat=setInterval(()=>write(': heartbeat\n\n'),15000);
+  const backlog=taskStore.eventsAfter(after,EVENT_REPLAY),latest=taskStore.snapshot().nextSeq-1;
+  if(backlog.length&&backlog.at(-1).seq<latest){client.cursor=latest;write(`event: resync\ndata: ${JSON.stringify({seq:latest})}\n\n`);}
+  else backlog.forEach(event=>client.push(event));
+  streams.add(client);req.on('close',()=>{streams.delete(client);clearInterval(beat);});
+}
+// ---- application jobs: an owner approval binds revision + manifest hash + environment; one job per project, two overall ----
+const JOB_LIMIT=2,RUN_TIMEOUT=Number(process.env.RUNNER_TIMEOUT_MS||120000),running=new Map();
+function workspaceExport(state){const copy=structuredClone(state);delete copy.requests;for(const p of copy.projects||[])delete p.approvals;return copy;}
+function projectRecord(state,id){return state.projects.find(p=>p.id===id);}
+async function approveRun(projectId,input){
+  const manifest=projects.verifyRevision(projectId,input.revisionId);
+  if(input.manifestHash!==manifest.manifestHash)throw Object.assign(new Error('Sumber atau perintah berubah sejak kamu memeriksanya. Muat ulang lalu setujui lagi.'),{status:409,code:'APPROVAL_STALE'});
+  const disk=JSON.parse(fs.readFileSync(path.join(DATA_DIR,'projects',projectId,'project.json'),'utf8'));
+  if(input.environment!==disk.environment)throw Object.assign(new Error(`Proyek ini memakai ${disk.environment}. Ganti lingkungan lewat keputusan terpisah.`),{status:409,code:'ENVIRONMENT_MISMATCH'});
+  if(input.environment==='windows'&&input.acknowledgeHostAccess!==true)throw Object.assign(new Error(runner.WINDOWS_WARNING),{status:409,code:'HOST_ACCESS_ACK_REQUIRED'});
+  const env=(await runner.environments())[input.environment];if(!env?.available)throw Object.assign(new Error(env?.reason||'Lingkungan tidak tersedia.'),{status:409,code:'ENVIRONMENT_UNAVAILABLE'});
+  return commit((draft,emit)=>{
+    let record=projectRecord(draft,projectId);if(!record){record={id:projectId,taskId:disk.taskId,environment:disk.environment,approvals:[]};draft.projects.push(record);}
+    const approval={id:crypto.randomUUID(),revisionId:input.revisionId,manifestHash:manifest.manifestHash,environment:input.environment,imageDigest:env.imageDigest||null,networkAllowed:input.networkAllowed===true,approvedBy:'owner',approvedAt:now()};
+    record.approvals.push(approval);emit({type:'job.approved',taskId:disk.taskId,data:{projectId,revisionId:input.revisionId,environment:input.environment}});return approval;
+  });
+}
+function startJob(projectId,input,requestKey){
+  const state=taskStore.snapshot(),record=projectRecord(state,projectId),manifest=projects.verifyRevision(projectId,input.revisionId);
+  const approval=record?.approvals.find(a=>a.id===input.approvalId&&a.revisionId===input.revisionId&&a.manifestHash===manifest.manifestHash);
+  if(!approval)throw Object.assign(new Error('Revisi ini belum kamu setujui untuk dijalankan.'),{status:403,code:'APPROVAL_REQUIRED'});
+  if(requestKey&&state.requests[requestKey])return state.requests[requestKey].result;
+  if(state.jobs.some(j=>j.projectId===projectId&&['queued','running'].includes(j.status)))throw Object.assign(new Error('Proyek ini masih punya job berjalan.'),{status:409,code:'JOB_ACTIVE'});
+  if(running.size>=JOB_LIMIT)throw Object.assign(new Error('Sudah ada 2 job berjalan. Tunggu salah satu selesai.'),{status:409,code:'JOB_LIMIT'});
+  const job=commit((draft,emit)=>{const j={id:crypto.randomUUID(),projectId,taskId:record.taskId,revisionId:input.revisionId,manifestHash:manifest.manifestHash,approvalId:approval.id,environment:approval.environment,status:'running',startedAt:now(),evidence:[]};draft.jobs.push(j);emit({type:'job.started',taskId:record.taskId,data:{jobId:j.id,projectId,environment:j.environment}});return j;},{requestKey});
+  const controller=new AbortController();running.set(job.id,controller);
+  const jobDir=path.join(DATA_DIR,'projects',projectId,'jobs',job.id);
+  runner.run({job,sourceDir:projects.sourceDir(projectId,input.revisionId),manifest,jobDir,signal:controller.signal,timeoutMs:RUN_TIMEOUT,environment:approval.environment,networkAllowed:approval.networkAllowed,imageDigest:approval.imageDigest,
+    onEvent:(type,data)=>commit((draft,emit)=>{emit({type,taskId:record.taskId,data:{jobId:job.id,...data}});})})
+    .catch(error=>({status:error.code==='ENVIRONMENT_UNAVAILABLE'?'environment_unavailable':'failed',evidence:[{phase:'runner',exitCode:null,stderr:sanitizeText(error.message),argv:[]}]}))
+    .then(result=>{running.delete(job.id);commit((draft,emit)=>{const j=draft.jobs.find(x=>x.id===job.id);if(!j||j.status!=='running')return;Object.assign(j,{status:result.status,evidence:result.evidence,finishedAt:now()});emit({type:`job.${result.status}`,taskId:record.taskId,data:{jobId:job.id}});});applications.completed(taskStore.snapshot().jobs.find(j=>j.id===job.id)).catch(error=>console.error(`Application completion failed: ${error.message}`));});
+  return job;
+}
+// A restart cannot know how far a command got: running jobs become interrupted and are never rerun automatically.
+function recoverJobs(){const stuck=taskStore.snapshot().jobs.filter(j=>['queued','running'].includes(j.status));if(stuck.length)commit((draft,emit)=>{for(const s of stuck){const j=draft.jobs.find(x=>x.id===s.id);Object.assign(j,{status:'interrupted',finishedAt:now()});emit({type:'job.interrupted',taskId:j.taskId,data:{jobId:j.id}});}});}
+// One model call path for planning and synthesis: same routing, fallback and dry-run rules as ordinary work.
+async function askModel(name,task){
+  const profile=org.roster().find(member=>member.name===name)||{},snapshot=settings.resolve(name,profile),worker=buildAgent(profile,org.state,snapshot.route||{});
+  const input={...task,conversation:conversationFor(task.id)};
+  if(snapshot.dryRun)return {text:await dryRun(worker,input),by:'dry-run'};
+  if(snapshot.invalid)throw new Error('Agen ini belum punya provider/model yang valid. Atur di Pengaturan.');
+  const result=await askConfigured(snapshot,worker,input);return {text:result.answer,by:result.route?.modelId||worker.model};
+}
+const applications=createApplicationWorkflow({snapshot:()=>taskStore.snapshot(),commit,projects,askModel,approveRun,startJob,smoke:async task=>{
+  const preview=await previews.open(task),response=await fetch(preview.url,{signal:AbortSignal.timeout(5000)}),html=await response.text();
+  if(!response.ok||!/<(?:html|title|body|h1|script)\b/i.test(html))throw Error('Halaman utama tidak dapat ditampilkan.');
+  return {status:'passed',httpStatus:response.status,checkedAt:now(),check:'GET halaman utama pada origin loopback terpisah'};
+}});
+const orchestrator=createOrchestrator({snapshot:()=>taskStore.snapshot(),commit,org,askModel,buildApplication:(id,results)=>applications.generate(id,'Integrate these completed team results:\n'+results),canRun:name=>!!agentFor(name),log:message=>console.error(message)});
+const kick = () => { orchestrator.wake(); Object.keys(agentMembers()).forEach(work); };
+// Any committed change (new children, an answered decision, a finished dependency) may unblock work.
+let kickQueued=false;taskStore.subscribe(()=>{if(kickQueued)return;kickQueued=true;setImmediate(()=>{kickQueued=false;kick();});});
 
 // ---- HTTP ----
 function send(res, status, body) {
@@ -103,23 +269,269 @@ function readJson(req) {
     req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString() || '{}')); } catch { reject(Object.assign(new Error('Invalid JSON'), {status: 400})); } });
   });
 }
+function validateTaskPlacement(task, input={}) {
+  const member=memberOf(task.assignee);if(!member)return {status:400,error:'Unknown assignee.'};
+  const division=task.division||divisionOf(task.assignee);if(!division)return {status:400,error:'Pick a division.'};
+  if(member.division&&member.division!==division)return {status:409,error:'Anggota tidak berada di divisi tugas.',code:'TASK_ROUTE_FORBIDDEN'};
+  if(task.createdBy!=='owner'&&task.createdBy!==task.assignee){const route=org.communicationPath(task.createdBy,task.assignee);if(!route.allowed)return {status:409,error:'Task route is not allowed.',code:'TASK_ROUTE_FORBIDDEN'};}
+  if(member.divisions?.length>1&&input.asLead===undefined&&task.parentId===null)return {status:409,error:'Choose whether this dual-hat member receives the task as lead.'};
+  task.division=division;
+  if(task.parentId){
+    const parent=tasks.find(item=>item.id===task.parentId);if(!parent)return {status:400,error:'Parent task not found.'};
+    if(taskDivision(parent)!==division)return {status:409,error:'A child task must stay in the parent division.',code:'TASK_ROUTE_FORBIDDEN'};
+    if(parent.status==='done')return {status:409,error:'Tugas induk sudah selesai.'};
+    const seen=new Set([task.id]);let cursor=parent;
+    while(cursor){if(seen.has(cursor.id))return {status:409,error:'Hubungan tugas membentuk siklus.'};seen.add(cursor.id);cursor=cursor.parentId?tasks.find(item=>item.id===cursor.parentId):null;}
+    if(parent.kind==='roster-review')return {status:409,error:'Roster review tasks cannot have child tasks.'};
+  } else if(!isLeadFor(task.assignee,division) && !(division==='leadership'&&task.assignee==='Koh Arman')) return {status:409,error:'Root tasks must be assigned to a division lead.',code:'TASK_ROUTE_FORBIDDEN'};
+  if(task.asLead&&!isLeadFor(task.assignee,division)) return {status:409,error:'Only the division lead can receive a lead task.',code:'TASK_ROUTE_FORBIDDEN'};
+  if(task.parentId&&task.asLead&&task.assignee!==leadOf(division)) return {status:409,error:'Child tasks cannot use lead mode for another member.',code:'TASK_ROUTE_FORBIDDEN'};
+  return null;
+}
+function privilegedTask(task) { return task.kind === 'roster-review' || task.parentId !== null || task.status === 'review'; }
+function requireOrgToken(req, task) {
+  if (!privilegedTask(task) || org.verifyToken(req.headers['x-kantor-org'])) return null;
+  return {status:403,error:'A valid owner unlock is required for this action.',code:'ORG_LOCKED'};
+}
+function promoteParent(parentId){
+  if(!parentId)return;
+  const parent=tasks.find(item=>item.id===parentId);if(!parent)return;
+  const children=tasks.filter(item=>item.parentId===parentId);if(children.length&&children.every(item=>item.status==='done')&&['queued','active'].includes(parent.status)){
+    // A manual split has no lead synthesis: the owner reviews the children's own results, listed as the parent result.
+    const result=parent.result||children.map(item=>`### ${item.title} (${item.assignee})\n${item.result||'(tanpa hasil)'}`).join('\n\n').slice(0,10000);
+    Object.assign(parent,{status:'review',result,version:(parent.version||0)+1,updatedAt:now()});
+  }
+}
 function newTask(input) {
   if(!input||typeof input!=='object')return null;
   const title = text(input.title, 160), assignee = text(input.assignee, 80);
   if (!title || !assignee) return null;
   const status = STATES.has(input.status) ? input.status : 'queued', result = text(input.result, 10000);
-  return {id: crypto.randomUUID(), title, assignee, brief: text(input.brief, 5000), status: ['done','review'].includes(status) && !result ? 'queued' : status, result, createdAt: now()};
+  const legacy=!Object.hasOwn(input,'division')&&!Object.hasOwn(input,'parentId')&&!Object.hasOwn(input,'asLead')&&!Object.hasOwn(input,'priority')&&!Object.hasOwn(input,'progressPct')&&!Object.hasOwn(input,'messages')&&!Object.hasOwn(input,'kind');
+  const task = {id: crypto.randomUUID(), title, assignee, division:text(input.division,80)||divisionOf(assignee), parentId:typeof input.parentId==='string'&&input.parentId?input.parentId:null, createdBy:text(input.createdBy,120)||'owner', asLead:input.asLead===true, priority:PRIORITIES.has(input.priority)?input.priority:'normal', progressPct:Number.isInteger(input.progressPct)?Math.max(0,Math.min(100,input.progressPct)):0, messages:Array.isArray(input.messages)?input.messages:[], kind:KINDS.has(input.kind)?input.kind:'work', legacy, executionMode:['direct','manual'].includes(input.executionMode)?input.executionMode:input.executionMode==='automatic'||(input.asLead===true&&!input.parentId&&input.kind!=='roster-review'&&input.outputType!=='application')?'automatic':'direct', outputType:input.outputType==='application'?'application':'document', environment:input.outputType==='application'&&['docker','windows'].includes(input.environment)?input.environment:null, acceptance:Array.isArray(input.acceptance)?input.acceptance.map(a=>text(a,500)).filter(Boolean).slice(0,20):[], dependencyIds:[], phase:'queued', brief:text(input.brief,5000), status:['done','review'].includes(status) && !result ? 'queued' : status, result, createdAt:now()};
+  return normalizeTask(task);
 }
 async function api(req, res, url) {
-  if (url.pathname === '/api/agents' && req.method === 'GET')
-    return send(res, 200, {mode: DRY_RUN ? 'dry-run' : 'claude', model: DRY_RUN ? null : MODEL, members: Object.fromEntries(Object.entries(agents).map(([name, a]) => [name, {role: a.role, model: modelOf(a)}]))});
+  guardRequest(req);
+  if (url.pathname === '/api/session' && req.method === 'GET') return send(res,200,{csrf:CSRF});
+  if (url.pathname === '/api/settings' && req.method === 'GET') return send(res,200,settings.publicState());
+  if (url.pathname === '/api/org/templates' && req.method === 'GET') return send(res,200,ORG_TEMPLATES);
+  if (url.pathname === '/api/org' && req.method === 'GET') {
+    if((req.headers.origin&&req.headers.origin!==serverOrigin())||req.headers['x-kantor-csrf']!==CSRF){const error=new Error('A valid local session is required.');error.status=403;throw error;}
+    return send(res, 200, org.publicState());
+  }
+  if (url.pathname === '/api/org/unlock' && req.method === 'POST') {
+    const input=await readJson(req);const token=org.unlock(input.pin);return send(res,200,{token});
+  }
+  if (url.pathname === '/api/org' && req.method === 'PUT') {
+    const input=await readJson(req);const token=req.headers['x-kantor-org'];if(org.verifyToken(token)){const busyError=busyMembers(input);if(busyError)return send(res,409,busyError);}return send(res,200,org.save(input,token,input.version));
+  }
+  if (url.pathname === '/api/org/wizard' && req.method === 'POST') {
+    const input=await readJson(req),token=req.headers['x-kantor-org'];
+    if(!org.verifyToken(token))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    if(input.version!==org.state.version)return send(res,409,{error:'Organization changed in another tab. Reload before saving.'});
+    const candidate=normalizeOrg(input.draft),moves=input.reassignments||{},before=tasks;
+    const next=tasks.map(task=>{const name=moves[task.assignee];if(task.status==='done'||!name)return task;const target=candidate.members.find(m=>m.name===name&&m.active);if(!target)throw Object.assign(new Error('Pilih anggota aktif tujuan.'),{status:400});if(task.status==='active')throw Object.assign(new Error('Tunggu tugas AI aktif selesai.'),{status:409});return {...task,assignee:name,division:target.division,status:task.status==='review'?'review':'queued',runId:null,version:(task.version||0)+1,updatedAt:now()};});
+    tasks=next;const busyError=busyMembers(candidate);if(busyError){tasks=before;return send(res,409,busyError);}
+    try{const result=org.save(candidate,token,input.version);save();return send(res,200,result);}catch(error){tasks=before;throw error;}
+  }
+  // "Mulai dari 0": the chosen model drafts an organization from the company profile. Nothing is saved here.
+  if (url.pathname === '/api/org/ai-draft' && req.method === 'POST') {
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req),company=input?.company||{},route=input?.route||{};
+    const provider=settings.state.providers.find(p=>p.id===route.providerId),model=provider?.models.find(m=>m.id===route.modelId);
+    if(!provider||!model)return send(res,400,{error:'Pilih model dari provider yang sudah diambil.'});
+    const credential=settings.credential(provider.id);if(!credential)return send(res,400,{error:'Provider ini belum punya API key.'});
+    const system='You design small-company org charts. Reply with JSON only: {"divisions":[{"id":"kebab-id","name":"...","lead":"person name","collaboratesWith":["division id"]}],"members":[{"name":"...","role":"...","division":"division id","manager":"person name or null","effort":"light|standard|deep"}]}. Rules: 3-6 divisions, 6-20 people, Indonesian role titles, unique realistic Indonesian names, exactly one top person with manager null who leads the leadership division, every division lead belongs to that division and reports to the top person, everyone else reports to someone in their own division, no cycles. effort: deep for leads and complex work, light for routine work, otherwise standard.';
+    const brief=`Nama perusahaan: ${text(company.name,160)}
+Jenis usaha: ${text(company.type,160)}
+Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
+    let correction='';
+    // One bounded retry asks the same model for a complete corrected document, not a guessed or partial roster.
+    for(let attempt=0;attempt<2;attempt++){
+      let answer;try{answer=await providers.generate(provider,credential,model.id,{system},{title:'Susun struktur organisasi',brief:brief+correction},{maxTokens:10000});}
+      catch(error){return send(res,502,{error:`Provider/model ${model.id} gagal: ${error.message}`,code:'PROVIDER_FAILED'});}
+      try{
+        const parsed=parseDraft(answer);
+        const members=parsed.members.map(m=>({name:text(m?.name,120),role:text(m?.role,120),division:text(m?.division,80),manager:m?.manager?text(m.manager,120):null,effort:['light','standard','deep'].includes(m?.effort)?m.effort:'standard',workloadPct:100,instructions:'',active:true,isAgent:true}));
+        if(!members.length||members.length>40||!parsed.divisions.length||parsed.divisions.length>12)throw new Error('Gunakan 1–12 divisi dan 1–40 orang.');
+        const draft=normalizeOrg({company,divisions:parsed.divisions,members});return send(res,200,{divisions:draft.divisions,members:draft.members});
+      }catch(error){
+        if(attempt)return send(res,422,{error:`AI belum menghasilkan organisasi yang valid setelah koreksi: ${error.message}`,code:'AI_DRAFT_INVALID'});
+        correction=`\n\nYour previous response could not be used: ${error.message}. Return one COMPLETE JSON object with divisions and members. Keep it compact: 3 divisions and 6–10 members unless the brief requires more. Do not include explanations, markdown or thinking.`;
+      }
+    }
+  }
+  if (url.pathname === '/api/org/reset' && req.method === 'POST') {
+    const input=await readJson(req);if(input.confirmation!=='RESET')return send(res,400,{error:'Ketik RESET untuk mengonfirmasi reset.'});if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const state=taskStore.snapshot();if(tasks.some(task=>task.status==='active')||state.jobs.some(job=>['queued','running'].includes(job.status)))return send(res,409,{error:'Selesaikan atau batalkan tugas/job aktif sebelum reset.',code:'JOB_ACTIVE'});
+    if(input.version!==org.state.version)return send(res,409,{error:'Organisasi berubah. Muat ulang sebelum reset.'});
+    const stamp=Date.now(),archiveFile=archiveTasks(stamp),workspaceArchiveName=`workspace-${stamp}.json`;
+    fs.writeFileSync(path.join(DATA_DIR,'archive',workspaceArchiveName),JSON.stringify(workspaceExport(state),null,2),{mode:0o600});
+    const result=org.reset(input.version);for(const task of tasks)await previews.stop(task.id);
+    commit(draft=>{for(const key of ['tasks','threads','messages','decisions','events','projects','jobs'])draft[key]=[];draft.reads={owner:{}};draft.requests={};});
+    return send(res,200,{archiveFile,archiveName:path.basename(archiveFile),workspaceArchiveName,org:result});
+  }
+  if(url.pathname==='/api/workspace/export'&&req.method==='GET'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    return send(res,200,workspaceExport(taskStore.snapshot()));
+  }
+  const workspaceArchive=url.pathname.match(/^\/api\/workspace\/archive\/(workspace-\d+\.json)$/);
+  if(workspaceArchive&&req.method==='GET'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    try{return send(res,200,JSON.parse(fs.readFileSync(path.join(DATA_DIR,'archive',workspaceArchive[1]),'utf8')));}catch{return send(res,404,{error:'Arsip tidak ditemukan.'});}
+  }
+  // Archived task lists are served by name only, so no path outside data/archive can be read.
+  const archiveMatch=url.pathname.match(/^\/api\/org\/archive\/(tasks-\d+\.json)$/);
+  if(archiveMatch&&req.method==='GET'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    try{return send(res,200,JSON.parse(fs.readFileSync(path.join(DATA_DIR,'archive',archiveMatch[1]),'utf8')));}catch{return send(res,404,{error:'Arsip tidak ditemukan.'});}
+  }
+  if (url.pathname === '/api/agents' && req.method === 'GET') {
+    const roster=agentMembers();const entries=Object.entries(roster).map(([name,a])=>{const route=settings.resolve(name,a);return [name,{role:a.role,model:route.modelId||a.model||MODEL,provider:route.provider?.displayName||null,mode:route.dryRun?'dry-run':'claude'}]});const dry=entries.every(([,a])=>a.mode==='dry-run');return send(res,200,{mode:dry?'dry-run':'claude',model:dry?null:MODEL,settingsVersion:settings.publicState().version,members:Object.fromEntries(entries)});
+  }
+  if (url.pathname === '/api/settings' && req.method === 'PUT') {
+    const input=await readJson(req);const result=settings.save(input,input.version);return send(res,200,result);
+  }
+  const modelMatch=url.pathname.match(/^\/api\/settings\/providers\/([^/]+)\/models$/);
+  if(modelMatch&&req.method==='POST'){
+    const current=settings.publicState(),provider=current.providers.find(item=>item.id===decodeURIComponent(modelMatch[1]));
+    if(!provider)return send(res,404,{error:'Provider not found.'});
+    const input=await readJson(req),credential=input.credential||settings.credential(provider.id)||'';
+    if(!credential)return send(res,400,{error:'Provider credential is missing.'});
+    const found=await providers.discoverModels(provider,credential);const saved={...settings.state,version:current.version,providers:settings.state.providers.map(item=>item.id===provider.id?{...item,models:found.map(model=>({...model,source:'fetched',enabled:item.models.find(old=>old.id===model.id)?.enabled??true,status:'verified',lastSeenAt:new Date().toISOString()}))}:item)};
+    return send(res,200,settings.save(saved,current.version));
+  }
+  const testMatch=url.pathname.match(/^\/api\/settings\/providers\/([^/]+)\/test$/);
+  if(testMatch&&req.method==='POST'){
+    const current=settings.publicState(),provider=current.providers.find(item=>item.id===decodeURIComponent(testMatch[1]));if(!provider)return send(res,404,{error:'Provider not found.'});
+    const input=await readJson(req),credential=input.credential||settings.credential(provider.id)||'';if(!credential)return send(res,400,{error:'Provider credential is missing.'});
+    await providers.testConnection(provider,credential,input.modelId);return send(res,200,{ok:true,checkedAt:new Date().toISOString()});
+  }
+  // Per-member model routes chosen in the organization chart or wizard. Owner-only; '' clears the override.
+  if(url.pathname==='/api/settings/member-routes'&&req.method==='PUT'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req),routes=input?.routes&&typeof input.routes==='object'?input.routes:{},current=settings.state;
+    const overrides={...current.overrides},providersNext=current.providers.map(p=>({...p,models:p.models.map(m=>({...m}))}));
+    for(const [name,route] of Object.entries(routes)){
+      if(!route){delete overrides[name];continue;}
+      const provider=providersNext.find(p=>p.id===route.providerId),model=provider?.models.find(m=>m.id===route.modelId);
+      if(!provider||!model)return send(res,400,{error:`Model ${route.modelId||''} tidak ada di provider.`});
+      model.enabled=true;overrides[name]={providerId:provider.id,modelId:model.id};
+    }
+    return send(res,200,settings.save({...current,providers:providersNext,overrides},current.version));
+  }
+  if(url.pathname==='/api/settings/reset'&&req.method==='POST'){
+    const input=await readJson(req);return send(res,200,settings.save({...settings.state,providers:[],defaultRoute:null,fallbackRoute:null,overrides:{}},input.version));
+  }
+  if (url.pathname.startsWith('/api/task-events') && req.method === 'GET' && !org.verifyToken(req.headers['x-kantor-org']||url.searchParams.get('token')))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+  if (url.pathname === '/api/task-events/snapshot' && req.method === 'GET') {
+    const state=taskStore.snapshot();return send(res,200,{seq:state.nextSeq-1,tasks:state.tasks,streams:streams.size});
+  }
+  if (url.pathname === '/api/task-events' && req.method === 'GET') {
+    const after=Math.max(0,Number(req.headers['last-event-id']??url.searchParams.get('after')??0)||0);
+    if((req.headers.accept||'').includes('text/event-stream'))return openEventStream(req,res,after);
+    return send(res,200,{events:taskStore.eventsAfter(after,EVENT_REPLAY)});
+  }
+  if (url.pathname === '/api/communications' && req.method === 'GET') {
+    const after=Number(url.searchParams.get('after')||0),state=taskStore.snapshot();
+    // Alerts are derived from current task state: they clear by themselves once the task is retried or recovers.
+    const alerts=state.tasks.filter(t=>t.error&&(t.status==='queued'||(t.status==='blocked'&&['failed','interrupted','environment_unavailable'].includes(t.blockedReason)))).map(t=>({taskId:t.id,assignee:t.assignee,text:`${t.title}: ${t.error}`.slice(0,300),since:t.updatedAt}));
+    return send(res,200,{threads:threadSummaries(state),messages:state.messages.filter(m=>m.seq>after).slice(-200),decisions:state.decisions,alerts,reads:state.reads.owner,nextSeq:state.nextSeq});
+  }
+  // Generated sources: owner-only metadata and per-file download as plain text (never served as runnable pages here).
+  const revMatch=url.pathname.match(/^\/api\/projects\/([^/]+)\/revisions\/([^/]+)(?:\/files\/(.+))?$/);
+  if(revMatch&&req.method==='GET'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const [,projectId,revisionId,file]=revMatch.map(v=>v&&decodeURIComponent(v));
+    if(!file)return send(res,200,projects.manifest(projectId,revisionId));
+    const content=projects.readFile(projectId,revisionId,file);
+    res.writeHead(200,{'content-type':'text/plain; charset=utf-8','content-disposition':`attachment; filename="${path.basename(file).replace(/[^\w.-]/g,'_')}"`,'x-content-type-options':'nosniff','cache-control':'no-store'});return res.end(content);
+  }
+  if(url.pathname==='/api/execution/environments'&&req.method==='GET')return send(res,200,await runner.environments());
+  const previewMatch=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})\/application\/(preview|stop-preview)$/);
+  if(previewMatch&&req.method==='POST'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const task=tasks.find(t=>t.id===previewMatch[1]);if(!task||!applications.canReview(task))return send(res,409,{error:'Revisi belum memiliki bukti pengujian.',code:'EVIDENCE_REQUIRED'});
+    if(previewMatch[2]==='stop-preview'){await previews.stop(task.id);return send(res,200,{stopped:true});}
+    return send(res,200,await previews.open(task));
+  }
+  const appApprove=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})\/application\/approve$/);
+  if(appApprove&&req.method==='POST'){if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});return send(res,202,await applications.approve(appApprove[1],await readJson(req)));}
+  const projMatch=url.pathname.match(/^\/api\/projects\/([^/]+)\/(approve|run)$/),jobMatch=url.pathname.match(/^\/api\/jobs\/([0-9a-f-]{36})(\/cancel)?$/);
+  if((projMatch&&req.method==='POST')||jobMatch){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    if(jobMatch&&!jobMatch[2]&&req.method==='GET'){const job=taskStore.snapshot().jobs.find(j=>j.id===jobMatch[1]);return job?send(res,200,job):send(res,404,{error:'Job tidak ditemukan.'});}
+    if(jobMatch&&jobMatch[2]&&req.method==='POST'){const controller=running.get(jobMatch[1]);if(!controller)return send(res,409,{error:'Job tidak sedang berjalan.'});controller.abort();return send(res,200,{id:jobMatch[1],cancelling:true});}
+    if(projMatch){const input=await readJson(req),id=decodeURIComponent(projMatch[1]);
+      if(projMatch[2]==='approve')return send(res,201,await approveRun(id,input));
+      return send(res,202,startJob(id,input,req.headers['x-kantor-request']));}
+  }
+  const readMatch=url.pathname.match(/^\/api\/communications\/([^/]+)\/read$/);
+  if(readMatch&&req.method==='PUT'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req),id=decodeURIComponent(readMatch[1]);
+    const state=taskStore.snapshot();if(!state.threads.some(t=>t.id===id))return send(res,404,{error:'Percakapan tidak ditemukan.'});
+    const through=Math.min(Number(input?.throughSeq)||0,state.nextSeq-1);
+    commit(draft=>{if(through>(draft.reads.owner[id]||0))draft.reads.owner[id]=through;});
+    return send(res,200,{threadId:id,throughSeq:taskStore.snapshot().reads.owner[id]||0});
+  }
+  const threadMatch=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})\/(thread|messages)$/);
+  const activityMatch=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})\/activity$/);
+  if(activityMatch&&req.method==='GET'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const result=activityFor(taskStore.snapshot(),activityMatch[1],{agents:Object.keys(agentMembers())});
+    return result?send(res,200,result):send(res,404,{error:'Task not found.'});
+  }
+  if(threadMatch&&req.method==='GET'&&threadMatch[2]==='thread'){
+    const state=taskStore.snapshot();if(!state.tasks.some(t=>t.id===threadMatch[1]))return send(res,404,{error:'Task not found.'});
+    return send(res,200,{messages:state.messages.filter(m=>m.taskId===threadMatch[1]),decisions:state.decisions.filter(d=>d.taskId===threadMatch[1])});
+  }
+  if(threadMatch&&req.method==='POST'&&threadMatch[2]==='messages'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req),body=text(input?.text,8000);if(!body)return send(res,400,{error:'Tulis pesan dulu.'});
+    const task=tasks.find(t=>t.id===threadMatch[1]);if(!task)return send(res,404,{error:'Task not found.'});
+    // On a failed task the owner's message ("lanjutkan", "coba lagi", or any instruction) retries it with that message as context.
+    if(task.error&&task.status==='queued'){
+      const message=commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);Object.assign(t,{error:undefined,retryRequested:true,version:(t.version||0)+1,updatedAt:now()});return addMessage(draft,emit,{task:t,sender:{type:'owner',name:'Owner'},text:body});},{requestKey:req.headers['x-kantor-request']});
+      setImmediate(kick);return send(res,201,{...message,retried:true,pendingForNextStep:false});
+    }
+    // While the agent waits on questions, a chat reply IS the answer: resolve the open decision and resume once.
+    const open=taskStore.snapshot().decisions.find(d=>d.taskId===task.id&&d.status==='open'&&d.kind!=='approval');
+    if(open){answerDecision(open.id,body,open.version,req.headers['x-kantor-request']);setImmediate(kick);
+      const message=taskStore.snapshot().messages.filter(m=>m.decisionId===open.id&&m.sender.type==='owner').at(-1);
+      return send(res,201,{...message,answeredDecision:true,pendingForNextStep:false});}
+    // A running agent reads this in its next model call; it is not claimed as consumed now.
+    const message=commit((draft,emit)=>addMessage(draft,emit,{task:draft.tasks.find(t=>t.id===task.id),sender:{type:'owner',name:'Owner'},text:body}),{requestKey:req.headers['x-kantor-request']});
+    return send(res,201,{...message,pendingForNextStep:task.status==='active'});
+  }
+  const decisionMatch=url.pathname.match(/^\/api\/decisions\/([0-9a-f-]{36})\/answer$/);
+  if(decisionMatch&&req.method==='POST'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req),answer=text(input?.answer,3000);if(!answer)return send(res,400,{error:'Tulis jawaban dulu.'});
+    const result=answerDecision(decisionMatch[1],answer,input?.version,req.headers['x-kantor-request']);setImmediate(kick);return send(res,200,result);
+  }
   if (url.pathname === '/api/tasks' && req.method === 'GET') return send(res, 200, tasks);
+  // Moves every open task of one member to another, so a member can be removed or deactivated.
+  if (url.pathname === '/api/tasks/reassign' && req.method === 'POST') {
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req),from=text(input?.from,120),to=text(input?.to,120),target=org.roster().find(member=>member.name===to);
+    if(!from||!target||from===to)return send(res,400,{error:'Pilih anggota aktif tujuan.'});
+    const open=tasks.filter(task=>task.assignee===from&&task.status!=='done');
+    if(open.some(task=>task.status==='active'))return send(res,409,{error:'Tunggu tugas AI yang sedang berjalan selesai dulu.'});
+    for(const task of open)Object.assign(task,{assignee:to,division:target.division,status:task.status==='review'?'review':'queued',runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
+    save();setImmediate(kick);return send(res,200,{moved:open.length});
+  }
   if (url.pathname === '/api/tasks' && req.method === 'POST') {
     const input=await readJson(req);
     if(input?.status!==undefined&&!STATES.has(input.status))return send(res,400,{error:'Unknown status.'});
     const task = newTask(input); if (!task) return send(res, 400, {error: 'A task needs a title and an assignee.'});
-    if(!MEMBERS.has(task.assignee))return send(res,400,{error:'Unknown assignee.'});
-    if(task.status==='review'||task.status==='blocked'||(agents[task.assignee]&&task.status!=='queued'))return send(res,409,{error:'AI drafts must be generated before review.'});
+    if(task.kind==='roster-review'&&!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required to request a roster review.',code:'ORG_LOCKED'});
+    if(task.parentId&&!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required for this action.',code:'ORG_LOCKED'});
+    if(task.parentId && tasks.some(item=>item.kind==='roster-review'&&item.division===task.division&&item.status!=='done'))return send(res,409,{error:'Complete the pending roster review before creating more child tasks in this division.'});
+    const placement=validateTaskPlacement(task,input);if(placement)return send(res,placement.status,{error:placement.error,code:placement.code});
+    if(agentFor(task.assignee)){const route=settings.resolve(task.assignee,agentFor(task.assignee));if(!route.dryRun&&route.invalid)return send(res,409,{error:'This agent has no valid provider/model route. Fix it in Settings.'});}
+    if(task.status==='review'||task.status==='blocked'||(agentFor(task.assignee)&&task.status!=='queued'))return send(res,409,{error:'AI drafts must be generated before review.'});
     if(task.status==='active'&&tasks.some(t=>t.assignee===task.assignee&&t.status==='active'))return send(res,409,{error:'This member already has an active task.'});
     tasks.unshift(task); save(); send(res, 201, task); setImmediate(kick); return;
   }
@@ -128,43 +540,66 @@ async function api(req, res, url) {
     if (tasks.length) return send(res, 409, {error: 'The server already has tasks.'});
     const list = await readJson(req); if (!Array.isArray(list)) return send(res, 400, {error: 'Expected a list of tasks.'});
     if(tasks.length)return send(res,409,{error:'The server already has tasks.'});
-    tasks = list.map(item => { const task = newTask(item); if (task && typeof item.createdAt === 'string') task.createdAt = item.createdAt; if(task&&Array.isArray(item.history))task.history=item.history; return task; }).filter(Boolean);
+    tasks = list.map(item => { const task = newTask({...item,legacy:true}); if (task && typeof item.createdAt === 'string') task.createdAt = item.createdAt; if(task&&Array.isArray(item.history))task.history=item.history; return task; }).filter(Boolean);
     // Imported work that was in progress by hand goes back to the queue.
     tasks.forEach(task => { if (task.status === 'active') task.status = 'queued'; });
     save(); kick(); return send(res, 201, tasks);
   }
   const match = url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})$/);
   if (match && req.method === 'PATCH') {
-    const task = tasks.find(t => t.id === match[1]); if (!task) return send(res, 404, {error: 'Task not found.'});
     const input = await readJson(req), change = {};
+    const task = tasks.find(t => t.id === match[1]); if (!task) return send(res, 404, {error: 'Task not found.'});
     if(!input||typeof input!=='object')return send(res,400,{error:'Expected an object.'});
+    if(input.action===undefined&&input.message===undefined&&input.progressPct===undefined&&input.version!==undefined&&input.version!==(task.version||0))return send(res,409,{error:'Tugas berubah. Muat ulang sebelum menyimpan.',code:'VERSION_CONFLICT'});
     // Answering an agent's questions adds the answers to the brief and puts the task back in its queue.
     if(input.action==='answer'){
+      const open=taskStore.snapshot().decisions.find(d=>d.taskId===task.id&&d.status==='open');
+      if(open&&task.status==='blocked'&&input.version===(task.version||0)){const answer=text(input.answer,3000);if(!answer)return send(res,400,{error:'Write an answer first.'});answerDecision(open.id,answer,open.version,req.headers['x-kantor-request']);send(res,200,tasks.find(t=>t.id===task.id));setImmediate(kick);return;}
       if(task.status!=='blocked'||input.version!==(task.version||0))return send(res,409,{error:'These questions changed. Refresh and answer the latest ones.'});
       const answer=text(input.answer,3000);if(!answer)return send(res,400,{error:'Write an answer first.'});
       Object.assign(task,{status:'queued',brief:`${task.brief}\n\nQuestions from ${task.assignee}:\n${task.questions}\n\nAnswers:\n${answer}`.trim().slice(0,5000),questions:undefined,askedBy:undefined,error:undefined,runId:null,version:(task.version||0)+1,updatedAt:now()});
       save();send(res,200,task);setImmediate(kick);return;
     }
     if(input.action!==undefined){
+      const locked=requireOrgToken(req,task);if(locked)return send(res,locked.status,{error:locked.error,code:locked.code});
       if(!['approve','revise'].includes(input.action))return send(res,400,{error:'Unknown action.'});
+      if(input.action==='approve'&&task.outputType==='application'&&!applications.canReview(task))return send(res,409,{error:'Belum ada bukti pengujian untuk revisi ini.',code:'EVIDENCE_REQUIRED'});
       if(task.status!=='review'||input.version!==(task.version||0))return send(res,409,{error:'This draft changed. Refresh and review the latest version.'});
       if(input.action==='revise'&&!text(input.feedback,5000))return send(res,400,{error:'Describe the changes needed.'});
+      if(input.action==='approve'&&!text(task.result,10000))return send(res,409,{error:'Belum ada hasil yang bisa disetujui. Minta lead menyusun hasil dulu.',code:'RESULT_REQUIRED'});
+      if(input.action==='revise'&&task.outputType==='application'){await previews.stop(task.id);task.evidence=null;task.phase='queued';task.repairAttempts=0;}
       Object.assign(task,{status:input.action==='approve'?'done':'queued',feedback:input.action==='revise'?text(input.feedback,5000):'',reviewedAt:input.action==='approve'?now():null,runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
+      if(input.action==='approve')promoteParent(task.parentId);
       save();send(res,200,task);setImmediate(kick);return;
     }
-    if (input.assignee !== undefined) { change.assignee = text(input.assignee, 80); if (!MEMBERS.has(change.assignee)) return send(res, 400, {error: 'Pick an assignee.'}); if (task.status !== 'done') change.status = 'queued'; }
+    if(input.message!==undefined){
+      if(input.version!==(task.version||0))return send(res,409,{error:'This task changed. Refresh before sending another update.'});
+      const message=typeof input.message==='string'?{text:input.message}:input.message;
+      if(!message||!text(message.text,2000))return send(res,400,{error:'Write a message first.'});
+      task.messages=[...(task.messages||[]),{by:text(message.by,120)||'Owner',text:text(message.text,2000),at:now()}];
+      Object.assign(task,{version:(task.version||0)+1,updatedAt:now()});save();return send(res,200,task);
+    }
+    if(input.progressPct!==undefined){
+      if(input.version!==(task.version||0))return send(res,409,{error:'This task changed. Refresh before updating progress.'});
+      if(!Number.isInteger(input.progressPct))return send(res,400,{error:'Progress must be a whole number.'});
+      Object.assign(task,{progressPct:Math.max(0,Math.min(100,input.progressPct)),version:(task.version||0)+1,updatedAt:now()});save();return send(res,200,task);
+    }
+    if (input.assignee !== undefined) { change.assignee = text(input.assignee, 80); if (!memberOf(change.assignee)) return send(res, 400, {error: 'Pick an assignee.'}); if (task.status !== 'done') change.status = 'queued'; }
+    if(input.assignee!==undefined||input.parentId!==undefined||input.division!==undefined||input.asLead!==undefined){const candidate=normalizeTask({...task,...input,assignee:change.assignee||task.assignee,parentId:input.parentId!==undefined?input.parentId:task.parentId,division:input.division!==undefined?input.division:task.division,asLead:input.asLead!==undefined?input.asLead:task.asLead});const placement=validateTaskPlacement(candidate,input);if(placement)return send(res,placement.status,{error:placement.error});change.parentId=candidate.parentId;change.division=candidate.division;change.asLead=candidate.asLead;}
+    if(input.priority!==undefined){if(!PRIORITIES.has(input.priority))return send(res,400,{error:'Unknown priority.'});change.priority=input.priority;}
     if (input.status !== undefined) {
       if (!STATES.has(input.status)||input.status==='review'||input.status==='blocked') return send(res, 400, {error: 'Unknown status.'});
       const assignee = change.assignee || task.assignee;
       if(task.status==='review'&&!change.assignee)return send(res,409,{error:'Approve this draft or request a revision.'});
-      if (agents[assignee] && input.status !== 'queued') return send(res, 409, {error: 'This member is connected to an AI agent; it starts and finishes its own tasks.'});
+      if (agentFor(assignee) && input.status !== 'queued') return send(res, 409, {error: 'This member is connected to an AI agent; it starts and finishes its own tasks.'});
       if (input.status === 'active' && tasks.some(t => t.id !== task.id && t.assignee === assignee && t.status === 'active')) return send(res, 409, {error: 'This member already has an active task.'});
       if (input.status === 'done' && !text(input.result, 10000)) return send(res, 400, {error: 'Write a result before finishing.'});
+      if(input.status==='done'&&tasks.some(item=>item.parentId===task.id&&item.status!=='done'))return send(res,409,{error:'Complete every child task before closing the parent.'});
       change.status = input.status; change.result = input.status === 'done' ? text(input.result, 10000) : '';
     }
     if(!Object.keys(change).length)return send(res,400,{error:'Provide an assignee, status, or review action.'});
     // Moving a task back to the queue clears a previous agent error so it is tried again.
-    Object.assign(task, change, {runId:null,version:(task.version||0)+1,error: undefined, updatedAt: now()}); save(); kick(); return send(res, 200, task);
+    Object.assign(task, change, {runId:null,version:(task.version||0)+1,error: undefined, updatedAt: now()}); promoteParent(task.parentId); save(); kick(); return send(res, 200, task);
   }
   send(res, 404, {error: 'Not found.'});
 }
@@ -179,15 +614,19 @@ function serveFile(res, url) {
   });
 }
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host || HOST}`);
+  const host=req.headers.host||'';
+  if(host!==`${HOST}:${PORT}`&&host!==HOST){return send(res,400,{error:'Invalid host.'});}
+  if(req.url.length>4096)return send(res,414,{error:'Request target too long.'});
+  const url = new URL(req.url, serverOrigin());
   if (!url.pathname.startsWith('/api/')) return serveFile(res, url);
   try { await api(req, res, url); }
-  catch (error) { send(res, error.status || 500, {error: error.status ? error.message : 'Server error.'}); if (!error.status) console.error(error); }
+  catch (error) { send(res, error.status || 500, {error: error.status ? error.message : 'Server error.',...(error.code?{code:error.code}:{})}); if (!error.status) console.error(error); }
 });
 server.listen(PORT, HOST, () => {
   console.log(`Kantor Kita: http://${HOST}:${PORT}`);
-  console.log(DRY_RUN ? 'AI agents: dry run (set ANTHROPIC_API_KEY in .env to use Claude)' : `AI agents: ${Object.entries(agents).map(([name, a]) => `${name} → ${modelOf(a)}`).join(', ')}`);
+  console.log(legacyDryRun() ? 'AI agents: dry run (set ANTHROPIC_API_KEY in .env to use Claude)' : `AI agents: ${Object.entries(agentMembers()).map(([name, a]) => `${name} → ${modelOf(a)}`).join(', ')}`);
   // Tasks left active by a previous run go back to the queue and are picked up again.
-  let reset = false; tasks.forEach(task => { if (task.status === 'active' && agents[task.assignee]) { task.status = 'queued'; reset = true; } }); if (reset) save();
+  orchestrator.recover();recoverJobs();tasks=taskStore.snapshot().tasks;
+  let reset = false; tasks.forEach(task => { if(task.outputType==='application'&&task.status==='active'){Object.assign(task,{status:'blocked',phase:'interrupted',blockedReason:'interrupted',runId:null,error:'Server dimulai ulang. Periksa revisi dan pilih lanjut secara eksplisit.'});reset=true;}else if (task.status === 'active' && agentFor(task.assignee)) { task.status = 'queued'; reset = true; } }); if (reset) save();
   kick();
 });

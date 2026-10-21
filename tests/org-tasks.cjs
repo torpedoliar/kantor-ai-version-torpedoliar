@@ -1,0 +1,28 @@
+const assert=require('node:assert/strict');
+const {spawn}=require('node:child_process');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const PORT=43192,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-org-tasks-')),origin=`http://127.0.0.1:${PORT}`;
+const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',DRY_RUN_DELAY_MS:'5000'},stdio:['ignore','pipe','inherit']});
+const start=new Promise((resolve,reject)=>{let ready=false;child.stdout.on('data',d=>{if(String(d).includes('Kantor Kita:')){ready=true;resolve();}});child.on('exit',code=>{if(!ready)reject(new Error(`server exited ${code}`));});});
+const request=async(pathname,options={})=>{const response=await fetch(origin+pathname,options);return {status:response.status,body:await response.json().catch(()=>null)};};
+(async()=>{await start;try{
+  const session=await request('/api/session');const csrf=session.body.csrf;const headers={'content-type':'application/json','origin':origin,'x-kantor-csrf':csrf};
+  const create=body=>request('/api/tasks',{method:'POST',headers,body:JSON.stringify(body)});
+  const parent=(await create({title:'Launch campaign',assignee:'Kak Rani',division:'marketing',asLead:true,priority:'high',brief:'Coordinate the marketing launch.'}));
+  assert.equal(parent.status,201);assert.equal(parent.body.priority,'high');assert.equal(parent.body.division,'marketing');assert.equal(parent.body.parentId,null);assert.equal(parent.body.progressPct,0);assert.deepEqual(parent.body.messages,[]);assert.equal(parent.body.kind,'work');assert.equal(parent.body.asLead,true);
+  const rootWiraDefault=await create({title:'Engineering plan',assignee:'Koh Wira',division:'engineering',priority:'normal',brief:'No dual-hat prompt in v2.'});assert.equal(rootWiraDefault.status,201,'single primary division needs no lead-mode choice');
+  const rootWira=await create({title:'Engineering roadmap',assignee:'Koh Wira',division:'engineering',asLead:true,priority:'normal',brief:'Plan the roadmap.'});assert.equal(rootWira.status,201);
+  const memberRoot=await create({title:'Direct member task',assignee:'Kak Dewi',division:'marketing',asLead:false,priority:'normal',brief:'Should be split by the lead.'});assert.equal(memberRoot.status,409);
+  const unlocked=await request('/api/org/unlock',{method:'POST',headers,body:JSON.stringify({pin:'2468'})});assert.equal(unlocked.status,200);const ownerHeaders={...headers,'x-kantor-org':unlocked.body.token};
+  const child=(await request('/api/tasks',{method:'POST',headers:ownerHeaders,body:JSON.stringify({title:'Draft campaign copy',assignee:'Kak Dewi',division:'marketing',parentId:parent.body.id,asLead:false,priority:'low',brief:'Write three options.'})}));assert.equal(child.status,201);assert.equal(child.body.parentId,parent.body.id);assert.equal(child.body.division,'marketing');assert.equal(child.body.priority,'low');
+  const crossDivision=await request('/api/tasks',{method:'POST',headers:ownerHeaders,body:JSON.stringify({title:'Answer support queue',assignee:'Kak Sinta',division:'service',parentId:parent.body.id,asLead:false,priority:'normal',brief:'Answer the queue.'})});assert.equal(crossDivision.status,409);
+  const wrongMember=await request('/api/tasks',{method:'POST',headers:ownerHeaders,body:JSON.stringify({title:'Wrong roster division',assignee:'Kak Sinta',division:'marketing',parentId:parent.body.id})});assert.equal(wrongMember.status,409,'assignee must belong to the task division');
+  const cycle=await request(`/api/tasks/${parent.body.id}`,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({parentId:child.body.id,version:parent.body.version})});assert.equal(cycle.status,409,'task parentage cannot cycle');
+  const unknown=await create({title:'Unknown person',assignee:'Nobody',division:'marketing',asLead:false,priority:'normal'});assert.equal(unknown.status,400);
+  const legacy=await create({title:'Legacy direct AI task',assignee:'Kak Rani',brief:'A legacy task with no org fields.'});assert.equal(legacy.status,201);assert.equal(legacy.body.priority,'normal');assert.equal(legacy.body.parentId,null);assert.equal(legacy.body.progressPct,0);assert.deepEqual(legacy.body.messages,[]);assert.equal(legacy.body.kind,'work');assert.equal(legacy.body.legacy,true);
+  const done=await request(`/api/tasks/${child.body.id}`,{method:'PATCH',headers,body:JSON.stringify({status:'done',result:'Copy options are ready.'})});assert.equal(done.status,200);
+  const latest=(await request('/api/tasks')).body;assert.equal(latest.find(t=>t.id===parent.body.id).status,'review');const reviewDenied=await request(`/api/tasks/${parent.body.id}`,{method:'PATCH',headers,body:JSON.stringify({action:'approve',version:latest.find(t=>t.id===parent.body.id).version})});assert.equal(reviewDenied.status,403);assert.equal(reviewDenied.body.code,'ORG_LOCKED');
+  const promoted=(await request('/api/tasks')).body.find(t=>t.id===parent.body.id);
+  assert.match(promoted.result,/Copy options are ready\./,'a promoted manual split carries the results of its children for the owner to review');
+  console.log('PASS: task schema, legacy defaults, lead/parent rules, division boundaries and parent review promotion');
+}finally{child.kill();fs.rmSync(dir,{recursive:true,force:true});}})().catch(error=>{console.error(error);process.exitCode=1;});

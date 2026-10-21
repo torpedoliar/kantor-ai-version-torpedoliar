@@ -10,16 +10,12 @@ button:focus-visible,select:focus-visible{outline:3px solid var(--accent);outlin
 .name-label::before{content:'';position:absolute;inset:-7px -2px;min-height:44px}
 .name-label::after{content:'';position:absolute;top:100%;left:50%;width:1px;height:var(--stem,6px);background:var(--line);pointer-events:none}
 
-#header{position:fixed;left:28px;right:28px;top:22px;display:flex;gap:20px;align-items:flex-end;pointer-events:none}#header>*{pointer-events:auto}
-#brand{margin-right:auto}#brand strong{display:block;font-size:26px;font-weight:700;letter-spacing:-.5px;line-height:1}#brand .brand-meta{display:block;margin-top:6px;font:500 12px var(--mono);color:var(--ink-2)}.brand-mark,.brand-tagline,#teamFaces{display:none}
-.team-picker label{display:block;font-size:12px;color:var(--ink-2);margin-bottom:5px}
-select,.team-picker select{background:var(--sheet);color:var(--ink);border:1px solid var(--line);border-radius:2px;padding:8px;min-height:44px;font-size:13px}.team-picker select{width:235px;max-width:100%}
+select{background:var(--sheet);color:var(--ink);border:1px solid var(--line);border-radius:2px;padding:8px;min-height:44px;font-size:13px}
 .btn{border:1px solid var(--line);background:var(--sheet);color:var(--ink);border-radius:2px;padding:10px 13px;min-height:44px;font-size:13px;font-weight:500;white-space:nowrap}
 .btn:hover{background:var(--hover)}.btn[aria-pressed=true]#bPause{background:var(--ink);color:var(--sheet)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn.primary:hover{background:#2c4438}
-#taskCount{margin-left:8px;font-family:var(--mono);font-weight:700}
+#taskCount{margin-left:auto;font-family:var(--mono);font-weight:700}
 
-/* Navigasi lantai digambar sebagai potongan gedung: lantai bertumpuk, pelat tebal di bawah tiap lantai. */
 #floors{position:fixed;left:28px;top:112px;width:200px}
 .nav-title{margin:0 0 8px;font:500 12px var(--mono);color:var(--ink-2)}
 .section-stack{border:1px solid var(--line);border-top-width:3px;background:var(--sheet)}
@@ -34,22 +30,14 @@ select,.team-picker select{background:var(--sheet);color:var(--ink);border:1px s
 #floors .building-button{display:block;width:100%;margin-top:10px;min-height:44px;background:var(--sheet);border:1px solid var(--line);border-radius:2px;font-size:13px;font-weight:500}
 #floors .building-button:hover{background:var(--hover)}#floors .building-button[aria-pressed=true]{background:var(--ink);color:var(--sheet)}
 
-/* Caption lantai sebagai title block lembar gambar. */
-#floorCaption{position:fixed;left:28px;bottom:112px;width:300px;background:var(--sheet);border:1px solid var(--line);pointer-events:none}
-.tb-head{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:7px 12px;font:500 12px var(--mono);color:var(--ink-2)}
-#floorTitle{font-size:24px;line-height:1.15;letter-spacing:-.4px;margin:14px 12px 8px;font-weight:700}
-#floorDescription{font-size:13px;line-height:1.55;margin:0 12px 14px;color:var(--ink-2)}
-.tb-foot{margin:0;border-top:1px solid var(--line);padding:7px 12px;font-size:12px;color:var(--ink-2)}
-
-.panel{background:var(--sheet);border:1px solid var(--line);border-radius:4px}
 #info{position:fixed;right:24px;bottom:112px;width:290px;padding:18px;font-size:13px;max-height:calc(100dvh - 250px);overflow:auto}
 #info h2{font-size:19px;margin:0 34px 4px 0;letter-spacing:-.3px}#info .role{color:var(--ink-2);margin:0 0 14px;line-height:1.5}
 #info dl{margin:0 0 14px;border-top:1px solid var(--line)}#info dt{font:500 12px var(--mono);color:var(--ink-2);margin-top:12px}#info dd{margin:3px 0 0;overflow-wrap:anywhere;line-height:1.45}
 #info .btn{width:100%;margin-top:8px}
 #info #iClose{position:absolute;right:8px;top:8px;width:44px;height:44px;border:0;background:transparent;font-size:22px}
 /* Log kantor: daftar kejadian simulasi; kotak kecil berwarna = kelompok meja orang yang disebut. */
-#log{position:fixed;right:24px;top:146px;width:290px;max-height:calc(100dvh - 270px);display:flex;flex-direction:column;overflow:hidden}
-body:has(#info:not([hidden])) #log{max-height:22vh}
+#log{position:fixed;right:24px;top:146px;width:290px;max-height:calc(100dvh - 270px);display:flex;flex-direction:column;overflow:hidden}#log.collapsed{max-height:none}#log.collapsed #logList,#log.collapsed #logEmpty{display:none}
+body:has(#info:not([hidden])) #log #logList{display:none}.log-head .btn{min-height:34px;padding:6px 9px;font-size:11px}
 .log-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
 .log-head h2{margin:0;font-size:15px}.log-head span{font:500 12px var(--mono);color:var(--ink-2)}
 #logEmpty{margin:0;padding:12px 14px;font-size:13px;color:var(--ink-2);line-height:1.5}
@@ -57,21 +45,14 @@ body:has(#info:not([hidden])) #log{max-height:22vh}
 #logList li{display:grid;grid-template-columns:auto 1fr;gap:10px;padding:8px 0;border-bottom:1px solid #d9d2c3;font-size:13px;line-height:1.45}
 #logList li:last-child{border-bottom:0}#logList time{font:500 12px/1.6 var(--mono);color:var(--ink-2)}
 .log-text::before{content:'';display:inline-block;width:8px;height:8px;background:var(--dot);margin-right:7px;vertical-align:1px}
-#bLog[aria-expanded=true]{background:var(--ink);color:var(--sheet)}
 #info .check{display:flex;align-items:center;gap:10px;min-height:44px;font-size:13px;cursor:pointer}
 #info .check input{width:20px;height:20px;margin:0;accent-color:var(--accent)}
 #sceneStatus{position:fixed;right:28px;top:100px;color:var(--ink);font-size:12px;text-align:right;max-width:260px;background:var(--sheet);border:1px solid var(--line);padding:7px 10px;border-radius:2px}
 #controls{position:fixed;bottom:36px;left:50%;transform:translateX(-50%);display:flex;gap:16px;padding:8px;max-width:calc(100% - 32px)}
 .simulation-controls,.camera-controls{display:flex;gap:6px}
-#cameraHint{position:fixed;bottom:8px;left:0;right:0;margin:0;text-align:center;font-size:12px;color:var(--ink-2);pointer-events:none}
-
-@media(max-width:1250px){#floorCaption{width:240px}#floorTitle{font-size:21px}#cameraHint{display:none}#controls{bottom:16px}#floorCaption,#info{bottom:92px}}
-@media(max-width:1100px){#header{left:18px;right:18px}#floors{left:18px;width:170px}#floorCaption{left:18px}#sceneStatus{right:18px;max-width:200px}}
+@media(max-width:1250px){#controls{bottom:16px}}
+@media(max-width:1100px){#floors{left:18px;width:170px}#sceneStatus{right:18px;max-width:200px}}
 @media(max-width:1000px){
-  #header{left:12px;right:12px;top:12px;gap:10px;flex-wrap:wrap;align-items:center}
-  #brand strong{font-size:22px}#brand .brand-meta{font-size:11px;margin-top:4px}
-  .team-picker{order:3;width:100%;display:flex;align-items:center;gap:12px}
-  .team-picker label{margin:0;white-space:nowrap}.team-picker select{width:100%;flex:1;min-width:0}
   #floors{top:128px;left:12px;right:12px;width:auto;display:flex;gap:6px}
   .nav-title{display:none}
   .section-stack{flex:4;display:flex;flex-direction:row-reverse;border-top-width:1px;border-bottom-width:3px}
@@ -79,8 +60,6 @@ body:has(#info:not([hidden])) #log{max-height:22vh}
   #floors .section-stack button:first-child{border-left:0}
   .floor-number{font-size:11px;min-width:0}#floors small{display:none}
   #floors .building-button{flex:1;margin:0;min-height:52px;font-size:11px;white-space:normal;line-height:1.3;padding:4px}
-  #floorCaption{left:12px;right:12px;width:auto;bottom:130px}.tb-head{padding:5px 10px;font-size:11px}
-  #floorTitle{font-size:18px;margin:8px 10px 4px}#floorDescription{font-size:12px;margin:0 10px 8px;line-height:1.45}.tb-foot{font-size:11px;padding:5px 10px}
   #sceneStatus{top:188px;right:12px;font-size:11px;max-width:calc(100% - 24px);padding:5px 8px}
   #controls{bottom:12px;max-width:calc(100% - 24px);width:430px;flex-direction:column;gap:6px;padding:6px}
   .simulation-controls,.camera-controls{justify-content:center}
@@ -88,22 +67,18 @@ body:has(#info:not([hidden])) #log{max-height:22vh}
   #info{left:12px;right:12px;width:auto;bottom:130px;max-height:calc(100dvh - 345px);padding:14px}
   #log{left:12px;right:12px;width:auto;top:236px;bottom:150px;max-height:none;z-index:2}
   body:has(#info:not([hidden])) #log{display:none}
-  body:has(#log:not([hidden])) #floorCaption{display:none}
-  body:has(#info:not([hidden])) #floorCaption{display:none}.name-label{font-size:10px;padding:5px 6px}
 }
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 .music-volume{display:flex;align-items:center;gap:6px;min-height:44px;font-size:11px;color:var(--ink-2)}
 .music-volume input{width:64px;min-width:0;accent-color:var(--accent)}
 #bMusic[aria-pressed=true]{background:var(--ink);color:var(--sheet)}
-@media(min-width:1001px) and (max-width:1450px){#controls{flex-direction:column;align-items:center;gap:6px}#floorCaption,#info{bottom:150px}}
-@media(max-width:1000px){.camera-controls{flex-wrap:wrap}.camera-controls .btn{padding:8px 5px;font-size:11px}.music-volume{gap:4px}.music-volume input{width:50px}}
+@media(max-width:1000px){.camera-controls{flex-wrap:wrap}.camera-controls .btn{padding:8px 5px;font-size:11px}.music-volume{gap:4px}.music-volume input{width:50px}#cameraControls{right:12px;bottom:130px}}
 /* Kamera karakter: bilah kecil di atas tengah, tombol mode memakai status tekan seperti Jeda. */
 #followBar{position:fixed;top:22px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:6px 6px 6px 12px;z-index:3}
 #followName{font:500 12px var(--mono);color:var(--ink-2);margin-right:4px;white-space:nowrap}
 #followBar .btn[aria-pressed=true]{background:var(--ink);color:var(--sheet)}
 #info .view-buttons{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}#info .view-buttons .btn{width:auto;margin:0;white-space:normal;line-height:1.25;padding:8px}
 @media(max-width:1000px){#followBar{top:auto;bottom:150px;max-width:calc(100% - 24px)}#followBar .btn{padding:8px;font-size:12px}}
-body.following #floorCaption,body.following #cameraHint{display:none}
 
 /* Member instructions and current work share the existing detail sheet. */
 .member-commands,.active-task{border-top:1px solid var(--line);padding:12px 0}
@@ -118,124 +93,91 @@ body.following #floorCaption,body.following #cameraHint{display:none}
 @media(min-width:1001px){#info{top:150px;max-height:none}body:has(#info:not([hidden])) #log{display:none}}
 
 /* Warm studio: softer control surfaces, with sage used for selection. */
-.panel,.btn,select,.team-picker select,.name-label{border-radius:8px}
+.panel,.btn,select,.name-label{border-radius:8px}
 #floors .section-stack{border-radius:10px;overflow:hidden;border-top-width:1px}
 #floors .section-stack button{border-bottom-width:1px}
 #floors .section-stack button[aria-pressed=true],#floors .building-button[aria-pressed=true]{background:var(--accent)}
-#floorCaption{border-radius:10px;overflow:hidden}
 
 /* Log chips: the first person named gets their initials in their desk-group colour. */
 .log-chip{display:inline-grid;place-items:center;min-width:26px;height:22px;padding:0 5px;margin-right:8px;border-radius:6px;background:var(--dot);color:#fff;font:700 10px var(--mono);vertical-align:1px}
 #logList li.has-chip .log-text::before{display:none}
 
-/* Studio UI for every view (whole building and single floors): white cards with soft shadows, one coral accent. */
+/* Studio UI: white cards with soft shadows, one coral accent. */
 .floor-thumb,.floor-count{display:none}
 body.ui{--paper:#f4f1ea;--sheet:#fff;--ink:#1e2230;--ink-2:#6b6f7b;--line:#e8e3da;--hover:#f7f3ed;--accent:#e8634a;--navy:#1f2433}
-.ui .panel,.ui #floorCaption,.ui #floors,.ui #header>#brand,.ui .header-card{background:#fff;border:1px solid rgba(30,34,48,.06);border-radius:16px;box-shadow:0 10px 28px rgba(60,48,30,.12)}
-.ui #header{top:16px;left:24px;right:24px;align-items:center;gap:10px}
-.ui #brand{display:flex;align-items:center;gap:14px;padding:12px 20px 12px 12px;margin-right:auto}
-.ui .brand-mark{display:grid;place-items:center;width:52px;height:52px;border-radius:12px;background:var(--accent);color:#fff}
-.ui #brand strong{font-size:24px}
-.ui .brand-meta{font:500 13px var(--sans)!important;margin-top:4px!important}
-.ui .brand-tagline{display:block;border-left:1px solid var(--line);padding-left:16px;margin-left:8px;font-size:13px;line-height:1.4;color:var(--ink-2)}
-/* Picker, faces, Log and Tasks share one card, all centred on one line. */
-.header-card{display:contents}
-.ui .header-card{display:flex;align-items:center;gap:14px;padding:8px 8px 8px 16px}
-.ui .team-picker{display:flex;align-items:center;gap:10px}
-.ui .team-picker label{margin:0;font-size:12px;color:var(--ink-2);white-space:nowrap}
-.ui .team-picker select{width:170px;min-height:40px;padding:6px 8px;border-radius:10px}
-.ui #teamFaces{display:flex;align-items:center;padding-left:14px;border-left:1px solid var(--line);height:40px}
-.face{width:34px;height:34px;border-radius:50%;border:2px solid #fff;background:var(--dot);color:#fff;font:700 10px var(--mono);display:grid;place-items:center;margin-left:-8px;padding:0}
-.face:first-child{margin-left:0}.face.more{background:#f0ece5;color:var(--ink-2);font-size:11px}
-.face:hover{transform:translateY(-2px)}
-.ui #bLog,.ui #bTasks{min-height:40px;border-radius:10px;padding:0 14px}
-.ui #bLog{background:#fff;border:1px solid var(--line)}
-.ui #bLog[aria-expanded=true]{background:#f3efe8;color:var(--ink);border-color:#f3efe8}
-.ui #bTasks{border:0}
+.ui .panel,.ui #floors{background:#fff;border:1px solid rgba(30,34,48,.06);border-radius:16px;box-shadow:0 10px 28px rgba(60,48,30,.12)}
 .ui .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .ui .btn.primary:hover{background:#d4553d}
-.ui #bTasks::before{content:'';display:inline-block;width:16px;height:16px;margin-right:8px;vertical-align:-3px;background:currentColor;-webkit-mask:var(--i-list) center/contain no-repeat;mask:var(--i-list) center/contain no-repeat}
 .ui .name-label.selected{background:var(--accent);border-color:var(--accent);color:#fff}
-
-.ui #floors{padding:14px;width:268px;top:122px;left:24px}
+.ui #floors{padding:14px;width:268px;top:24px}
 .ui .nav-title{font:600 13px var(--sans);color:var(--ink-2);margin:2px 4px 10px}
 .ui .section-stack{background:transparent;border:0;border-radius:0!important;overflow:visible!important}
-.ui #floors .section-stack button{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"thumb num" "thumb name";column-gap:12px;row-gap:1px;align-items:center;border:0;border-left:3px solid transparent;border-radius:10px;margin-bottom:4px;padding:7px 8px;min-height:68px;font-size:15px}
+.ui #floors .section-stack button{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"thumb num" "thumb name";column-gap:12px;row-gap:1px;align-items:center;border:0;border-radius:10px;margin-bottom:4px;padding:7px 8px;min-height:68px;font-size:15px}
 .ui #floors .section-stack button:hover{background:var(--hover)}
-.ui #floors .section-stack button[aria-pressed=true]{background:#fdeee9;color:var(--ink);border-left-color:var(--accent)}
+.ui #floors .section-stack button[aria-pressed=true]{background:#fdeee9;color:var(--ink)}
 .ui .floor-thumb{display:block;grid-area:thumb;object-fit:cover;border-radius:8px;width:72px;height:52px}
 .ui .floor-number{display:block;grid-area:num;align-self:end;font:500 11px var(--mono);color:var(--ink-2);min-width:0}
 .ui #floors button[aria-pressed=true] .floor-number{color:var(--ink-2);box-shadow:none}
-.ui #floors .section-stack button>span:not([class]){grid-area:name;align-self:start;font-weight:700}
-.ui #floors small,.ui #floors button[aria-pressed=true] small{color:var(--ink-2)}
-/* The live head count sits on the thumbnail corner so the floor name keeps one line. */
+.ui #floors .section-stack button>span:not([class]){grid-area:name;align-self:start;font-weight:700;line-height:1.25}
 .ui .floor-count{display:block;grid-area:thumb;align-self:start;justify-self:end;margin:3px;font:700 10px var(--mono);color:var(--ink);background:rgba(255,255,255,.92);border-radius:8px;padding:1px 6px;min-width:0}
 .ui #floors .building-button{display:flex;align-items:center;gap:10px;border:0;border-radius:10px;min-height:48px;padding:0 14px;background:var(--navy);color:#fff;font-weight:600;margin-top:8px}
 .ui #floors .building-button[aria-pressed=true],.ui #floors .building-button:hover{background:#2c3346;color:#fff}
 .ui #floors .building-button::before{content:'';width:18px;height:18px;background:currentColor;-webkit-mask:var(--i-building) center/contain no-repeat;mask:var(--i-building) center/contain no-repeat}
 .ui #floors .building-button::after{content:'';width:14px;height:14px;margin-left:auto;background:currentColor;-webkit-mask:var(--i-chevron) center/contain no-repeat;mask:var(--i-chevron) center/contain no-repeat}
-
-.ui #floorCaption{left:24px;width:268px;overflow:hidden}
-.ui .tb-head{border-bottom:1px solid var(--line);font:500 12px var(--sans);padding:12px 18px 8px}
-.ui #floorTitle{font-size:26px;margin:12px 18px 8px}
-.ui #floorDescription{margin:0 18px 14px}
-.ui .tb-foot{border-top:1px solid var(--line);padding:10px 18px}
-
-.ui #log{top:148px;right:24px;width:310px}
-.ui .log-head{padding:14px 18px;border-bottom:0}
-.ui .log-head h2{font-size:17px}
-.ui .log-head span{font:500 12px var(--sans);display:flex;align-items:center;gap:6px}
+.ui #log{top:24px;right:24px;width:310px}
+.ui .log-head{padding:14px 18px;border-bottom:0;align-items:center}
+.ui .log-head h2{font-size:17px;white-space:nowrap}
+.ui .log-head span{font:500 12px var(--sans);display:flex;align-items:center;gap:6px;white-space:nowrap;margin-right:auto;color:var(--ink-2)}
 .ui .log-head span::before{content:'';width:8px;height:8px;border-radius:50%;background:#3fae6a}
+.ui .log-head .btn{border-radius:8px}
 .ui #logList{padding:0 18px 8px}
 .ui #logList li{border-bottom-color:#f0ece5;align-items:center}
 .ui #logEmpty{padding:0 18px 14px}
-
-.ui #controls{gap:8px;border-radius:16px;padding:10px}
-.ui #controls .btn{border-color:var(--line);border-radius:10px;display:inline-flex;align-items:center;gap:7px}
-.ui .simulation-controls .btn::before{content:'';width:16px;height:16px;flex:none;background:currentColor;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}
-.ui #bPause{--icon:var(--i-pause)}.ui #bRoutine{--icon:var(--i-calendar)}.ui #bLunch{--icon:var(--i-lunch)}
-.ui #bRoof{--icon:var(--i-sun);color:var(--ink)}.ui #bPray{--icon:var(--i-moon)}.ui #bWork{--icon:var(--i-briefcase)}
-.ui #bRoof::before{background:#f0a531}
+.ui #controls{gap:8px;border-radius:16px;padding:10px;align-items:center}
+.ui .simulation-controls{align-items:center}
+.ui #controls .btn,.ui #moments>summary{border:1px solid var(--line);border-radius:10px;display:inline-flex;align-items:center;gap:7px;background:#fff;min-height:44px;padding:0 14px;font-size:13px;font-weight:500}
+.ui #moments>summary:hover,.ui #controls .btn:hover{background:var(--hover)}
+.ui .simulation-controls>.btn::before,.ui #moments>summary::before{content:'';width:16px;height:16px;flex:none;background:currentColor;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}
+.ui #bPause{--icon:var(--i-pause)}.ui #bRoutine{--icon:var(--i-calendar)}.ui #moments>summary{--icon:var(--i-sun)}.ui #bMusic{--icon:var(--i-music)}
+.ui .moment-menu{border:1px solid rgba(30,34,48,.06);border-radius:12px;min-width:180px}
+.ui .moment-menu .btn{width:100%;justify-content:flex-start}
 .ui .btn[aria-pressed=true]#bPause,.ui #bMusic[aria-pressed=true]{background:var(--navy);color:#fff}
 .ui #bRoutine[aria-pressed=true]{background:#fff}
-.ui #sceneStatus{top:104px;right:24px;border:0;border-radius:10px;box-shadow:0 6px 18px rgba(60,48,30,.1)}
-.ui #taskDialog .task-primary{background:var(--accent);color:#fff}
-.ui #cameraHint{left:50%;right:auto;transform:translateX(-50%);width:max-content;max-width:95%;padding:3px 10px;border-radius:8px;background:rgba(255,255,255,.85);color:var(--ink-2)}
+.ui #sceneStatus{border:0;border-radius:10px;box-shadow:0 6px 18px rgba(60,48,30,.1)}
+.ui #cameraControls{background:#fff;border-radius:14px;padding:4px;box-shadow:0 10px 28px rgba(60,48,30,.12);gap:0;bottom:36px}
+.ui #cameraControls .btn{width:44px;height:44px;min-height:44px;padding:0;border:0;border-radius:10px;font-size:18px;display:grid;place-items:center;background:transparent}
+.ui #cameraControls .btn:hover{background:var(--hover)}
+.ui #bRotate,.ui #bReset{font-size:0!important}
+.ui #bRotate::before,.ui #bReset::before{content:'';width:18px;height:18px;background:var(--ink);-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}
+.ui #bRotate{--icon:var(--i-rotate)}.ui #bReset{--icon:var(--i-target)}
 body{--i-list:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01'/%3E%3C/svg%3E");
  --i-building:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M4 21V4h11v17M15 9h5v12M2 21h20M8 8h3M8 12h3M8 16h3'/%3E%3C/svg%3E");
  --i-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 5l7 7-7 7'/%3E%3C/svg%3E");
  --i-pause:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 4h4v16H6zM14 4h4v16h-4z'/%3E%3C/svg%3E");
  --i-calendar:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M8 3v4M16 3v4'/%3E%3C/svg%3E");
- --i-lunch:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 3v7a2 2 0 0 0 4 0V3M8 10v11M17 21V3c-2 1-3 4-3 8h3'/%3E%3C/svg%3E");
  --i-sun:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='4' fill='black'/%3E%3Cpath d='M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4'/%3E%3C/svg%3E");
- --i-moon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z'/%3E%3C/svg%3E");
- --i-briefcase:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='7' width='18' height='13' rx='2'/%3E%3Cpath d='M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M3 12h18'/%3E%3C/svg%3E")}
-@media(max-width:1250px){.ui .brand-tagline{display:none}}
+ --i-music:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3C/svg%3E");
+ --i-rotate:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7'/%3E%3C/svg%3E");
+ --i-target:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='8'/%3E%3Ccircle cx='12' cy='12' r='2' fill='black'/%3E%3C/svg%3E");
+ --i-home:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Cpath d='M3 11l9-7 9 7v9H3z'/%3E%3C/svg%3E");
+ --i-org:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='9' y='3' width='6' height='5' rx='1'/%3E%3Crect x='3' y='16' width='6' height='5' rx='1'/%3E%3Crect x='15' y='16' width='6' height='5' rx='1'/%3E%3Cpath d='M12 8v4M6 16v-4h12v4'/%3E%3C/svg%3E");
+ --i-team:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Ccircle cx='9' cy='8' r='3'/%3E%3Cpath d='M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6'/%3E%3Ccircle cx='17' cy='9' r='2.5'/%3E%3Cpath d='M15.5 14.2A5 5 0 0 1 21 19'/%3E%3C/svg%3E");
+ --i-layout:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cpath d='M3 10h18M10 10v11'/%3E%3C/svg%3E");
+ --i-decision:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5V14M12 17h.01'/%3E%3C/svg%3E");
+ --i-more:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Ccircle cx='5' cy='12' r='2'/%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3Ccircle cx='19' cy='12' r='2'/%3E%3C/svg%3E")}
 @media(max-width:1000px){
- .ui #header{padding:0;top:8px;left:8px;right:8px;gap:6px}
- .ui #brand{flex:1;min-width:0;padding:6px 10px 6px 6px;gap:10px}.ui .brand-mark{width:34px;height:34px;border-radius:9px}.ui .brand-mark svg{width:20px;height:20px}
- .ui #brand strong{font-size:19px}.ui .brand-meta{font-size:11px!important;margin-top:2px!important}
- .ui .header-card{display:contents}
- .ui .team-picker{background:#fff;border-radius:12px;padding:6px 8px;box-shadow:0 10px 28px rgba(60,48,30,.12)}.ui .team-picker select{width:100%}
- .ui #teamFaces{display:none}
- .ui #bLog,.ui #bTasks{align-self:center;border-radius:12px;min-height:44px;padding:0 12px}
- .ui #floors{top:120px;left:8px;right:8px;width:auto;padding:5px;gap:4px}
+ .ui #floors{top:8px;left:calc(var(--rail-w) + 8px);right:8px;width:auto;padding:5px;gap:4px}
  .ui #floors .section-stack button{display:flex;min-height:50px;padding:3px;gap:2px;margin:0;border:0;border-radius:6px;font-size:11px}
- .ui .floor-thumb{display:none}.ui .floor-count{font-size:10px;margin:0;padding:0 4px}.ui .floor-count::after{content:' people'}
+ .ui .floor-thumb{display:none}.ui .floor-count{font-size:10px;margin:0;padding:0 4px}
  .ui #floors .building-button{padding:4px;justify-content:center;min-height:52px}.ui #floors .building-button::before,.ui #floors .building-button::after{display:none}
- .ui #floorCaption{left:8px;right:8px;width:auto}
- .ui #sceneStatus{top:190px}.ui #log{top:230px;left:8px;right:8px;width:auto}
- .ui .simulation-controls .btn::before{display:none}
+ .ui #log{top:auto;bottom:150px;left:calc(var(--rail-w) + 8px);right:8px;width:auto}
+ .ui .simulation-controls>.btn::before,.ui #moments>summary::before{display:none}
  .ui #info{max-height:calc(100dvh - 390px)}
 }
-/* Short desktop screens: the taller building nav would run into the caption, so shrink the nav, drop the caption's floor list (the nav already shows it), and hide the caption when even that does not fit. */
 @media(min-width:1001px) and (max-height:960px){
  .ui #floors .section-stack button{min-height:58px;padding:5px 8px}
  .ui .floor-thumb{width:60px;height:44px}
- .ui #floorTitle{font-size:22px}
 }
-@media(min-width:1001px) and (max-height:820px){.ui #floorDescription{display:none}}
-@media(min-width:1001px) and (max-height:740px){.ui #floorCaption{display:none}}
 /* Members connected to an AI agent: a badge in the detail sheet and a small dot on their name label. */
 .ai-badge{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:10px;background:#e8f3ec;color:#2f6b47;font:600 11px var(--sans);vertical-align:1px}
 .name-label.ai{padding-right:19px;background-image:radial-gradient(circle at calc(100% - 9px) 50%,#3fae6a 3.5px,transparent 4.5px)}
@@ -276,4 +218,56 @@ body{--i-list:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' 
 #cReturn{width:100%;margin-top:10px}
 #bCustom[aria-pressed=true]{background:var(--ink);color:var(--sheet)}
 body.customizing #c{cursor:move}
-@media(max-width:1000px){#customPanel{left:12px;right:12px;width:auto;bottom:130px;max-height:calc(100dvh - 345px)}body:has(#customPanel:not([hidden])) #floorCaption,body:has(#customPanel:not([hidden])) #log{display:none}}
+#cameraControls{position:fixed;right:24px;bottom:100px;z-index:5;display:flex;flex-direction:column;gap:6px}#cameraControls .btn{width:44px;min-height:44px;padding:8px 4px}.moment-menu{position:absolute;bottom:calc(100% + 8px);left:0;display:grid;gap:6px;padding:8px;background:var(--sheet);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(60,48,30,.12)}#moments{position:relative}#moments summary{list-style:none;cursor:pointer}#moments summary::-webkit-details-marker{display:none}
+
+:root{--rail-w:212px}
+.ui #rail{position:fixed;z-index:10;left:16px;top:16px;bottom:16px;width:calc(var(--rail-w) - 28px);display:flex;flex-direction:column;gap:2px;padding:12px;background:#fff;border:1px solid rgba(30,34,48,.06);border-radius:16px;box-shadow:0 10px 28px rgba(60,48,30,.12)}
+.ui #railBrand{display:flex;align-items:center;gap:10px;padding:4px 4px 14px;margin-bottom:8px;border-bottom:1px solid var(--line)}
+.ui #railBrand .brand-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:var(--accent);color:#fff;flex:none}
+.ui #railBrand .brand-mark svg{width:22px;height:22px}
+.ui #railBrand .brand-name{min-width:0}.ui #railBrand strong{display:block;font-size:16px;line-height:1.1}.ui #railBrand .brand-meta{display:block;margin-top:3px;font:500 11px var(--sans);color:var(--ink-2)}
+.ui #rail>.btn,.ui #railMore>summary,.ui #railMore .btn{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:0 10px;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:14px;font-weight:500;text-align:left;cursor:pointer}
+.ui #rail>.btn:hover,.ui #railMore>summary:hover,.ui #railMore .btn:hover{background:var(--hover)}
+.ui #rail>.btn::before,.ui #railMore>summary::before,.ui #railMore .btn::before{content:'';width:18px;height:18px;flex:none;background:currentColor;opacity:.75;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}
+.ui #navOffice{--icon:var(--i-home)}.ui #bTasks{--icon:var(--i-list)}.ui #bOrg{--icon:var(--i-org)}.ui #bTeam{--icon:var(--i-team)}.ui #bCustom{--icon:var(--i-layout)}.ui #decisions{--icon:var(--i-decision)}.ui #railMore>summary{--icon:var(--i-more)}.ui #bSettings{--icon:var(--i-calendar)}.ui #bLock{--icon:var(--i-target)}
+.ui #rail [aria-current=page],.ui #rail #bCustom[aria-pressed=true]{background:#fdeee9;color:var(--accent)}
+.ui #rail [aria-current=page]::before,.ui #rail #bCustom[aria-pressed=true]::before{opacity:1}
+.ui #bTasks.primary{background:transparent;color:var(--ink)}
+.ui #bTasks.primary[aria-current=page]{background:#fdeee9;color:var(--accent)}
+.ui #taskCount,.ui #decisions .badge{margin-left:auto;min-width:22px;padding:1px 7px;border-radius:999px;background:#f0ece5;color:var(--ink);font:700 11px var(--mono);text-align:center}
+.ui #decisions .badge{background:#fff1d6;color:#7a4d0e}
+.ui #decisions .badge:empty{display:none}
+.ui #railMore{margin-top:auto;border-top:1px solid var(--line);padding-top:8px;position:relative}
+.ui #railMore>summary{list-style:none}.ui #railMore>summary::-webkit-details-marker{display:none}
+.ui #railMore>div{display:grid;gap:2px;padding-top:2px}
+.ui #rail [hidden]{display:none}
+.ui #teamPopover{position:fixed;left:calc(var(--rail-w) + 4px);top:180px;width:280px;max-height:60vh;overflow:auto;padding:12px;background:#fff;border:1px solid rgba(30,34,48,.06);border-radius:14px;box-shadow:0 10px 28px rgba(60,48,30,.16)}
+.ui #teamSearch{width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font:inherit}
+#teamList{list-style:none;margin:8px 0 0;padding:0}#teamList li{margin:2px 0}#teamList button{width:100%;min-height:40px;padding:8px 10px;text-align:left;border:0;background:transparent;border-radius:8px;font-size:13px}#teamList button:hover{background:var(--hover)}
+.drawer{position:fixed;z-index:20;inset:0 auto 0 var(--rail-w);width:min(760px,calc(100vw - var(--rail-w)));max-width:none;height:100%;margin:0;padding:24px;overflow:auto;background:var(--sheet);color:var(--ink);border:0;border-left:1px solid var(--line);border-radius:0}.drawer::backdrop{background:transparent}.drawer-header{display:flex;justify-content:space-between;align-items:center}.drawer-header h1{margin:0}
+.ui #floors{left:var(--rail-w)}
+.ui #sceneStatus{z-index:3;left:calc(var(--rail-w) + (100vw - var(--rail-w))/2);right:auto;transform:translateX(-50%);top:24px}
+.ui #followBar{z-index:5;left:calc(var(--rail-w) + (100vw - var(--rail-w))/2);top:22px}
+.ui #controls{z-index:4;left:calc(var(--rail-w) + (100vw - var(--rail-w))/2)}
+.ui #info{z-index:5}
+@media(max-width:1000px){:root{--rail-w:80px}.ui #rail{left:8px;top:8px;bottom:8px;width:64px;padding:8px 6px;align-items:center}.ui #railBrand{justify-content:center;border:0;padding:0 0 8px}.ui #railBrand .brand-name{display:none}.ui #rail>.btn,.ui #railMore>summary,.ui #railMore .btn{flex-direction:column;justify-content:center;gap:2px;padding:6px 2px;font-size:10px;text-align:center;min-height:52px}.ui #taskCount,.ui #decisions .badge{margin:0;font-size:9px;padding:0 5px}.ui #railMore>div{position:absolute;left:calc(100% + 8px);bottom:0;width:180px;padding:8px;background:#fff;border-radius:12px;box-shadow:0 10px 28px rgba(60,48,30,.16)}.ui #railMore .btn{flex-direction:row;font-size:13px;justify-content:flex-start}.drawer{left:var(--rail-w);width:calc(100vw - var(--rail-w));padding:16px}.ui #teamPopover{left:var(--rail-w)}}
+@media(max-width:640px){:root{--rail-w:0px}.ui #rail{left:0;right:0;top:auto;bottom:0;width:100%;height:64px;padding:4px 4px max(4px,env(safe-area-inset-bottom));flex-direction:row;align-items:center;justify-content:space-around;border-radius:0}.ui #railBrand{display:none}.ui #rail>.btn,.ui #railMore>summary{width:auto;min-width:44px;min-height:52px;padding:4px}.ui #railMore{margin:0;border:0;padding:0}.ui #railMore>div{left:auto;right:0;bottom:64px}.drawer{left:0;bottom:64px;width:100%;height:calc(100% - 64px)}.ui #floors{left:8px}.ui #sceneStatus,.ui #followBar,.ui #controls{left:50%}.ui #controls{bottom:76px;max-width:calc(100% - 16px)}.ui #cameraControls{right:8px;bottom:190px;z-index:6}.ui #teamPopover{left:8px;right:8px;top:auto;bottom:72px;width:auto}}
+
+/* Responsive fixes for the rail layout. */
+@media(max-width:1000px){.ui #floors{top:8px}.ui #sceneStatus{top:96px;max-width:calc(100vw - var(--rail-w) - 24px);text-align:center}.ui #log{bottom:96px}.ui #log #logList{max-height:30vh}.ui #cameraControls{bottom:260px}}
+@media(max-width:640px){.ui #floors .section-stack button>span:not([class]){font-size:10px}.ui #floors .floor-number{font-size:10px}.ui #controls{width:calc(100% - 16px);padding:6px;gap:4px}.ui .simulation-controls{gap:4px;flex-wrap:nowrap;width:100%}.ui #controls .btn,.ui #moments>summary{padding:0 8px;font-size:12px;flex:1;justify-content:center}.ui .music-volume{display:none}.ui #log{bottom:140px}.ui #cameraControls{bottom:300px}.ui #log .log-head{padding:10px 12px}.ui .log-stats{padding:0 12px 10px}}
+/* Right-side panels: profile and customize share the column above the camera controls. */
+@media(min-width:1001px){
+ .ui #info,.ui #customPanel{top:24px;right:24px;bottom:auto;width:320px;max-height:calc(100dvh - 300px);overflow:auto;border-radius:16px}
+ body:has(#info:not([hidden])) #log,body:has(#customPanel:not([hidden])) #log{display:none}
+ .ui #cameraControls{bottom:36px}
+}
+.ui #info .check{margin-top:4px}
+.ui .moment-menu{z-index:6}
+body:has(dialog.drawer[open]) #sceneStatus{left:calc(var(--rail-w) + min(760px,100vw - var(--rail-w)) + (100vw - var(--rail-w) - min(760px,100vw - var(--rail-w)))/2)}
+.ui .log-stats strong{line-height:1.1}.ui .log-stats span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Status pill sits under the log when a drawer is open, so it never collides with the log card. */
+body:has(dialog.drawer[open]) .ui #sceneStatus,body.ui:has(dialog.drawer[open]) #sceneStatus{top:auto;bottom:110px}
+/* Profile and customize panels: no stray backdrop strip below the card. */
+.ui #info,.ui #customPanel{box-shadow:0 10px 28px rgba(60,48,30,.12)}
+@media(min-width:1001px){body.ui:has(#info:not([hidden])) #log,body.ui:has(#customPanel:not([hidden])) #log{display:none}}
