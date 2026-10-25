@@ -67,7 +67,13 @@
         // and an arriving vehicle never yields to a departing one (prevents head-on standoffs in the aisle).
         const departing=v.lane.endsWith(':depart'),arriving=v.lane.endsWith(':arrive')||v.lane===(bay&&bay.entryLane);
         if(departing&&v.distance<.01&&ordered.some(o=>o.id!==v.id&&o.lane&&(o.lane.endsWith(':arrive')||roads.get(o.lane)===roads.get(bay?.entryLane))))speed=0;
-        const closing=fl>1e-6&&ordered.some(o=>{if(o.id===v.id)return false;if(arriving&&o.lane?.endsWith(':depart'))return false;const ox=o.pose[0]-v.pose[0],oz=o.pose[2]-v.pose[2],along=(ox*fx+oz*fz)/fl,side=Math.abs(ox*fz-oz*fx)/fl;
+        const closing=fl>1e-6&&ordered.some(o=>{if(o.id===v.id)return false;if(arriving&&o.lane?.endsWith(':depart'))return false;
+        // Converging connectors all end at the same exit mouth, so two vehicles can each see the
+        // other "ahead" and wait forever. The one nearer its merge point has priority; a stopped
+        // vehicle farther from its junction never blocks one that is closer (id breaks exact ties).
+        const oRoad=o.lane&&roads.get(o.lane),oRemain=oRoad?oRoad.length-o.distance:Infinity,myRemain=l.length-v.distance;
+        if(o.speed===0&&o.lane!==v.lane&&(oRemain>myRemain||(oRemain===myRemain&&o.id>v.id)))return false;
+        const ox=o.pose[0]-v.pose[0],oz=o.pose[2]-v.pose[2],along=(ox*fx+oz*fz)/fl,side=Math.abs(ox*fz-oz*fx)/fl;
           return along>0&&along<(o.length+v.length)/2+.5+fl&&side<(o.width+v.width)/2+.2;});
         if(closing)speed=0;
         v.speed=speed;v.distance=Math.min(l.length,v.distance+speed*dt);v.pose=pose(v);

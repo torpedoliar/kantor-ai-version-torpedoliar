@@ -1407,7 +1407,9 @@
     if(spot){assign(agent,spot,rand(6,11));log(`${agent.n} ${ACTIVITY_LOG[kind]}`,agent.group);return;}
     assign(agent,agent.stretchSpot,rand(3.5,6));
   }
-  let travelSerial=0,nextExcursion=40;
+  // Excursions pace on the wall clock: a slow renderer slows simTime (dt is clamped per
+  // frame), and an idle-member drive should not become minutes just because the FPS dipped.
+  let travelSerial=0,nextExcursion=performance.now()+40000;
   let travelTaskStateKnown=false;
   document.addEventListener('officetasks:server',()=>{travelTaskStateKnown=true;});
   const tasksKnown=()=>travelTaskStateKnown||!!window.officeTasks?.online?.();
@@ -1434,8 +1436,8 @@
         if(a.spot===a.desk)mobility.arrive(trip.id,'walkToOffice');
       }
     }
-    if(!routineOn||!tasksKnown()||simTime<nextExcursion||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-    nextExcursion=simTime+25;
+    if(!routineOn||!tasksKnown()||performance.now()<nextExcursion||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    nextExcursion=performance.now()+25000;
     const a=agents.find(a=>!a.vehicleTrip&&!a.activity&&a.spot===a.desk&&window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),true));
     if(!a)return;const kind=travelSerial%2?'motorcycle':'car';if(!environment.audit().loaded.includes(kind))return;
     const id=mobility.request({id:'team-trip-'+(++travelSerial),owner:a.n,kind:'team',vehicle:kind});if(!id)return;

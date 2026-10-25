@@ -50,8 +50,11 @@ function stream(headers,after){
   again.close();await again.done;
   // Far behind (more than 500 events): an explicit resync marker instead of a partial replay.
   for(let i=0;i<505;i++)await call('POST',`/api/tasks/${task.id}/messages`,{text:`m${i}`});
+  // Owner messages schedule async agent replies; let that tail land so the resync cursor is measured on a quiet log.
+  let settled=0,quietSeq=(await call('GET','/api/task-events/snapshot')).body.seq;
+  for(let until=Date.now()+15000;Date.now()<until;){await new Promise(r=>setTimeout(r,150));const s=(await call('GET','/api/task-events/snapshot')).body.seq;if(s===quietSeq){if(++settled>=3)break;}else{settled=0;quietSeq=s;}}
   const behind=stream(auth,0);await wait(()=>behind.control.length,'resync');const latest=(await call('GET','/api/task-events/snapshot')).body.seq;
-  assert.equal(behind.control[0].resync.seq,latest);assert.equal(behind.events.length,0);behind.close();await behind.done;
+  assert.equal(behind.control[0].resync.seq,quietSeq,'resync carries the seq at subscribe time');assert.ok(latest>=behind.control[0].resync.seq);assert.equal(behind.events.length,0);behind.close();await behind.done;
   // Public events never carry credentials or provider snapshots.
   const all=[];for(let after=0;;){const page=(await call('GET',`/api/task-events?after=${after}`)).body.events;if(!page.length)break;all.push(...page);after=page.at(-1).seq;}
   const json=JSON.stringify(all);assert.doesNotMatch(json,/SECRET999|credential|baseUrl/);
