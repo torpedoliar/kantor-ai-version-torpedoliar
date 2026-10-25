@@ -262,7 +262,7 @@ async function work(name) {
         const target=org.escalationTarget(name),questions=asked[1].trim().slice(0,2000).split(/\n+/).map(q=>q.replace(/^\s*\d+[.)]\s*/,'').trim()).filter(Boolean).slice(0,10);
         // In a delegated plan the lead (when it is an AI agent) gets the question first; the owner only if it escalates.
         const parent=current.planRunId&&tasks.find(t=>t.id===current.parentId),leadAnswers=parent&&agentFor(parent.assignee);
-        const decision=commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'blocked',blockedReason:'decision',questions:questions.map((q,i)=>`${i+1}. ${q}`).join('\n'),decisionTarget:leadAnswers?parent.assignee:'owner',decisionPath:leadAnswers?[name,parent.assignee]:[name,'owner'],askedBy:by,providerId:result.route?.providerId||null,modelId:result.route?.modelId||null,usedFallback:!!result.fallback,runId:null,version:(t.version||0)+1,updatedAt:now()});return openDecision(draft,emit,{task:t,questions,target:leadAnswers?parent.assignee:'owner',path:leadAnswers?[name,parent.assignee]:target.path,askedBy:by});});
+        const decision=commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'blocked',blockedReason:'decision',retryCategory:undefined,autoAttempts:0,retryAt:undefined,questions:questions.map((q,i)=>`${i+1}. ${q}`).join('\n'),decisionTarget:leadAnswers?parent.assignee:'owner',decisionPath:leadAnswers?[name,parent.assignee]:[name,'owner'],askedBy:by,providerId:result.route?.providerId||null,modelId:result.route?.modelId||null,usedFallback:!!result.fallback,runId:null,version:(t.version||0)+1,updatedAt:now()});return openDecision(draft,emit,{task:t,questions,target:leadAnswers?parent.assignee:'owner',path:leadAnswers?[name,parent.assignee]:target.path,askedBy:by});});
         if(leadAnswers)setImmediate(()=>leadAnswer(current.id,decision.id,parent).catch(error=>console.error(`Lead answer failed: ${error.message}`)));
         return;
       }
@@ -270,7 +270,7 @@ async function work(name) {
       // Delegated plan tasks are reviewed by their lead (orchestrator); other staff drafts pass their manager first.
       const reviewer=current.planRunId?null:managerGate(name),to=reviewer?'manager-review':'review';
       // The draft lands in the task's thread in the same commit, so Komunikasi shows what the agent actually sent.
-      commit((store,emit)=>{const t=store.tasks.find(x=>x.id===current.id);Object.assign(t,{status:to,result:draft.result,by:draft.by,providerId:draft.providerId,modelId:draft.modelId,usedFallback:draft.usedFallback,history:[...(t.history||[]),draft],runId:null,version:(t.version||0)+1,updatedAt:now()});
+      commit((store,emit)=>{const t=store.tasks.find(x=>x.id===current.id);Object.assign(t,{status:to,result:draft.result,by:draft.by,providerId:draft.providerId,modelId:draft.modelId,usedFallback:draft.usedFallback,history:[...(t.history||[]),draft],runId:null,retryCategory:undefined,autoAttempts:0,retryAt:undefined,version:(t.version||0)+1,updatedAt:now()});
         emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{from:'active',to,phase:to}});
         emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:reviewer||(t.parentId?store.tasks.find(x=>x.id===t.parentId)?.assignee||'owner':'owner'),runId,data:{draft:true,...(reviewer?{manager:reviewer}:{})}});
         addMessage(store,emit,{task:t,sender:{type:'agent',name:t.assignee},kind:'result',text:draft.result});});
@@ -281,12 +281,52 @@ async function work(name) {
     const current = tasks.find(t => t.id === task.id);
     if (current && current.status === 'active' && current.assignee === name && current.runId === runId) {
       const reason=sanitizeText(error.name === 'AbortError' ? 'Model terlalu lama menjawab.' : error.message === 'fetch failed' ? 'Provider tidak bisa dihubungi. Periksa koneksi.' : error.message).slice(0,500);
-      // The owner hears about it in the task thread (and Komunikasi alerts), not only from a card label.
-      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'queued',runId:null,version:(t.version||0)+1,error:reason,updatedAt:now()});
-        addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'error',text:`${t.assignee} gagal mengerjakan tugas ini: ${reason}\nBuka tugas lalu klik Coba lagi setelah masalahnya diperbaiki.`});});
+      // Transient provider trouble (rate limit, outage, timeout) retries itself with backoff instead of
+      // parking the task until the owner returns; configuration errors still stop for the owner.
+      const category=error.category||'',attempts=current.autoAttempts||0;
+      const transient=RETRY_TRANSIENT.has(category)&&attempts<RETRY_DELAYS.length;
+      const nextDelay=RETRY_DELAYS[Math.min(attempts,RETRY_DELAYS.length-1)];
+      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===current.id);
+        Object.assign(t,{status:'queued',runId:null,version:(t.version||0)+1,updatedAt:now(),error:reason,
+          ...(transient?{retryCategory:category,autoAttempts:attempts+1,retryAt:Date.now()+nextDelay}
+            :{retryCategory:undefined,retryAt:undefined})});
+        if(transient){
+          emit({type:'task.retry_scheduled',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId:null,data:{attempt:attempts+1,of:RETRY_DELAYS.length,delayMs:nextDelay,category,reason}});
+          // One error message per failure streak, posted on the first attempt, with the self-healing plan.
+          if(attempts===0)addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'error',text:`${t.assignee} gagal mengerjakan tugas ini: ${reason}\nGangguan terdeteksi sementara (${category}); dicoba ulang otomatis ${attempts+1}/${RETRY_DELAYS.length} dalam ${Math.round(nextDelay/1000)} detik — tidak perlu melakukan apa pun.`});
+        }else if(attempts===0){
+          // The owner hears about it in the task thread (and Komunikasi alerts), not only from a card label.
+          addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'error',text:`${t.assignee} gagal mengerjakan tugas ini: ${reason}\nBuka tugas lalu klik Coba lagi setelah masalahnya diperbaiki.`});
+        }else{
+          // The streak is exhausted: close the narration, then the alert and card label take over.
+          addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'text',text:`Percobaan ulang otomatis dihentikan setelah ${attempts} kali; tugas menunggu keputusan pemilik.`});
+        }});
+      if(transient)armRetry(current.id);
     }
     console.error(`Agent ${name} failed on "${task.title}": ${error.message}`);
   } finally { liveTyping.delete(task.id);busy.delete(name); setImmediate(() => work(name)); }
+}
+// ---- automatic retry with backoff (audit R1): one timer per task, cancelled by any owner action ----
+const RETRY_DELAYS=(process.env.KANTOR_RETRY_DELAYS_MS||'30000,120000,480000').split(',').map(v=>Math.max(0,Number(v)||0)).slice(0,10);
+const RETRY_TRANSIENT=new Set(['quota','unavailable','connection','timeout']);
+const retryTimers=new Map();
+function armRetry(taskId,at){
+  clearTimeout(retryTimers.get(taskId));retryTimers.delete(taskId);
+  const task=tasks.find(t=>t.id===taskId);
+  if(!task||task.status!=='queued'||!task.error||!RETRY_TRANSIENT.has(task.retryCategory||''))return;
+  const due=at??task.retryAt,token=task.retryAt;
+  if(!Number.isFinite(due))return;
+  retryTimers.set(taskId,setTimeout(()=>{
+    retryTimers.delete(taskId);
+    const current=tasks.find(t=>t.id===taskId);
+    // Any owner action that cleared or moved the task cancels the attempt (token mismatch).
+    if(!current||current.status!=='queued'||!current.error||current.retryAt!==token)return;
+    commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===taskId);if(!t||t.status!=='queued'||!t.error||t.retryAt!==token)return;
+      Object.assign(t,{error:undefined,retryAt:undefined,retryRequested:true,version:(t.version||0)+1,updatedAt:now()});
+      emit({type:'task.retry',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId:null,data:{attempt:t.autoAttempts,of:RETRY_DELAYS.length}});
+      addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'text',text:`Percobaan ulang otomatis ${t.autoAttempts}/${RETRY_DELAYS.length} dimulai.`});});
+    // The store subscription kicks the worker for the released task.
+  },Math.max(0,due-Date.now())));
 }
 function modelEvent(type,task,runId,data){commit((draft,emit)=>{emit({type,taskId:task.id,rootId:task.rootId||task.id,agent:task.assignee,runId,data});});}
 // ---- manager advice (port dari orchestrator-patterns): the AI manager recommends on every staff draft ----
@@ -327,6 +367,37 @@ async function managerAdvice(taskId){
     console.error(`Manager advice by ${manager} failed on "${task.title}": ${error.message}`);
   }finally{adviceBusy.delete(taskId);}
 }
+// ---- decision SLA (audit R2): an owner decision that sits too long gets one reminder, ----
+// ---- then a labelled recommendation from the top member when that member is an agent. ----
+// ---- The owner still decides; this only keeps the pipeline from stalling silently. ----
+const DECISION_SLA=Number(process.env.KANTOR_DECISION_SLA_MS||900000);
+const DECISION_INSTRUCTIONS='You are the top member of this company. A task is stopped waiting for the owner to answer the questions below. Draft the best answer from the facts available: concrete, short, in the language of the task. If a fact is genuinely missing, say exactly what must be asked. This is a recommendation for the owner to confirm, not a decision.';
+const recommending=new Set();
+function decisionSlaTick(){
+  const state=taskStore.snapshot(),top=org.state.members.find(m=>m.manager===null&&m.active);
+  for(const d of state.decisions){
+    if(d.status!=='open'||(d.target&&d.target!=='owner'))continue;
+    const task=state.tasks.find(t=>t.id===d.taskId);
+    if(!task)continue;
+    const age=Date.now()-(Date.parse(d.openedAt)||0);
+    if(!d.nudged&&age>=DECISION_SLA){
+      commit((draft,emit)=>{const x=draft.decisions.find(z=>z.id===d.id);if(!x||x.status!=='open'||x.nudged)return;x.nudged=true;
+        const t=draft.tasks.find(t=>t.id===x.taskId);
+        addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'text',text:`Keputusan ini sudah menunggu lama dan menahan tugas "${t?t.title:''}". Jawab di Komunikasi agar pekerjaan lanjut.`});
+        emit({type:'decision.nudged',taskId:x.taskId,rootId:t?.rootId||x.taskId,data:{decisionId:x.id}});});
+    }else if(!d.recommended&&!recommending.has(d.id)&&age>=DECISION_SLA*2&&top&&agentFor(top.name)){
+      recommending.add(d.id);
+      askModel(top.name,{...task,brief:`${DECISION_INSTRUCTIONS}\n\nTask: ${task.title}\nBrief:\n${task.brief||'(none)'}\nQuestions blocking the task:\n${task.questions||''}`,feedback:''})
+        .then(answer=>{commit((draft,emit)=>{const x=draft.decisions.find(z=>z.id===d.id);if(!x||x.status!=='open'||x.recommended)return;x.recommended=String(answer.text).slice(0,2000);
+          const t=draft.tasks.find(t=>t.id===x.taskId);
+          addMessage(draft,emit,{task:t,sender:{type:'agent',name:top.name},kind:'advice',text:`Saran jawaban (menunggu konfirmasi owner): ${x.recommended.slice(0,1200)}`});
+          emit({type:'decision.recommended',taskId:x.taskId,rootId:t?.rootId||x.taskId,data:{decisionId:x.id,by:top.name}});});})
+        .catch(error=>console.error(`Decision recommendation failed on "${task.title}": ${error.message}`))
+        .finally(()=>recommending.delete(d.id));
+    }
+  }
+}
+setInterval(decisionSlaTick,Math.max(5000,Math.min(60000,Math.round(DECISION_SLA/4)))).unref();
 // Live event streams: owner-only, replay by sequence, explicit resync when the client is too far behind.
 const EVENT_REPLAY=500,streams=new Set();
 taskStore.subscribe(events=>{for(const client of streams)for(const event of events)client.push(event);});
@@ -607,7 +678,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
   if (url.pathname === '/api/communications' && req.method === 'GET') {
     const after=Number(url.searchParams.get('after')||0),state=taskStore.snapshot();
     // Alerts are derived from current task state: they clear by themselves once the task is retried or recovers.
-    const alerts=state.tasks.filter(t=>t.error&&(t.status==='queued'||(t.status==='blocked'&&['failed','interrupted','environment_unavailable'].includes(t.blockedReason)))).map(t=>({taskId:t.id,assignee:t.assignee,text:`${t.title}: ${t.error}`.slice(0,300),since:t.updatedAt}));
+    const alerts=state.tasks.filter(t=>t.error&&!t.retryAt&&(t.status==='queued'||(t.status==='blocked'&&['failed','interrupted','environment_unavailable'].includes(t.blockedReason)))).map(t=>({taskId:t.id,assignee:t.assignee,text:`${t.title}: ${t.error}`.slice(0,300),since:t.updatedAt}));
     return send(res,200,{threads:threadSummaries(state),messages:state.messages.filter(m=>m.seq>after).slice(-200),decisions:state.decisions,alerts,reads:state.reads.owner,nextSeq:state.nextSeq});
   }
   // Generated sources: owner-only metadata and per-file download as plain text (never served as runnable pages here).
@@ -681,7 +752,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     const task=tasks.find(t=>t.id===threadMatch[1]);if(!task)return send(res,404,{error:'Task not found.'});
     // On a failed task the owner's message ("lanjutkan", "coba lagi", or any instruction) retries it with that message as context.
     if(task.error&&task.status==='queued'){
-      const message=commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);Object.assign(t,{error:undefined,retryRequested:true,version:(t.version||0)+1,updatedAt:now()});return addMessage(draft,emit,{task:t,sender:{type:'owner',name:'Owner'},text:body});},{requestKey:req.headers['x-kantor-request']});
+      const message=commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);Object.assign(t,{error:undefined,retryRequested:true,retryAt:undefined,version:(t.version||0)+1,updatedAt:now()});return addMessage(draft,emit,{task:t,sender:{type:'owner',name:'Owner'},text:body});},{requestKey:req.headers['x-kantor-request']});
       setImmediate(kick);return send(res,201,{...message,retried:true,pendingForNextStep:false});
     }
     // While the agent waits on questions, a chat reply IS the answer: resolve the open decision and resume once.
@@ -812,7 +883,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     }
     if(!Object.keys(change).length)return send(res,400,{error:'Provide an assignee, status, or review action.'});
     // Moving a task back to the queue clears a previous agent error so it is tried again.
-    Object.assign(task, change, {runId:null,version:(task.version||0)+1,error: undefined, updatedAt: now()}); promoteParent(task.parentId); save(); kick(); return send(res, 200, task);
+    Object.assign(task, change, {runId:null,version:(task.version||0)+1,error: undefined, retryAt: undefined, autoAttempts: 0, retryCategory: undefined, updatedAt: now()}); promoteParent(task.parentId); save(); kick(); return send(res, 200, task);
   }
   send(res, 404, {error: 'Not found.'});
 }
@@ -844,4 +915,11 @@ server.listen(PORT, HOST, () => {
   kick();
   // Drafts already waiting at the manager gate get their AI manager's recommendation again after a restart.
   tasks.forEach(task => { if (task.status === 'manager-review' && !task.managerAdvice) managerAdvice(task.id); });
+  // Pending automatic retries survive a restart: past-due ones are released now, future ones re-armed.
+  let rearmed=false;
+  tasks.forEach(task => { if (task.status==='queued'&&task.error&&RETRY_TRANSIENT.has(task.retryCategory||'')&&Number.isFinite(task.retryAt)) {
+    if (task.retryAt<=Date.now()) { Object.assign(task,{error:undefined,retryAt:undefined,retryRequested:true,version:(task.version||0)+1,updatedAt:now()}); rearmed=true; }
+    else armRetry(task.id);
+  } });
+  if (rearmed) { save(); kick(); }
 });

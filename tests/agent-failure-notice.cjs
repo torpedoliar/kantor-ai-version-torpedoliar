@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),http=require('node:http'),fs=require(
 const PORT=Number(process.env.TEST_PORT||43661),origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-fail-notice-'));
 const mock=http.createServer((req,res)=>{req.resume();req.on('end',()=>{res.writeHead(500,{'content-type':'application/json'});res.end('{"error":"boom"}');});});
 (async()=>{await new Promise(r=>mock.listen(0,'127.0.0.1',r));
- const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',KANTOR_SETTINGS_KEY:Buffer.alloc(32,5).toString('base64')},stdio:['ignore','pipe','inherit']});
+ const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',KANTOR_SETTINGS_KEY:Buffer.alloc(32,5).toString('base64'),KANTOR_RETRY_DELAYS_MS:'100,100,100'},stdio:['ignore','pipe','inherit']});
  try{await new Promise((r,j)=>{child.stdout.on('data',d=>String(d).includes('Kantor Kita:')&&r());child.on('exit',c=>j(Error('exit '+c)));});
   const csrf=(await(await fetch(origin+'/api/session')).json()).csrf;let token='';
   const call=async(m,p,b)=>{const r=await fetch(origin+p,{method:m,headers:{'content-type':'application/json',origin,'x-kantor-csrf':csrf,...(token?{'x-kantor-org':token}:{})},body:b&&JSON.stringify(b)});return {status:r.status,body:await r.json().catch(()=>null)};};
