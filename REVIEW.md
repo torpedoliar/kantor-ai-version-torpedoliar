@@ -1,5 +1,11 @@
 # Pemeriksaan kantor empat lantai
 
+## Porting advice atasan dan ruangan custom ke arsitektur v2 (25 Okt 2026)
+
+Dua fitur dari cabang `orchestrator-patterns` yang belum ada padanannya di v2 dikembalikan, menyesuaikan arsitektur baru: **advice atasan AI** kini berupa satu panggilan model ber-purpose `manager-review` lewat `askConfigured` (routing, gerbang konkurensi, dan dry-run yang sama), rekomendasinya masuk thread tugas sebagai pesan `advice` plus event `manager.advice`, gagal diparkir di `adviceError` dengan aksi owner-only `retry-advice`, dan restart server mengulang review yang belum selesai. **Ruangan custom** kini store `data/rooms.json` dengan API owner-gated, drawer Ruang berisi denah 2D (seret snap 0,5 m + furnitur katalog), dan pembangunan ulang tanpa muat ulang lewat `officeScene.applyRooms` — spot kursi masuk pool rutinitas lantainya sehingga ekskursi antar-lantai menjemputnya, musholla custom ikut pool waktu salat, rapat selalu satu ruangan, dan hapus ruangan berpenghuni ditolak. Validasi murni tetap di `server/rooms.js`.
+
+Uji: `tests/manager-advice.cjs` (verdict + fallback tanpa VERDICT, pesan thread, event, retry, atasan manual tanpa advice, pickup restart) dan `tests/rooms.cjs` (guard API, build 3D, nav grid, ekskursi mencapai ruangan, okupansi, drawer). Suite unit 69/69 dan UI kunci (server, task-board, nav, org-chat, office) hijau.
+
 ## Evening building overview (30 Sep 2026)
 
 Referensi full-building bernuansa senja disetujui pengguna. Design read: gedung kantor interaktif dengan interior hangat, panel navy dan seleksi biru; ENERGY 2 / RHYTHM 2 / MOTION 2. Kamera overview diperbesar dan ditengahkan di antara panel. Cahaya lingkungan dikurangi, sumber hangat per lantai serta lampu pagar memberi pembeda interior/kota. Kabut tipis menenangkan lingkungan jauh. Mode satu lantai mempertahankan interior siang.

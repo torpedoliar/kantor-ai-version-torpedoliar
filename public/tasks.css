@@ -158,3 +158,18 @@ dialog.wizard button:disabled{opacity:.5;cursor:default}
 /* The stepper never shrinks: the content area scrolls instead. */
 .wizard-form>.wizard-header,.wizard-form>.wizard-steps,.wizard-form>.wizard-footer{flex-shrink:0}
 @media(max-width:640px){.wizard-steps li{min-width:0;font-size:0;padding:0}.wizard-steps li[aria-current=step]{font-size:12px;flex:3;padding-top:6px}}
+
+/* Manager advice (port dari orchestrator-patterns): the AI manager recommends, the owner decides. */
+.advice-approve{color:#2f6b47}.advice-revise{color:#9a6212}
+.advice-text{background:#f4f8f5}
+/* Rooms drawer (port): list rows, template grid, floor-plan canvas, furniture chips. */
+.room-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;border-top:1px solid var(--line);padding:12px 0}
+.room-row strong{margin-right:auto}
+.room-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px}
+.room-grid label{margin-top:0!important}
+#roomPlan{display:block;width:100%;max-width:360px;height:auto;border:1px solid var(--line);border-radius:8px;background:#f7f3ed;touch-action:none;cursor:grab;margin:8px 0}
+.room-furnish{margin:8px 0}
+.furnish-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.furnish-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:9px;background:#fffdf8;padding:3px 6px;font:500 11px var(--mono)}
+.furnish-remove{border:0;background:transparent;padding:0 4px;font-size:14px;line-height:1;min-height:0;cursor:pointer}
+@media(max-width:640px){.room-grid{grid-template-columns:1fr}}

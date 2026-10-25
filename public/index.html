@@ -24,7 +24,7 @@
     <button id="bOrg" class="btn" type="button" data-drawer="orgDialog">Organisasi</button>
     <button id="bTeam" class="btn" type="button">Tim</button>
     <button id="bCustom" class="btn" type="button" aria-pressed="false">Tata ruang</button>
-    <details id="railMore"><summary class="btn">Lainnya</summary><div><button id="bSettings" class="btn" type="button" data-drawer="settingsDialog">Pengaturan</button><button id="bLock" class="btn" type="button" disabled title="Menghubungkan ke server lokal…">Kunci</button></div></details>
+    <details id="railMore"><summary class="btn">Lainnya</summary><div><button id="bSettings" class="btn" type="button" data-drawer="settingsDialog">Pengaturan</button><button id="bRooms" class="btn" type="button" hidden>Ruang</button><button id="bLock" class="btn" type="button" disabled title="Menghubungkan ke server lokal…">Kunci</button></div></details>
     <button id="decisions" class="btn" type="button" data-drawer="taskDialog" hidden>Keputusan <span class="badge"></span></button>
     <div id="teamPopover" hidden><input id="teamSearch" type="search" placeholder="Cari nama atau peran"><ul id="teamList"></ul></div>
   </nav>
@@ -42,6 +42,24 @@
   </dialog>
   <div id="notificationCenter" aria-live="polite" aria-label="Notifikasi"></div>
   <dialog id="orgDialog" class="drawer drawer-wide" aria-labelledby="orgHeading"><header class="drawer-header"><h1 id="orgHeading">Organisasi</h1><button type="button" id="closeOrg">Tutup</button></header><section id="orgPanel" class="org-panel" aria-label="Struktur organisasi"></section></dialog>
+  <dialog id="roomsDialog" class="drawer drawer-wide" aria-labelledby="roomsHeading">
+    <header class="settings-header"><div><h1 id="roomsHeading">Ruang</h1><p>Tambah ruangan dari template, seret posisinya di denah, dan letakkan furnitur. Kantor 3D diperbarui tanpa muat ulang.</p></div><button type="button" id="roomsClose">Tutup</button></header>
+    <p id="roomsMessage" role="status" aria-live="polite"></p>
+    <div id="roomsList"></div>
+    <button type="button" id="addRoom" class="btn primary">+ Tambah ruangan</button>
+    <form id="roomForm" hidden>
+      <label for="roomName">Nama</label><input id="roomName" required maxlength="80">
+      <div class="room-grid">
+        <div><label for="roomFloor">Lantai</label><select id="roomFloor"></select></div>
+        <div><label for="roomType">Tipe</label><select id="roomType"></select></div>
+        <div><label for="roomCapacity">Kursi</label><input id="roomCapacity" type="number" min="1" max="8" required></div>
+      </div>
+      <p class="settings-note">Seret kotak beraksen untuk memindahkan ruangan. Klik di dalamnya untuk menaruh furnitur yang dipilih.</p>
+      <canvas id="roomPlan" width="360" height="272" aria-label="Denah lantai"></canvas>
+      <div class="room-furnish"><label for="roomKind">Furnitur</label><select id="roomKind"></select><div id="roomFurniture" class="furnish-list"></div></div>
+      <div class="settings-actions"><button type="submit" class="primary" id="roomSave">Simpan ruangan</button><button type="button" id="roomCancel">Batal</button></div>
+    </form>
+  </dialog>
   <dialog id="wizardDialog" class="wizard" aria-labelledby="wizardHeading"></dialog>
   <dialog id="resetDialog" class="wizard reset-dialog" aria-labelledby="resetHeading"></dialog>
   <dialog id="pinDialog" aria-labelledby="pinHeading"><h2 id="pinHeading">Buka kunci organisasi</h2><form id="pinForm"><label for="orgPin">PIN owner</label><input id="orgPin" type="password" inputmode="numeric" minlength="4" maxlength="6" required><p id="pinMessage" role="status"></p><button id="pinSubmit" type="submit">Buka kunci</button></form></dialog>
@@ -135,6 +153,7 @@
   <script src="task-flow.js"></script>
   <script src="application-panel.js"></script>
   <script src="messenger.js"></script>
+  <script src="rooms.js"></script>
   <script src="tasks.js"></script>
   <script src="music.js"></script>
   <script type="importmap">{"imports":{"three":"./vendor/three/three.module.min.js","three/addons/":"./vendor/three/"}}</script>

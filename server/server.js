@@ -85,6 +85,14 @@ function guardRequest(req){
 
 // ---- durable workspace: migrate the legacy tasks file once, then commit tasks and events together ----
 const taskStore=createTaskStore({dataDir:DATA_DIR});
+// ---- custom rooms (port dari orchestrator-patterns): template rooms on a floor plan, built into the 3D office ----
+const roomsApi=require('./rooms');
+const ROOMS_FILE=path.join(DATA_DIR,'rooms.json');
+let roomList;
+try{roomList=JSON.parse(fs.readFileSync(ROOMS_FILE,'utf8'));if(!Array.isArray(roomList))throw new Error('not a list');}
+catch(error){if(error.code==='ENOENT')roomList=structuredClone(roomsApi.SEED);else{console.error(`Cannot read ${ROOMS_FILE}: ${error.message}. Fix or move the file, then restart.`);process.exit(1);}}
+function saveRooms(){const tmp=`${ROOMS_FILE}.${process.pid}.tmp`;fs.writeFileSync(tmp,JSON.stringify(roomList,null,2));fs.renameSync(tmp,ROOMS_FILE);}
+if(!fs.existsSync(ROOMS_FILE))saveRooms();
 const projects=createProjectWorkspace({dataDir:DATA_DIR});
 const previews=createPreviewService({projects});
 let tasks=taskStore.snapshot().tasks;
@@ -266,6 +274,8 @@ async function work(name) {
         emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{from:'active',to,phase:to}});
         emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:reviewer||(t.parentId?store.tasks.find(x=>x.id===t.parentId)?.assignee||'owner':'owner'),runId,data:{draft:true,...(reviewer?{manager:reviewer}:{})}});
         addMessage(store,emit,{task:t,sender:{type:'agent',name:t.assignee},kind:'result',text:draft.result});});
+      // A manager connected to an AI agent reads the draft right away; the owner still decides.
+      if(reviewer&&agentFor(reviewer))setImmediate(()=>managerAdvice(current.id));
     }
   } catch (error) {
     const current = tasks.find(t => t.id === task.id);
@@ -279,6 +289,44 @@ async function work(name) {
   } finally { liveTyping.delete(task.id);busy.delete(name); setImmediate(() => work(name)); }
 }
 function modelEvent(type,task,runId,data){commit((draft,emit)=>{emit({type,taskId:task.id,rootId:task.rootId||task.id,agent:task.assignee,runId,data});});}
+// ---- manager advice (port dari orchestrator-patterns): the AI manager recommends on every staff draft ----
+// ---- at the gate; it never approves anything. Failure parks an error with a retry; boot retries what is missing. ----
+const adviceBusy=new Set();
+async function managerAdvice(taskId){
+  if(adviceBusy.has(taskId))return;
+  const task=tasks.find(t=>t.id===taskId);
+  if(!task||task.status!=='manager-review'||task.managerAdvice)return;
+  const manager=managerGate(task.assignee);
+  if(!manager||!agentFor(manager))return;
+  adviceBusy.add(taskId);
+  const profile=org.roster().find(member=>member.name===manager)||{},snapshot=settings.resolve(manager,profile),runId=crypto.randomUUID();
+  try{
+    const prompt=[`You are ${manager}${profile.role?` (${profile.role})`:''}. Review this draft from your direct report before it reaches the owner.`,`Task: ${task.title}`,`Brief:\n${task.brief||'(no brief given)'}`,`Draft:\n${task.result}`,'Check facts first, then tone, then completeness. Keep it under 200 words and write in the language of the draft.','End with exactly one line: VERDICT: approve (ready for the owner) or VERDICT: revise (needs changes first).'].join('\n\n');
+    const route={providerId:snapshot.dryRun?null:snapshot.route?.providerId||null,modelId:snapshot.dryRun?'dry-run':snapshot.route?.modelId||null};
+    modelEvent('model.started',task,runId,{purpose:'manager-review',...route});
+    let answer;
+    if(snapshot.dryRun){await new Promise(r=>setTimeout(r,Number(process.env.DRY_RUN_DELAY_MS??2000)/2));answer=(task.brief||'').trim().length>=12?'DRY RUN review: the draft matches the brief; nothing obvious is missing.\nVERDICT: approve':'DRY RUN review: the brief is thin; ask for the missing details before approving.\nVERDICT: revise';}
+    else answer=(await askConfigured(snapshot,buildAgent(profile,org.state,snapshot.route||{}),{...task,brief:prompt,feedback:''})).answer;
+    modelEvent('model.completed',task,runId,{purpose:'manager-review',...route});
+    const verdict=/VERDICT:\s*(approve|revise)/i.exec(answer)?.[1]?.toLowerCase()||'revise';
+    const current=tasks.find(t=>t.id===taskId);
+    // The draft may have been approved, rejected or moved while the manager read it.
+    if(current&&current.status==='manager-review'&&!current.managerAdvice){
+      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===taskId);if(!t||t.status!=='manager-review'||t.managerAdvice)return;
+        t.managerAdvice={verdict,text:answer.slice(0,4000),by:snapshot.dryRun?'dry-run':route.modelId||profile.model||'model',at:now()};t.adviceError=undefined;
+        emit({type:'manager.advice',taskId:t.id,rootId:t.rootId||t.id,agent:manager,runId:null,data:{verdict,manager}});
+        addMessage(draft,emit,{task:t,sender:{type:'agent',name:manager},kind:'advice',text:`${verdict==='approve'?'Setuju diteruskan ke owner':'Perlu revisi dulu'} — ${answer.slice(0,1400)}`});});
+    }
+  }catch(error){
+    const reason=sanitizeText(error.name==='AbortError'?'Manajer terlalu lama meninjau.':error.message||'gagal').slice(0,500);
+    const current=tasks.find(t=>t.id===taskId);
+    if(current&&current.status==='manager-review'&&!current.managerAdvice){
+      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===taskId);if(!t||t.status!=='manager-review'||t.managerAdvice)return;t.adviceError=reason;
+        emit({type:'manager.advice',taskId:t.id,rootId:t.rootId||t.id,agent:manager,runId:null,data:{error:reason}});});
+    }
+    console.error(`Manager advice by ${manager} failed on "${task.title}": ${error.message}`);
+  }finally{adviceBusy.delete(taskId);}
+}
 // Live event streams: owner-only, replay by sequence, explicit resync when the client is too far behind.
 const EVENT_REPLAY=500,streams=new Set();
 taskStore.subscribe(events=>{for(const client of streams)for(const event of events)client.push(event);});
@@ -513,6 +561,40 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
   if(url.pathname==='/api/settings/reset'&&req.method==='POST'){
     const input=await readJson(req);return send(res,200,settings.save({...settings.state,providers:[],defaultRoute:null,fallbackRoute:null,overrides:{}},input.version));
   }
+  if (url.pathname === '/api/rooms' && req.method === 'GET') return send(res, 200, roomList);
+  if (url.pathname === '/api/rooms' && req.method === 'POST') {
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req);
+    const v=roomsApi.validateRoom(input,roomList,null);
+    if(!v.ok)return send(res,['dup','overlap'].includes(v.code)?409:400,{error:v.error});
+    const room={id:`room-${crypto.randomUUID().slice(0,8)}`,furniture:[],...v.room};
+    roomList.push(room);saveRooms();return send(res,201,room);
+  }
+  const roomMatch=url.pathname.match(/^\/api\/rooms\/([^/]+)$/);
+  if(roomMatch&&(req.method==='PATCH'||req.method==='DELETE')){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const id=decodeURIComponent(roomMatch[1]),room=roomList.find(r=>r.id===id);
+    if(!room)return send(res,404,{error:'Room not found.'});
+    if(req.method==='DELETE'){
+      // The scene knows who sits where; the caller reports the count and the server refuses a busy room.
+      const occupants=Number(new URL(req.url,'http://x').searchParams.get('occupants')||0);
+      if(room.builtIn)return send(res,409,{error:'Ruangan ini bagian dari kantor; ubah namanya saja, jangan dihapus.'});
+      if(occupants>0)return send(res,409,{error:'Ada yang sedang memakai ruangan ini. Suruh kembali kerja dulu.'});
+      roomList.splice(roomList.indexOf(room),1);saveRooms();return send(res,200,{removed:id});
+    }
+    const input=await readJson(req);
+    // Built-in rooms mirror the 3D office geometry: rename only.
+    if(room.builtIn){
+      const name=typeof input?.name==='string'?input.name.trim():'';
+      if(!name||name.length>80)return send(res,400,{error:'Name must be 1-80 characters.'});
+      if(roomList.some(r=>r.name.toLowerCase()===name.toLowerCase()&&r.id!==id))return send(res,409,{error:'That room name is already used.'});
+      room.name=name;saveRooms();return send(res,200,room);
+    }
+    const v=roomsApi.validateRoom(input,roomList,id);
+    if(!v.ok)return send(res,['dup','overlap'].includes(v.code)?409:400,{error:v.error});
+    Object.assign(room,v.room,{furniture:v.room.furniture??room.furniture??[]});
+    saveRooms();return send(res,200,room);
+  }
   if (url.pathname.startsWith('/api/task-events') && req.method === 'GET' && !org.verifyToken(req.headers['x-kantor-org']||url.searchParams.get('token')))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
   if (url.pathname === '/api/task-events/snapshot' && req.method === 'GET') {
     const state=taskStore.snapshot();return send(res,200,{seq:state.nextSeq-1,tasks:state.tasks,streams:streams.size});
@@ -671,6 +753,15 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     }
     if(input.action!==undefined){
       const locked=requireOrgToken(req,task);if(locked)return send(res,locked.status,{error:locked.error,code:locked.code});
+      if(input.action==='retry-advice'){
+        // The manager agent failed or was interrupted: ask it again.
+        if(task.status!=='manager-review')return send(res,409,{error:'Hanya draf di gerbang atasan yang bisa ditinjau ulang.'});
+        if(task.managerAdvice)return send(res,409,{error:'Atasan sudah memberi pertimbangan untuk draf ini.'});
+        const manager=managerGate(task.assignee);
+        if(!manager||!agentFor(manager))return send(res,400,{error:'Atasan tugas ini tidak terhubung ke agen AI.'});
+        Object.assign(task,{adviceError:undefined,version:(task.version||0)+1,updatedAt:now()});save();
+        setImmediate(()=>managerAdvice(task.id));return send(res,200,task);
+      }
       if(!['approve','revise','manager-approve','manager-reject'].includes(input.action))return send(res,400,{error:'Unknown action.'});
       // Stage 1 of the one gate: the manager passes the staff draft on to the owner's review, or sends it back.
       if(input.action==='manager-approve'||input.action==='manager-reject'){
@@ -751,4 +842,6 @@ server.listen(PORT, HOST, () => {
   orchestrator.recover();recoverJobs();tasks=taskStore.snapshot().tasks;
   let reset = false; tasks.forEach(task => { if(task.outputType==='application'&&task.status==='active'){Object.assign(task,{status:'blocked',phase:'interrupted',blockedReason:'interrupted',runId:null,error:'Server dimulai ulang. Periksa revisi dan pilih lanjut secara eksplisit.'});reset=true;}else if (task.status === 'active' && agentFor(task.assignee)) { task.status = 'queued'; reset = true; } }); if (reset) save();
   kick();
+  // Drafts already waiting at the manager gate get their AI manager's recommendation again after a restart.
+  tasks.forEach(task => { if (task.status === 'manager-review' && !task.managerAdvice) managerAdvice(task.id); });
 });

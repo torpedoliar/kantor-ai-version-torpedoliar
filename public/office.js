@@ -549,7 +549,7 @@
   const hangouts=[];
   for(const x of [-14.2,-13.2,-12.2])for(const [z,f] of [[-10.35,1],[-7.65,-1]]){
     const item=chair(x,z,f,0x8a7a66);
-    hangouts.push(linkSpot(item,{x,z,f,floor:3,route:[[-11.2,P3],[-11.2,z]],state:'meet',label:'Menuju ruang rapat',occupant:null}));
+    hangouts.push(linkSpot(item,{x,z,f,floor:3,room:'seed-meeting',route:[[-11.2,P3],[-11.2,z]],state:'meet',label:'Menuju ruang rapat',occupant:null}));
   }
   // Two phone booths, front left.
   for(const x of [-14.6,-12.4]){
@@ -1092,6 +1092,97 @@
   }
   for(const level of Object.keys(floors).map(Number))dress(level);
   const navGrids={};
+  // ---- custom rooms (port dari orchestrator-patterns): template geometry, seats as activity spots ----
+  // Rooms land in the routine pools of their floor, so idle excursions and meetings reach them
+  // through the stairs like any built-in place. applyRooms rebuilds them without a page reload.
+  let customRooms=[];
+  try{const roomsResponse=await fetch('/api/rooms',{cache:'no-store'});if(roomsResponse.ok){const list=await roomsResponse.json();if(Array.isArray(list))customRooms=list.filter(r=>!r.builtIn&&Number.isFinite(r.x)&&Number.isFinite(r.z));}}catch{/* static host: built-in office only */}
+  const roomSpots=[],roomGroups=new Map();
+  const ROOM_RUGS={meeting:0xe6ded0,focus:0xdfe3d6,lounge:0xe8cfc0,pantry:0xb3c0a0,musholla:0xdfe3d6,custom:0xd8cfc0};
+  const ROOM_SEAT=0xd9d2c3;
+  function roomChair(parent,x,z,f){
+    cylinder(.055,.15,.46,0x595d54,x,.06,z,parent);
+    mesh(softBox(.78,.17,.72),ROOM_SEAT,x,.5,z,parent,false);
+    mesh(softBox(.78,.78,.2),ROOM_SEAT,x,.88,z-f*.32,parent,false);
+  }
+  function roomPlant(parent,x,z,scale){
+    cylinder(.3*scale,.24*scale,.5*scale,0xc9ab86,x,0,z,parent);
+    for(let i=0;i<5;i++){const a=i*1.3,leaf=oval(.3*scale,.6*scale,.12*scale,i%2?0x64825b:0x839769,x+Math.cos(a)*.2*scale,.55*scale,z+Math.sin(a)*.2*scale,parent);leaf.rotation.set(.35,a,Math.sin(a)*.5);}
+  }
+  function roomFurniture(parent,item){
+    if(item.kind==='table'){mesh(softBox(2.6,.14,1.3),BALSA,item.x,.88,item.z,parent,false);for(const sx of [-1,1])box(.09,.82,.09,DARK,item.x+sx*1.1,.06,item.z,parent);}
+    else if(item.kind==='chair')roomChair(parent,item.x,item.z,1);
+    else if(item.kind==='sofa'){mesh(softBox(2.8,.45,1),0xb8c3a6,item.x,.22,item.z,parent,false);mesh(softBox(2.8,.78,.24),0x9dab90,item.x,.55,item.z-.38,parent,false);}
+    else if(item.kind==='board'){box(2,1.25,.07,CARD,item.x,1,item.z,parent);box(1.8,1.05,.02,SCREEN,item.x,1.07,item.z+.045,parent);for(const sx of [-1,1])box(.07,.45,.07,DARK,item.x+sx*.9,0,item.z,parent);}
+    else if(item.kind==='plant')roomPlant(parent,item.x,item.z,.9);
+  }
+  function buildRoom(room){
+    const group=new THREE.Group();group.position.set(room.x,0,room.z);floors[room.floor].add(group);
+    const P=passage(room.floor),cap=Math.min(room.capacity,8),seats=[];
+    mesh(softBox(room.w-.1,.04,room.d-.1),ROOM_RUGS[room.type]??0xd8cfc0,0,.02,0,group,false);
+    const addSeat=(lx,lz,angle,state,standing=false)=>seats.push({x:room.x+lx,z:room.z+lz,f:1,angle,floor:room.floor,
+      route:[[Math.max(-14,Math.min(14,room.x)),P]],state,label:`Menuju ${room.name}`,room:room.id,roomName:room.name,occupant:null,standing});
+    const seated=(lx,lz,facing,state)=>{roomChair(group,lx,lz,facing);addSeat(lx,lz,facing>0?0:Math.PI,state);};
+    if(room.type==='meeting'||room.type==='custom'){
+      const state=room.type==='meeting'?'meet':'lounge';
+      const tw=room.w-2.2,td=Math.min(room.d-1.8,2.2);
+      mesh(softBox(tw,.14,td),BALSA,0,.88,0,group,false);
+      for(const sx of [-1,1])for(const sz of [-1,1])box(.09,.82,.09,DARK,sx*(tw/2-.15),.06,sz*(td/2-.12),group);
+      const perSide=Math.max(1,Math.min(3,Math.ceil(cap/2)));
+      let placed=0;
+      for(const side of [-1,1])for(let i=0;i<perSide&&placed<cap;i++,placed++)
+        seated(side*(room.w/2-.75),(i-(perSide-1)/2)*.95,-side,state);
+      // Seats past six go to the short ends of the table, facing in.
+      for(const side of [-1,1])if(placed<cap)seated((placed++-2.5)*.95,side*(room.d/2-.75),-side,state);
+      if(room.type==='meeting'){box(2.2,1.1,.08,DARK,0,1.1,-room.d/2+.12,group);box(2,.95,.02,SCREEN,0,1.17,-room.d/2+.17,group);}
+    }else if(room.type==='lounge'){
+      const sw=room.w-1.5;
+      mesh(softBox(sw,.45,1),0xb8c3a6,0,.22,-room.d/2+.85,group,false);
+      mesh(softBox(sw,.8,.24),0x9dab90,0,.55,-room.d/2+.4,group,false);
+      for(let i=0;i<cap;i++)addSeat((i-(cap-1)/2)*Math.min(1.35,sw/Math.max(cap,1)),-room.d/2+.85,0,'lounge');
+      cylinder(.55,.55,.06,BALSA,0,.5,room.d/2-1,group);cylinder(.07,.12,.48,DARK,0,.06,room.d/2-1,group);
+    }else if(room.type==='focus'){
+      mesh(softBox(1.8,.14,.9),BALSA,0,.88,0,group,false);
+      for(const sx of [-1,1])box(.09,.82,.09,DARK,sx*.7,.06,0,group);
+      box(.07,.17,.07,DARK,0,.95,-.25,group);box(.9,.55,.06,DARK,0,1.12,-.25,group);box(.8,.45,.015,SCREEN,0,1.18,-.2,group);
+      seated(0,.95,-1,'work');
+      roomPlant(group,room.w/2-.5,-room.d/2+.5,.5);
+    }else if(room.type==='pantry'){
+      box(room.w-1,.9,.7,0xcdb28a,0,0,-room.d/2+.45,group);
+      box(room.w-.9,.06,.8,CARD,0,.9,-room.d/2+.45,group);
+      cylinder(.2,.2,.4,0xc4dadb,-room.w/4,.96,-room.d/2+.45,group);
+      for(let i=0;i<cap;i++)addSeat((i-(cap-1)/2)*1,-room.d/2+1.4,Math.PI,'drink');
+    }else if(room.type==='musholla'){
+      box(room.w-.4,1.05,.1,CARD,0,0,-room.d/2+.06,group);
+      const perRow=Math.min(4,Math.ceil(cap/2));
+      for(let i=0;i<cap;i++){
+        const lx=(i%perRow-(perRow-1)/2)*1.1,lz=i<perRow?-room.d/2+1.1:room.d/2-1.1;
+        box(.7,.03,1.05,i%2?0xa98158:0x86968a,lx,.03,lz,group);
+        addSeat(lx,lz,Math.PI,'pray');
+      }
+    }
+    for(const item of room.furniture??[])roomFurniture(group,item);
+    textPlane(String(room.name).toUpperCase(),room.x,room.z+room.d/2+.7,Math.min(6,room.w),'#5c554b',floors[room.floor]);
+    return {group,seats};
+  }
+  const roomPool=floor=>floor===1?floorBreaks:floor===2?dining:floor===ROOF?roofSpots:hangouts;
+  function applyRooms(list){
+    for(const group of roomGroups.values())group.parent?.remove(group);
+    for(const spot of roomSpots){const pool=roomPool(spot.floor),i=pool.indexOf(spot);if(i>=0)pool.splice(i,1);const j=prayerSpots.indexOf(spot);if(j>=0)prayerSpots.splice(j,1);}
+    roomSpots.length=0;roomGroups.clear();
+    customRooms=(list||[]).filter(r=>!r.builtIn&&Number.isFinite(r.x)&&Number.isFinite(r.z));
+    const touched=new Set();
+    for(const room of customRooms){
+      if(!floors[room.floor])continue; // a floor the scene does not have cannot host a room
+      const built=buildRoom(room);roomGroups.set(room.id,built.group);
+      for(const spot of built.seats){roomSpots.push(spot);if(spot.state==='pray')prayerSpots.push(spot);else roomPool(room.floor).push(spot);}
+      touched.add(room.floor);
+    }
+    // Room furniture joins the collision grid exactly like an edited desk.
+    for(const floor of touched)navGrids[floor]=rasterize(floors[floor],a=>a.userData.walkable||a.userData.agent||a.visible===false);
+    return customRooms.length;
+  }
+  applyRooms(customRooms);
   // One rasterizer for start-up and furniture edits. skip(a) excludes ancestors (walkable pads, agents, hidden items).
   function rasterize(rootF,skip=a=>a.userData.walkable){
     const grid=rootF.userData.staticGrid?new Uint8Array(rootF.userData.staticGrid):new Uint8Array(NAV.w*NAV.h),bounds=new THREE.Box3(),y0=rootF.position.y;rootF.updateMatrixWorld(true);
@@ -1394,7 +1485,10 @@
     const roll=Math.random();
     if(roll<.28&&idle.length){const host=pick(prefer(idle));assign(agent,visitSpot(host),rand(7,12));host.visitor=agent;log(`${agent.n} menghampiri ${host.n}`,agent.group);return;}
     if(roll>=.76&&roll<.9&&idle.length&&away<MAX_AWAY-1){
-      const seats=shuffle(open('meet'));
+      // One meeting stays in one room: pick a room with enough free seats for the party.
+      const free=open('meet'),byRoom=new Map();
+      for(const s of free){const k=s.room||'seed-meeting';byRoom.set(k,[...(byRoom.get(k)||[]),s]);}
+      const seats=shuffle([...byRoom.values()].find(group=>group.length>=2)||[]);
       if(seats.length>=2){
         const others=shuffle(prefer(idle)).slice(0,away<MAX_AWAY-2&&Math.random()<.5?2:1);
         const meeting={members:[agent,...others]},duration=rand(10,16);
@@ -1637,7 +1731,12 @@
     if(!members.length){status('Pilih minimal satu anggota tim.');return;}
     let spots;
     if(action==='meet'){
-      spots=hangouts.filter(s=>s.state==='meet'&&!reservedByOthers(s,members));
+      const free=hangouts.filter(s=>s.state==='meet'&&!reservedByOthers(s,members));
+      // A group meets in one room: keep the first room that fits everyone.
+      const byRoom=new Map();
+      for(const s of free){const k=s.room||'seed-meeting';byRoom.set(k,[...(byRoom.get(k)||[]),s]);}
+      spots=[...byRoom.values()].find(group=>group.length>=members.length);
+      if(!spots){status(`Tidak ada satu ruangan yang menampung ${members.length} orang. Pilih lebih sedikit orang atau kembalikan yang sedang di sana ke meja.`);return;}
     }else if(action!=='work'){
       const pool=action==='lunch'?dining:shuffle([...roofSpots]);
       spots=pool.filter(s=>!reservedByOthers(s,members));
@@ -1706,6 +1805,11 @@
       break:agent.spot?.label?.replace(/^Menuju /,'')||'beristirahat'
     }[agent.state];
     if(text)return `Simulasi: ${text}`;
+    // A custom room names the activity instead of the generic floor text.
+    if(agent.spot?.roomName){
+      const verb={work:'bekerja tenang di',meet:'rapat di',lounge:'bersantai di',drink:'mengambil minum di'}[agent.state];
+      if(verb)return `Simulasi: ${verb} ${agent.spot.roomName}`;
+    }
     if(agent.floor===2)return 'Simulasi: makan bersama';
     if(agent.floor===ROOF)return `Simulasi: ${ROOF_STATUS[agent.spot?.fun]||'di rooftop'}`;
     if(others)return `Simulasi: mengobrol dengan ${others}`;
@@ -2431,6 +2535,9 @@
   // ponytail: fixed 0.24m head box above the head joint; use skinned vertex bounds if audits need more precision.
   const headBounds=a=>{const b=a.rig.bones?.get('head');if(!b)return new THREE.Box3().setFromObject(a.rig.head);const p=b.getWorldPosition(new THREE.Vector3());return new THREE.Box3(new THREE.Vector3(p.x-.1,p.y-.02,p.z-.1),new THREE.Vector3(p.x+.1,p.y+.22,p.z+.1));};
   window.officeScene={
+    // Custom rooms (port): rebuild rooms without a reload and report live occupancy per room.
+    applyRooms:list=>applyRooms(list),
+    roomOccupancy:()=>Object.fromEntries(customRooms.map(room=>[room.id,roomSpots.filter(s=>s.room===room.id&&s.occupant).length])),
     visitorTravelAudit:()=>shop.people.map(c=>({state:c.state,mode:c.arrivalMode||'walking-existing',trip:c.vehicleTrip||null})),
     environmentAudit:()=>environment.audit(),
     mobilitySnapshot:()=>mobility.snapshot(),

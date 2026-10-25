@@ -171,7 +171,17 @@
   function managerReviewControls(task,article){
     article.append(node('div',task.result,'task-result'));
     const who = chainFor(task.assignee)[0];
-    if (who) article.append(node('p', `Menunggu ${displayName(who)} (atasan). Siapa pun yang membuka browser ini menyetujui sebagai atasan (kepercayaan lokal).`, 'task-agent'));
+    if (task.managerAdvice) {
+      const advice = task.managerAdvice;
+      article.append(node('p', `${who ? displayName(who) : 'Atasan'} (${advice.by}) menyarankan: ${advice.verdict === 'approve' ? 'setujui' : 'revisi'} — keputusan tetap milikmu.`, `task-agent advice-${advice.verdict}`));
+      article.append(node('div', advice.text, 'task-result advice-text'));
+    } else if (task.adviceError) {
+      article.append(node('p', `Pertimbangan atasan gagal: ${task.adviceError}`, 'task-error'));
+      article.append(action('Minta tinjau ulang', async () => {
+        try { const saved = await call('PATCH', `/api/tasks/${task.id}`, {action: 'retry-advice', version: task.version || 0}); apply(tasks.map(t => t.id === task.id ? saved : t)); render(); feedback('Atasan AI membaca drafnya lagi.'); }
+        catch (error) { failed(error); }
+      }));
+    } else if (who) article.append(node('p', `Menunggu ${displayName(who)} (atasan). Siapa pun yang membuka browser ini menyetujui sebagai atasan (kepercayaan lokal).`, 'task-agent'));
     const approve=action('Setujui sebagai atasan',()=>reviewTask(task,'manager-approve'));approve.className='task-primary';article.append(approve);
     const form=node('form'),label=node('label','Minta perubahan (kembali ke staf)'),input=node('textarea'),key=draftKey(task,'manager-review');
     input.id=`manager-review-${task.id}`;label.htmlFor=input.id;input.required=true;input.maxLength=5000;input.rows=3;input.value=draftRead(key);
@@ -444,6 +454,7 @@
     render();
     resolveReady(orgState);
     window.officeModels?.load();
+    window.officeRooms?.start();
     // A fresh install has no owner PIN yet: walk the owner through building the organization.
     let snoozed=false;try{snoozed=sessionStorage.getItem('kantor-ai.wizardSnoozed')==='1';}catch{}
     if(orgState.configured===false&&!snoozed)window.OrgWizard?.open('first-run',wizardApi);
