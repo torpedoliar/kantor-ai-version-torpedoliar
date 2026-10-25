@@ -123,6 +123,8 @@ Model bawaan adalah `claude-sonnet-5-5`; ganti dengan `ANTHROPIC_MODEL` di `.env
 - **Tarik kartu** ke kartu lain untuk mengganti atasan, atau ke area kosong sebuah divisi untuk memindahkannya. Bawahannya tetap di divisi lama, kecuali kamu mencentang "Pindahkan beserta timnya". Atasan yang membuat siklus ditolak.
 - **Hubungkan divisi**: klik dua judul divisi untuk menambah atau menghapus jalur kolaborasi (garis ungu putus-putus).
 - **Menonaktifkan** orang yang masih punya tugas terbuka akan diblokir. Panel menawarkan "Pindahkan semua ke…".
+- **Review atasan:** draf staf yang melapor ke atasan di bawah pimpinan puncak melewati satu gerbang persetujuan atasan sebelum review owner; laporan langsung ke pimpinan puncak masuk review owner. Detail tugas menampilkan rantai atasan, tombol **Setujui sebagai atasan** dan **Minta perubahan**; kartu tetap berada di kolom Review, bukan kembali ke antrean. Pengelolaan anggota lokal digabungkan ke bagan/wizard Organisasi yang sama, bukan daftar tim kedua.
+- **Kompatibilitas data tim lama:** jika `data/org.json` belum ada tetapi `data/team.json` ada, server mengonversi daftar anggota, hubungan atasan, model, status agen AI, dan instruksi khusus ke organisasi baru. `team.json` asli tetap dipertahankan sebagai cadangan; data rusak menghentikan startup, bukan diganti diam-diam dengan contoh bawaan. Bila organisasi baru sudah ada, server tidak menimpa organisasi itu dari file tim lama.
 
 **Wizard** muncul sendiri di instalasi baru (belum ada PIN). Wizard juga bisa dibuka dari tombol **Susun ulang**. Langkahnya:
 1. PIN

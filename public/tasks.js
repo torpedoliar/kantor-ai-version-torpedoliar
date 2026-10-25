@@ -1,6 +1,6 @@
 (() => {
   const storageKey = 'kantor-ai.tasks.v1', orgStorageKey = 'kantor-ai.org.v1';
-  const states = {queued: 'Antre', active: 'Sedang berjalan', blocked: 'Butuh keputusan', review: 'Butuh review', done: 'Selesai'};
+  const states = {queued: 'Antre', active: 'Sedang berjalan', blocked: 'Butuh keputusan', 'manager-review': 'Review atasan', review: 'Butuh review', done: 'Selesai'};
   const priorities = new Set(['low','normal','high']), kinds = new Set(['work','roster-review']);
   const el = id => document.getElementById(id);
   let tasks = [], team = [], changed, locate;
@@ -30,6 +30,14 @@
     if (recoverOrgLock(error)) return;
     feedback(error.message);
     if (error.code === 'VERSION_CONFLICT' && server) { const latest = await call('GET', '/api/tasks').catch(() => null); if (latest) { apply(latest); render(); } }
+  }
+  const chainText = name => [displayName(name), ...chainFor(name).map(displayName)].join(' → ');
+  // Manager chain from the org chart (member.manager = name or null), cycle-safe.
+  function chainFor(name) {
+    const chain = [], seen = new Set([name]);
+    let cur = orgState.members.find(m => m.name === name)?.manager ?? null;
+    while (cur && !seen.has(cur)) { seen.add(cur); chain.push(cur); cur = orgState.members.find(m => m.name === cur)?.manager ?? null; }
+    return chain;
   }
   function persist(next) {
     if (!storageHealthy) {
@@ -62,7 +70,7 @@
     for (const task of list) {
       const old = before.get(task.id);
       // A fast agent can go from queued to done between two polls; still log that it started.
-      if (old && old.status === 'queued' && ['blocked','review','done'].includes(task.status)) changed(task.assignee, 'active', task.title);
+      if (old && old.status === 'queued' && ['blocked','manager-review','review','done'].includes(task.status)) changed(task.assignee, 'active', task.title);
       if (old && old.status !== task.status) changed(task.assignee, task.status, task.title);
       if (old && old.assignee !== task.assignee) changed(old.assignee);
     }
@@ -74,7 +82,7 @@
       typeof task.result === 'string' && task.result.length <= 10000 &&
       Number.isInteger(task.progressPct) && task.progressPct >= 0 && task.progressPct <= 100 &&
       Array.isArray(task.messages) && task.messages.every(message => message && typeof message.text === 'string' && message.text.length <= 2000) &&
-      (!['review','done'].includes(task.status) || task.result.trim()) && typeof task.createdAt === 'string';
+      (!['review','manager-review','done'].includes(task.status) || task.result.trim()) && typeof task.createdAt === 'string';
   }
   function node(tag, text, className) {
     const item = document.createElement(tag);
@@ -143,11 +151,12 @@
     try{
       if(server){const saved=await call('PATCH',`/api/tasks/${task.id}`,{action,feedback:comments,version:task.version||0});apply(tasks.map(t=>t.id===task.id?saved:t));}
       else{
-        const next=tasks.map(t=>t.id===task.id?{...t,status:action==='approve'?'done':'queued',feedback:comments,version:(t.version||0)+1,updatedAt:new Date().toISOString()}:t);
+        const status=action==='approve'?'done':action==='manager-approve'?'review':'queued';
+        const next=tasks.map(t=>t.id===task.id?{...t,status,feedback:comments,version:(t.version||0)+1,updatedAt:new Date().toISOString()}:t);
         if(!persist(next))return;
-        changed(task.assignee,action==='approve'?'done':'queued',task.title);
+        changed(task.assignee,status,task.title);
       }
-      draftClear(draftKey(task,'review'));render();feedback(action==='approve'?'Draf disetujui.':'Revisi diminta. Draf sebelumnya tetap tersimpan di riwayat.');
+      draftClear(draftKey(task,'review'));draftClear(draftKey(task,'manager-review'));render();feedback(action==='approve'?'Draf disetujui.':action==='manager-approve'?'Disetujui atasan, diteruskan ke review owner.':'Revisi diminta. Draf sebelumnya tetap tersimpan di riwayat.');
     }catch(error){failed(error);}
   }
   function reviewControls(task,article){
@@ -158,6 +167,17 @@
     input.oninput=()=>{input.setCustomValidity('');draftWrite(key,input.value);};
     const submit=node('button','Minta revisi');submit.type='submit';
     form.append(label,input,submit);form.onsubmit=e=>{e.preventDefault();if(!input.value.trim()){input.setCustomValidity('Jelaskan perubahan yang dibutuhkan.');input.reportValidity();return;}reviewTask(task,'revise',input.value.trim());};article.append(form);
+  }
+  function managerReviewControls(task,article){
+    article.append(node('div',task.result,'task-result'));
+    const who = chainFor(task.assignee)[0];
+    if (who) article.append(node('p', `Menunggu ${displayName(who)} (atasan). Siapa pun yang membuka browser ini menyetujui sebagai atasan (kepercayaan lokal).`, 'task-agent'));
+    const approve=action('Setujui sebagai atasan',()=>reviewTask(task,'manager-approve'));approve.className='task-primary';article.append(approve);
+    const form=node('form'),label=node('label','Minta perubahan (kembali ke staf)'),input=node('textarea'),key=draftKey(task,'manager-review');
+    input.id=`manager-review-${task.id}`;label.htmlFor=input.id;input.required=true;input.maxLength=5000;input.rows=3;input.value=draftRead(key);
+    input.oninput=()=>{input.setCustomValidity('');draftWrite(key,input.value);};
+    const submit=node('button','Minta perubahan');submit.type='submit';
+    form.append(label,input,submit);form.onsubmit=e=>{e.preventDefault();if(!input.value.trim()){input.setCustomValidity('Jelaskan perubahan yang dibutuhkan.');input.reportValidity();return;}reviewTask(task,'manager-reject',input.value.trim());};article.append(form);
   }
   // An agent that asked instead of guessing: show its questions and take the answers.
   async function answerTask(task,answer){
@@ -182,6 +202,7 @@
     const agent = agentFor(task.assignee);
     if (task.status === 'blocked' && task.questions && server) decisionLink(task, article);
     else if (task.status === 'blocked') answerControls(task, article);
+    else if (task.status === 'manager-review') managerReviewControls(task, article);
     else if (task.status === 'queued' && task.error) {
       article.append(node('p', `Agen tidak bisa menyelesaikan: ${task.error}`, 'task-error'));
       actions.append(action('Coba lagi', () => update(task.id, 'queued')));
@@ -204,7 +225,7 @@
     return form;
   }
   function renderSummary() {
-    const summary=document.querySelector('.owner-summary');summary.replaceChildren(node('h3','Ringkasan owner'));orgState.divisions.forEach(division=>{const list=divisionTasks(division.id),card=node('section',undefined,'owner-summary-card');card.append(node('h4',division.name),node('p',`Antre ${list.filter(task=>task.status==='queued').length} · Berjalan ${list.filter(task=>['active','blocked'].includes(task.status)).length} · Review ${list.filter(task=>task.status==='review').length}`));const roots=list.filter(task=>!task.parentId);if(roots.length)card.append(node('p',`Tugas lead: ${roots.map(task=>task.title).join(', ')}`));summary.append(card);});
+    const summary=document.querySelector('.owner-summary');summary.replaceChildren(node('h3','Ringkasan owner'));orgState.divisions.forEach(division=>{const list=divisionTasks(division.id),card=node('section',undefined,'owner-summary-card');card.append(node('h4',division.name),node('p',`Antre ${list.filter(task=>task.status==='queued').length} · Berjalan ${list.filter(task=>['active','blocked'].includes(task.status)).length} · Review ${list.filter(task=>['manager-review','review'].includes(task.status)).length}`));const roots=list.filter(task=>!task.parentId);if(roots.length)card.append(node('p',`Tugas lead: ${roots.map(task=>task.title).join(', ')}`));summary.append(card);});
   }
   async function unlockFlow(){
     const dialog=el('pinDialog');if(!dialog)return false;dialog.showModal();el('orgPin').value='';el('pinMessage').textContent='';el('orgPin').focus();
@@ -261,7 +282,7 @@
       (el('divisionFilter').value === 'all' || t.division === el('divisionFilter').value) &&
       (el('agentFilter').value === 'all' || t.assignee === el('agentFilter').value));
     // Keep the owner's selection; otherwise show what most needs attention.
-    const rank = {blocked:0, review:1, active:2, queued:3, done:4};
+    const rank = {blocked:0, review:1, 'manager-review':1, active:2, queued:3, done:4};
     let selected = tasks.find(t => t.id === selectedId);
     if (!selected || !visible.includes(selected)) selected = [...visible].sort((a,b) => rank[a.status]-rank[b.status])[0] || null;
     selectedId = selected?.id || null;
@@ -273,7 +294,7 @@
     for (const task of selected ? [selected] : []) {
       const article = node('article', undefined, 'task-item');
       const agent = agentFor(task.assignee);
-      article.append(node('h3', task.title), node('div', `${displayName(task.assignee)} · ${states[task.status]}${agent ? ` · AI agent${agent.mode === 'claude' ? ` · ${agent.provider ? `${agent.provider} · ` : ''}${agent.model}` : ''}` : ''}`, 'task-meta'));
+      article.append(node('h3', task.title), node('div', `${chainText(task.assignee)} · ${states[task.status]}${agent ? ` · AI agent${agent.mode === 'claude' ? ` · ${agent.provider ? `${agent.provider} · ` : ''}${agent.model}` : ''}` : ''}`, 'task-meta'));
       if (task.parentId) { const parent = tasks.find(t => t.id === task.parentId); if (parent) { const up = action(`Bagian dari: ${parent.title}`, () => select(parent.id)); up.className = 'task-root-link'; article.append(up); } }
       if (task.brief) article.append(node('p', task.brief));
       const facts = [task.outputType === 'application' ? `Aplikasi · diuji di ${task.environment === 'windows' ? 'Windows lokal' : 'Docker'}` : null, task.executionMode === 'automatic' ? 'Otomatis dibagi lead' : null].filter(Boolean);
@@ -288,7 +309,7 @@
       const progressForm=node('form',undefined,'task-progress-form'),progressLabel=node('label','Progress'),progressInput=node('input');progressLabel.htmlFor=`progress-input-${task.id}`;progressInput.id=progressLabel.htmlFor;progressInput.type='number';progressInput.min=0;progressInput.max=100;progressInput.step=1;progressInput.value=task.progressPct||0;const progressButton=node('button','Perbarui progres');progressButton.type='submit';progressForm.append(progressLabel,progressInput,progressButton);progressForm.onsubmit=event=>{event.preventDefault();setProgress(task,progressInput.value);};article.append(progressForm);
       const actions = node('div', undefined, 'task-actions');
       if (!team.some(person => person.n === task.assignee)) {
-        article.append(node('p', 'Penanggung jawab ini berasal dari prototipe lama. Pilih anggota tim untuk melanjutkan.'));
+        article.append(node('p', 'Anggota ini sudah tidak ada di tim. Pilih anggota tim untuk melanjutkan.'));
         const select = node('select'); select.setAttribute('aria-label', `Penanggung jawab baru untuk ${task.title}`);
         for (const person of team) { const option = node('option', displayName(person.n)); option.value = person.n; select.append(option); }
         actions.append(action('Pindahkan tugas', () => reassign(task.id, select.value)));
@@ -300,10 +321,11 @@
       if (!task.parentId && task.status !== 'done') { const split = action('Pecah', () => { if (!article.querySelector('.split-form')) article.append(splitForm(task, article)); }); split.className = 'task-split'; actions.append(split); }
       if(task.outputType==='application'&&server){
         window.ApplicationPanel.mount(article,task,{call,feedback,reload:async()=>{apply(await call('GET','/api/tasks'));render();},source:async(t,file)=>{const headers={};if(orgToken)headers['x-kantor-org']=orgToken;const r=await fetch(`/api/projects/${t.projectId}/revisions/${t.revisionId}/files/${file.split('/').map(encodeURIComponent).join('/')}`,{headers});if(!r.ok)throw Error('Sumber tidak dapat dimuat.');return r.text();}});
-        if(task.status==='review')reviewControls(task,article);article.append(actions);list.append(article);continue;
+        if(task.status==='review')reviewControls(task,article);else if(task.status==='manager-review')managerReviewControls(task,article);article.append(actions);list.append(article);continue;
       }
       if (agent) { agentActions(task, article, actions); list.append(article); continue; }
       if(task.status==='review'){reviewControls(task,article);article.append(actions);list.append(article);continue;}
+      if(task.status==='manager-review'){managerReviewControls(task,article);article.append(actions);list.append(article);continue;}
       if(task.status==='blocked'&&task.questions){if(server)decisionLink(task,article);else answerControls(task,article);article.append(actions);list.append(article);continue;}
       if (task.status === 'queued') actions.append(action('Mulai tugas', () => update(task.id, 'active')));
       if (task.status === 'active') {

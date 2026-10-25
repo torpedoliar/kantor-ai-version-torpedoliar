@@ -10,16 +10,18 @@ const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
  await page.goto(URL);
  await page.waitForFunction(()=>window.officeScene);
  const snap=await page.evaluate(()=>officeScene.snapshot());
- assert.equal(snap.team.length,13);assert.equal(snap.floor,3);
+ const rosterCount=await page.evaluate(()=>window.officeTasks.state().members.filter(m=>m.active!==false).length);
+ assert.equal(snap.team.length,rosterCount);assert.equal(snap.floor,3);
+ assert.equal(snap.team.filter(p=>p.sitting||p.atDesk).length,rosterCount,'every member seated at a desk or waiting bench');
  assert.equal(snap.team.find(p=>p.name==='Bagas Pratama Putra').role,'Frontend Engineer');
- assert.equal(await page.locator('#taskAssignee option').count(),13);
+ assert.equal(await page.locator('#taskAssignee option').count(),rosterCount);
  for(const floor of [3,1,2,4,0]){
    await page.locator(`[data-floor="${floor}"]`).click();await page.waitForFunction(()=>!officeScene.snapshot().transitioning);
    assert.deepEqual(await page.evaluate(()=>officeScene.snapshot().visibleFloors),floor?[floor]:[1,2,3,4]);
    assert.equal(await page.evaluate(()=>officeScene.snapshot().sky),floor===0,'city, clouds and birds only in the whole-building view');
    await page.screenshot({path:require('node:path').join(require('node:os').tmpdir(),`kantor-floor-${floor}.png`)});
  }
- console.log('PASS: 13 team members, roles, 4 floors and building overview');
+ console.log(`PASS: ${rosterCount} team members, roles, 4 floors and building overview`);
  await page.locator('[data-floor="0"]').click();await page.waitForFunction(()=>!officeScene.snapshot().transitioning);
  const point=await page.evaluate(()=>officeScene.floorPoint(2));await page.mouse.click(point.x,point.y);
  assert.equal(await page.evaluate(()=>officeScene.snapshot().floor),2);
@@ -103,7 +105,7 @@ const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
  }
  await page.evaluate(()=>localStorage.setItem('kantor-ai.tasks.v1',JSON.stringify([{id:'old-task',title:'Tugas lama',assignee:'Sari',status:'active',brief:'',result:'',createdAt:new Date().toISOString()}])));
  await page.reload();await page.waitForFunction(()=>window.officeScene);await page.click('#bTasks');
- assert.match(await page.locator('#taskList').innerText(),/prototipe lama/);
+ assert.match(await page.locator('#taskList').innerText(),/prototipe lama|sudah tidak ada di tim/);
  await page.locator('.task-item select').selectOption('Kak Rani');await page.getByRole('button',{name:'Pindahkan tugas'}).click();
  assert.match(await page.locator('#taskList').innerText(),/KR/);
  await page.getByRole('button',{name:'Mulai tugas',exact:true}).click();

@@ -35,8 +35,11 @@ const api=async(p,opts={})=>{const headers={'content-type':'application/json','o
   const parentResponse=await api('/api/tasks',{method:'POST',body:JSON.stringify({title:'Service root',assignee:'Gilang',division:'service',asLead:true,brief:'Coordinate service response.'})});assert.equal(parentResponse.status,201);const parent=parentResponse.body;assert.ok(parent.id);
   const ownerUnlock=await api('/api/org/unlock',{method:'POST',body:JSON.stringify({pin:'2468'})});assert.equal(ownerUnlock.status,200);
   const madeResponse=await api('/api/tasks',{method:'POST',headers:{'x-kantor-org':ownerUnlock.body.token},body:JSON.stringify({title:'Reply about a late order',assignee:'Kak Sinta',division:'service',parentId:parent.id,asLead:false,brief:'Order 1042 arrived two days late; customer is upset.'})});assert.equal(madeResponse.status,201);const made=madeResponse.body;
-  for(let i=0;i<40&&(await api('/api/tasks')).body.find(t=>t.id===made.id).status!=='review';i++)await new Promise(r=>setTimeout(r,250));
-  assert.equal((await api('/api/tasks')).body.find(t=>t.id===made.id).status,'review');
+  // Kak Sinta reports to Gilang (not the top), so her draft passes her manager first: one gate, then the owner.
+  for(let i=0;i<40&&(await api('/api/tasks')).body.find(t=>t.id===made.id).status!=='manager-review';i++)await new Promise(r=>setTimeout(r,250));
+  const mr=(await api('/api/tasks')).body.find(t=>t.id===made.id);assert.equal(mr.status,'manager-review');
+  const passed=await api(`/api/tasks/${made.id}`,{method:'PATCH',headers:{'x-kantor-org':ownerUnlock.body.token},body:JSON.stringify({action:'manager-approve',version:mr.version})});
+  assert.equal(passed.status,200);assert.equal(passed.body.status,'review');
   assert.equal((await api(`/api/tasks/${kn.id}`,{method:'PATCH',body:JSON.stringify({action:'answer',answer:'x',version:kn.version})})).status,409,'only blocked tasks take answers');
   assert.deepEqual(errors,[]);
   console.log('PASS: per-member models, agent asks instead of guessing, Needs decision banner and filter, answer resumes the task, second AI member drafts');

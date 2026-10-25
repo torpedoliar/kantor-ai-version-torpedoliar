@@ -4,7 +4,7 @@
   const SVG = 'http://www.w3.org/2000/svg', NODE_W = 220, NODE_H = 76, GAP_X = 48, GAP_Y = 96, MAX_ROWS = 200;
   const EDGE = {'delegation.created': 'delegation', 'result.submitted': 'result', 'decision.opened': 'question', 'decision.answered': 'answer'};
   const LABEL = {delegation: 'delegasi', result: 'hasil', question: 'pertanyaan', answer: 'jawaban'};
-  const STATUS = {queued: 'Antre', active: 'Berjalan', blocked: 'Menunggu', review: 'Review', done: 'Selesai'};
+  const STATUS = {queued: 'Antre', active: 'Berjalan', blocked: 'Menunggu', 'manager-review': 'Review atasan', review: 'Review', done: 'Selesai'};
   let api = null, view = {zoom: 1, x: 0, y: 0}, fittedRoot = null, consoleState = {paused: false, shown: 0};
   const el = id => document.getElementById(id);
   function node(tag, text, className) { const item = document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item; }

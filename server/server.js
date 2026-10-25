@@ -1,5 +1,5 @@
-// Kantor Kita server: serves public/ and a small task API. Tasks assigned to a connected
-// team member (server/agents.js) are worked by Claude, or by a labelled dry run when no API key is set.
+// Kantor Kita server: serves public/ and a small task API. Tasks assigned to an AI-enabled
+// organization member (isAgent in data/org.json) are worked by the configured model, or by a labelled dry run.
 // No login yet, so it only listens on this machine.
 const http = require('node:http');
 const fs = require('node:fs');
@@ -39,7 +39,8 @@ const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
 const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
 const HOST = '127.0.0.1', PORT = Number(process.env.PORT) || 3000;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
-const STATES = new Set(['queued', 'active', 'blocked', 'review', 'done']);
+// manager-review: a staff draft waits for its manager's approval before it reaches the owner (one gate).
+const STATES = new Set(['queued', 'active', 'blocked', 'manager-review', 'review', 'done']);
 const PRIORITIES = new Set(['low','normal','high']);
 const KINDS = new Set(['work','roster-review']);
 const CSRF=crypto.randomBytes(32).toString('hex');
@@ -49,6 +50,27 @@ const modelGate=createGate(()=>settings.callLimits());
 const agentMembers=()=>Object.fromEntries(org.roster().filter(m=>m.isAgent).map(m=>[m.name,m]));
 const agentFor=name=>agentMembers()[name]||null;
 function archiveTasks(timestamp=Date.now()){const archiveDir=path.join(DATA_DIR,'archive');fs.mkdirSync(archiveDir,{recursive:true});const file=path.join(archiveDir,`tasks-${timestamp}.json`);fs.writeFileSync(file,JSON.stringify(tasks,null,2),{mode:0o600});return file;}
+// One-time move of the older roster (data/team.json) into the organization, so custom members, AI picks and
+// manager links survive instead of a fresh seed. team.json stays as a backup; a bad roster stops startup.
+function orgFromTeam(team){
+  if(!Array.isArray(team)||!team.length)throw new Error('roster is empty');
+  const members=team.map(m=>({name:m.n,initials:m.initials,role:m.role,division:m.group,manager:m.manager??null,active:true,effort:'standard',workloadPct:100,isAgent:m.ai?.on===true,model:m.ai?.model||null,instructions:m.ai?.system||''}));
+  const byName=new Map(members.map(m=>[m.name,m])),tops=id=>members.filter(m=>m.division===id&&byName.get(m.manager)?.division!==id);
+  // ponytail: lead heuristic. A group whose people all report to one outsider below the top (a CTO seated in
+  // leadership) gets that outsider as its lead, as in the built-in seed. Odd charts can be fixed in the org editor.
+  for(const id of new Set(members.map(m=>m.division))){const t=tops(id),boss=byName.get(t[0]?.manager);
+    if(t.length>1&&boss&&boss.manager!==null&&t.every(m=>m.manager===boss.name))boss.division=id;}
+  const names=Object.fromEntries(require('./org').seed().divisions.map(d=>[d.id,d.name]));
+  const divisions=[...new Set(members.map(m=>m.division))].map(id=>{const t=tops(id);return {id,name:names[id]||id,lead:(t.find(m=>members.some(x=>x.manager===m.name&&x.division===id))||t[0]).name,collaboratesWith:[]};});
+  return normalizeOrg({version:0,company:{name:'Kantor Kita',type:'Lainnya',description:''},divisions,members});
+}
+{
+  const orgFile=path.join(DATA_DIR,'org.json'),teamFile=path.join(DATA_DIR,'team.json');
+  if(!fs.existsSync(orgFile)&&fs.existsSync(teamFile)){
+    try{fs.mkdirSync(DATA_DIR,{recursive:true});fs.writeFileSync(orgFile,JSON.stringify(orgFromTeam(JSON.parse(fs.readFileSync(teamFile,'utf8'))),null,2),{mode:0o600});}
+    catch(error){console.error(`Cannot migrate ${teamFile}: ${error.message}. Fix or move the file, then restart.`);process.exit(1);}
+  }
+}
 const org=createOrg({dataDir:DATA_DIR});
 const modelOf = agent => agent.model || MODEL;
 const legacyDryRun=()=>!process.env.ANTHROPIC_API_KEY||process.env.ANTHROPIC_DRY_RUN==='1';
@@ -156,6 +178,9 @@ const divisionsOf = name => org.divisionsOf(name);
 const leadOf = division => org.state.divisions.find(item => item.id === division)?.lead || null;
 const isLeadFor = (name, division) => leadOf(division) === name;
 const taskDivision = task => task.division || divisionOf(task.assignee) || null;
+// One-gate review: a draft by someone whose manager is below the top of the org waits in manager-review for that
+// manager; reports of the top person (the owner's seat) go straight to the owner's review.
+const managerGate = name => { const state=org.state,boss=state.members.find(m=>m.name===state.members.find(x=>x.name===name)?.manager); return boss&&boss.manager!==null?boss.name:null; };
 const normalizeTask = task => ({
   ...task,
   version: Number.isInteger(task.version) ? task.version : 0,
@@ -190,11 +215,11 @@ async function askConfigured(snapshot, agent, task,options={}) {
   }
   throw primaryError;
 }
-async function dryRun(agent, task) {
+async function dryRun(member, task) {
   await new Promise(resolve => setTimeout(resolve, Number(process.env.DRY_RUN_DELAY_MS ?? 4000)));
   // Dry runs ask back when the brief is nearly empty, so the "Needs decision" flow can be tried without a key.
   if ((task.brief || '').trim().length < 12) return 'QUESTIONS:\n1. DRY RUN: who is this for, and what should it say?\n2. DRY RUN: any facts, links or deadlines to include?';
-  return `DRY RUN: no ANTHROPIC_API_KEY is set, so this is placeholder text, not AI output.\n\n${agent.role} would draft: "${task.title}".\nBrief received: ${task.brief || '(none)'}${task.feedback ? `\nRevision requested: ${task.feedback}` : ''}`;
+  return `DRY RUN: no ANTHROPIC_API_KEY is set, so this is placeholder text, not AI output.\n\n${member.role} would draft: "${task.title}".\nBrief received: ${task.brief || '(none)'}${task.feedback ? `\nRevision requested: ${task.feedback}` : ''}`;
 }
 async function work(name) {
   if (busy.has(name)) return;
@@ -234,10 +259,12 @@ async function work(name) {
         return;
       }
       const draft={result:answer.slice(0,10000),by,providerId:result.route?.providerId||null,modelId:result.route?.modelId||null,usedFallback:!!result.fallback,createdAt:now(),feedback:input.feedback||''};
+      // Delegated plan tasks are reviewed by their lead (orchestrator); other staff drafts pass their manager first.
+      const reviewer=current.planRunId?null:managerGate(name),to=reviewer?'manager-review':'review';
       // The draft lands in the task's thread in the same commit, so Komunikasi shows what the agent actually sent.
-      commit((store,emit)=>{const t=store.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'review',result:draft.result,by:draft.by,providerId:draft.providerId,modelId:draft.modelId,usedFallback:draft.usedFallback,history:[...(t.history||[]),draft],runId:null,version:(t.version||0)+1,updatedAt:now()});
-        emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{from:'active',to:'review',phase:'review'}});
-        emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:t.parentId?store.tasks.find(x=>x.id===t.parentId)?.assignee||'owner':'owner',runId,data:{draft:true}});
+      commit((store,emit)=>{const t=store.tasks.find(x=>x.id===current.id);Object.assign(t,{status:to,result:draft.result,by:draft.by,providerId:draft.providerId,modelId:draft.modelId,usedFallback:draft.usedFallback,history:[...(t.history||[]),draft],runId:null,version:(t.version||0)+1,updatedAt:now()});
+        emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{from:'active',to,phase:to}});
+        emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:reviewer||(t.parentId?store.tasks.find(x=>x.id===t.parentId)?.assignee||'owner':'owner'),runId,data:{draft:true,...(reviewer?{manager:reviewer}:{})}});
         addMessage(store,emit,{task:t,sender:{type:'agent',name:t.assignee},kind:'result',text:draft.result});});
     }
   } catch (error) {
@@ -350,7 +377,7 @@ function validateTaskPlacement(task, input={}) {
   if(task.parentId&&task.asLead&&task.assignee!==leadOf(division)) return {status:409,error:'Child tasks cannot use lead mode for another member.',code:'TASK_ROUTE_FORBIDDEN'};
   return null;
 }
-function privilegedTask(task) { return task.kind === 'roster-review' || task.parentId !== null || task.status === 'review'; }
+function privilegedTask(task) { return task.kind === 'roster-review' || task.parentId !== null || task.status === 'review' || task.status === 'manager-review'; }
 function requireOrgToken(req, task) {
   if (!privilegedTask(task) || org.verifyToken(req.headers['x-kantor-org'])) return null;
   return {status:403,error:'A valid owner unlock is required for this action.',code:'ORG_LOCKED'};
@@ -370,7 +397,7 @@ function newTask(input) {
   if (!title || !assignee) return null;
   const status = STATES.has(input.status) ? input.status : 'queued', result = text(input.result, 10000);
   const legacy=!Object.hasOwn(input,'division')&&!Object.hasOwn(input,'parentId')&&!Object.hasOwn(input,'asLead')&&!Object.hasOwn(input,'priority')&&!Object.hasOwn(input,'progressPct')&&!Object.hasOwn(input,'messages')&&!Object.hasOwn(input,'kind');
-  const task = {id: crypto.randomUUID(), title, assignee, division:text(input.division,80)||divisionOf(assignee), parentId:typeof input.parentId==='string'&&input.parentId?input.parentId:null, createdBy:text(input.createdBy,120)||'owner', asLead:input.asLead===true, priority:PRIORITIES.has(input.priority)?input.priority:'normal', progressPct:Number.isInteger(input.progressPct)?Math.max(0,Math.min(100,input.progressPct)):0, messages:Array.isArray(input.messages)?input.messages:[], kind:KINDS.has(input.kind)?input.kind:'work', legacy, executionMode:['direct','manual'].includes(input.executionMode)?input.executionMode:input.executionMode==='automatic'||(input.asLead===true&&!input.parentId&&input.kind!=='roster-review'&&input.outputType!=='application')?'automatic':'direct', outputType:input.outputType==='application'?'application':'document', environment:input.outputType==='application'&&['docker','windows'].includes(input.environment)?input.environment:null, acceptance:Array.isArray(input.acceptance)?input.acceptance.map(a=>text(a,500)).filter(Boolean).slice(0,20):[], dependencyIds:[], phase:'queued', brief:text(input.brief,5000), status:['done','review'].includes(status) && !result ? 'queued' : status, result, createdAt:now()};
+  const task = {id: crypto.randomUUID(), title, assignee, division:text(input.division,80)||divisionOf(assignee), parentId:typeof input.parentId==='string'&&input.parentId?input.parentId:null, createdBy:text(input.createdBy,120)||'owner', asLead:input.asLead===true, priority:PRIORITIES.has(input.priority)?input.priority:'normal', progressPct:Number.isInteger(input.progressPct)?Math.max(0,Math.min(100,input.progressPct)):0, messages:Array.isArray(input.messages)?input.messages:[], kind:KINDS.has(input.kind)?input.kind:'work', legacy, executionMode:['direct','manual'].includes(input.executionMode)?input.executionMode:input.executionMode==='automatic'||(input.asLead===true&&!input.parentId&&input.kind!=='roster-review'&&input.outputType!=='application')?'automatic':'direct', outputType:input.outputType==='application'?'application':'document', environment:input.outputType==='application'&&['docker','windows'].includes(input.environment)?input.environment:null, acceptance:Array.isArray(input.acceptance)?input.acceptance.map(a=>text(a,500)).filter(Boolean).slice(0,20):[], dependencyIds:[], phase:'queued', brief:text(input.brief,5000), status:['done','review','manager-review'].includes(status) && !result ? 'queued' : status, result, createdAt:now()};
   return normalizeTask(task);
 }
 async function api(req, res, url) {
@@ -386,7 +413,7 @@ async function api(req, res, url) {
     const input=await readJson(req);const token=org.unlock(input.pin);return send(res,200,{token});
   }
   if (url.pathname === '/api/org' && req.method === 'PUT') {
-    const input=await readJson(req);const token=req.headers['x-kantor-org'];if(org.verifyToken(token)){const busyError=busyMembers(input);if(busyError)return send(res,409,busyError);}return send(res,200,org.save(input,token,input.version));
+    const input=await readJson(req);const token=req.headers['x-kantor-org'];if(org.verifyToken(token)){const busyError=busyMembers(input);if(busyError)return send(res,409,busyError);}const saved=org.save(input,token,input.version);setImmediate(kick);return send(res,200,saved);
   }
   if (url.pathname === '/api/org/wizard' && req.method === 'POST') {
     const input=await readJson(req),token=req.headers['x-kantor-org'];
@@ -613,7 +640,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     if(task.parentId && tasks.some(item=>item.kind==='roster-review'&&item.division===task.division&&item.status!=='done'))return send(res,409,{error:'Complete the pending roster review before creating more child tasks in this division.'});
     const placement=validateTaskPlacement(task,input);if(placement)return send(res,placement.status,{error:placement.error,code:placement.code});
     if(agentFor(task.assignee)){const route=settings.resolve(task.assignee,agentFor(task.assignee));if(!route.dryRun&&route.invalid)return send(res,409,{error:'This agent has no valid provider/model route. Fix it in Settings.'});}
-    if(task.status==='review'||task.status==='blocked'||(agentFor(task.assignee)&&task.status!=='queued'))return send(res,409,{error:'AI drafts must be generated before review.'});
+    if(task.status==='review'||task.status==='blocked'||task.status==='manager-review'||(agentFor(task.assignee)&&task.status!=='queued'))return send(res,409,{error:'AI drafts must be generated before review.'});
     if(task.status==='active'&&tasks.some(t=>t.assignee===task.assignee&&t.status==='active'))return send(res,409,{error:'This member already has an active task.'});
     tasks.unshift(task); save(); send(res, 201, task); setImmediate(kick); return;
   }
@@ -644,7 +671,17 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     }
     if(input.action!==undefined){
       const locked=requireOrgToken(req,task);if(locked)return send(res,locked.status,{error:locked.error,code:locked.code});
-      if(!['approve','revise'].includes(input.action))return send(res,400,{error:'Unknown action.'});
+      if(!['approve','revise','manager-approve','manager-reject'].includes(input.action))return send(res,400,{error:'Unknown action.'});
+      // Stage 1 of the one gate: the manager passes the staff draft on to the owner's review, or sends it back.
+      if(input.action==='manager-approve'||input.action==='manager-reject'){
+        if(task.status!=='manager-review'||input.version!==(task.version||0))return send(res,409,{error:'This draft changed. Refresh and review the latest version.'});
+        if(input.action==='manager-reject'&&!text(input.feedback,5000))return send(res,400,{error:'Describe the changes needed.'});
+        const by=managerGate(task.assignee)||'Owner',approved=input.action==='manager-approve';
+        commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);Object.assign(t,approved?{status:'review',managerReviewedAt:now(),managerReviewedBy:by}:{status:'queued',feedback:text(input.feedback,5000)},{runId:null,error:undefined,version:(t.version||0)+1,updatedAt:now()});
+          emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,data:{from:'manager-review',to:t.status,phase:t.status,by}});
+          addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},text:approved?`Disetujui atasan (${by}), diteruskan ke review owner.`:`Atasan (${by}) minta revisi: ${t.feedback}`});});
+        send(res,200,tasks.find(t=>t.id===task.id));setImmediate(kick);return;
+      }
       if(input.action==='approve'&&task.outputType==='application'&&!applications.canReview(task))return send(res,409,{error:'Belum ada bukti pengujian untuk revisi ini.',code:'EVIDENCE_REQUIRED'});
       if(task.status!=='review'||input.version!==(task.version||0))return send(res,409,{error:'This draft changed. Refresh and review the latest version.'});
       if(input.action==='revise'&&!text(input.feedback,5000))return send(res,400,{error:'Describe the changes needed.'});
@@ -673,9 +710,9 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     if(input.assignee!==undefined||input.parentId!==undefined||input.division!==undefined||input.asLead!==undefined){const candidate=normalizeTask({...task,...input,assignee:change.assignee||task.assignee,parentId:input.parentId!==undefined?input.parentId:task.parentId,division:input.division!==undefined?input.division:task.division,asLead:input.asLead!==undefined?input.asLead:task.asLead});const placement=validateTaskPlacement(candidate,input);if(placement)return send(res,placement.status,{error:placement.error});change.parentId=candidate.parentId;change.division=candidate.division;change.asLead=candidate.asLead;}
     if(input.priority!==undefined){if(!PRIORITIES.has(input.priority))return send(res,400,{error:'Unknown priority.'});change.priority=input.priority;}
     if (input.status !== undefined) {
-      if (!STATES.has(input.status)||input.status==='review'||input.status==='blocked') return send(res, 400, {error: 'Unknown status.'});
+      if (!STATES.has(input.status)||input.status==='review'||input.status==='blocked'||input.status==='manager-review') return send(res, 400, {error: 'Unknown status.'});
       const assignee = change.assignee || task.assignee;
-      if(task.status==='review'&&!change.assignee)return send(res,409,{error:'Approve this draft or request a revision.'});
+      if((task.status==='review'||task.status==='manager-review')&&!change.assignee)return send(res,409,{error:'Approve this draft or request a revision.'});
       if (agentFor(assignee) && input.status !== 'queued') return send(res, 409, {error: 'This member is connected to an AI agent; it starts and finishes its own tasks.'});
       if (input.status === 'active' && tasks.some(t => t.id !== task.id && t.assignee === assignee && t.status === 'active')) return send(res, 409, {error: 'This member already has an active task.'});
       if (input.status === 'done' && !text(input.result, 10000)) return send(res, 400, {error: 'Write a result before finishing.'});

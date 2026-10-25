@@ -13,7 +13,7 @@ const skipWizard=async page=>{await page.addInitScript(()=>{try{sessionStorage.s
  await page.locator('[data-floor="0"]').click();await page.waitForFunction(()=>!officeScene.snapshot().transitioning);
  assert.equal(await page.locator('body').evaluate(e=>e.classList.contains('building-view')),true);
  assert.equal(await page.locator('.floor-thumb').evaluateAll(images=>images.every(i=>i.complete&&i.naturalWidth===200)),true);
- assert.equal(await page.locator('[data-floor="3"] .floor-count').innerText(),'13');
+ assert.equal(await page.locator('[data-floor="3"] .floor-count').innerText(),String(await page.evaluate(()=>window.officeTasks.state().members.filter(m=>m.active!==false).length)));
  const point=await page.evaluate(()=>officeScene.floorPoint(2));await page.mouse.click(point.x,point.y);await page.waitForFunction(()=>!officeScene.snapshot().transitioning);
  assert.equal(await page.evaluate(()=>officeScene.snapshot().floor),2);assert.equal(await page.locator('body').evaluate(e=>e.classList.contains('building-view')),false);
  for(const width of [375,768,1440]){

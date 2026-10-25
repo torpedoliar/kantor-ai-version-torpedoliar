@@ -31,6 +31,7 @@ function statusOf(state,task,{agents=[]}={}){
     if(other)return {...base,label:`Antre: ${task.assignee} masih mengerjakan "${other.title}"`};
     return {...base,label:`Antre: ${task.assignee} akan segera mulai`};
   }
+  if(task.status==='manager-review')return {...base,label:'Menunggu review atasan'};
   if(task.status==='review')return {...base,label:'Siap kamu review'};
   if(task.status==='done')return {...base,label:'Selesai'};
   return {...base,label:task.status};

@@ -15,6 +15,8 @@ const api=async(pathname,options={})=>{const response=await fetch(origin+pathnam
   browser=await launch({headless:true});const page=await browser.newPage().then(skipWizard);await page.goto(origin);const unlocked=await api('/api/org/unlock',{method:'POST',headers,body:JSON.stringify({pin:'2468'})});assert.equal(unlocked.status,200);await page.evaluate(token=>sessionStorage.setItem('kantor-ai.orgToken',token),unlocked.body.token);await page.reload();await page.waitForFunction(()=>!document.querySelector('#bLock').disabled);await page.click('#bTasks');
   // One global board with four columns; the legacy unassigned task is still shown once.
   assert.equal(await page.locator('#taskBoard [data-column]').count(),4);assert.equal(await page.locator('.task-card[data-task-id]').count(),2);assert.equal(await page.locator('#rosterPanel').count(),0,'no duplicated roster inventory');
+  // A staff draft waiting on its manager sits in Review, but is not counted as the owner's turn.
+  assert.equal(await page.evaluate(()=>window.TaskWorkspace.columnOf('manager-review')),'review');
   await page.locator(`.task-card[data-task-id="${parent.body.id}"] .task-card-open`).click();
   const detail=page.locator('#taskDetail');await detail.getByRole('button',{name:'Pecah',exact:true}).click();await detail.locator('.split-form').waitFor();await detail.locator('.split-form input[ name="title" ]').fill('Draft launch copy');await detail.locator('.split-form button[type="submit"]').click();
   await page.waitForFunction(async id=>(await fetch('/api/tasks').then(response=>response.json())).some(task=>task.parentId===id),parent.body.id);

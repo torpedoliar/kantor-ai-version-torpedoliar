@@ -1,7 +1,7 @@
 // Task board: one global board with four columns. Cards only select; the detail panel (tasks.js) holds every action.
 (() => {
   const COLUMNS = [['queued', 'Tugas'], ['progress', 'In progress'], ['review', 'Review'], ['done', 'Selesai']];
-  const columnOf = status => ({queued: 'queued', active: 'progress', blocked: 'progress', review: 'review', done: 'done'})[status] || 'queued';
+  const columnOf = status => ({queued: 'queued', active: 'progress', blocked: 'progress', 'manager-review': 'review', review: 'review', done: 'done'})[status] || 'queued';
   let root = null, api = null;
   function node(tag, text, className) {
     const item = document.createElement(tag);
@@ -17,6 +17,7 @@
       return task.blockedReason === 'children' ? ['Menunggu tim', 'wait'] : ['Menunggu jawabanmu', 'owner'];
     }
     if (task.status === 'queued' && task.error) return ['Gagal, coba lagi', 'error'];
+    if (task.status === 'manager-review') return ['Menunggu atasan', 'wait'];
     if (task.status === 'review') return ['Perlu review kamu', 'owner'];
     return null;
   }
