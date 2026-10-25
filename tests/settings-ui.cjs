@@ -31,7 +31,14 @@ function startApp(){
     let fetched;for(let i=0;i<50;i++){fetched=await page.evaluate(()=>fetch('/api/settings').then(response=>response.json()));if(fetched.providers[0]?.models?.length)break;await page.waitForTimeout(100);}assert.deepEqual(fetched.providers[0].models.map(model=>model.id),['mock-model']);
     // Fetched models are listed and usable: pick the default route without hand-enabling anything.
     assert.match(await page.locator('#settingsProviders').innerText(),/1 model/);
-    assert.match(await page.locator('#routeDefault').innerText(),/Local mock · Mock model/);await page.selectOption('#routeDefault',{label:'Local mock · Mock model'});await page.getByRole('button',{name:'Simpan routing',exact:true}).click();
+    assert.match(await page.locator('#routeDefault').innerText(),/Local mock · Mock model/);await page.selectOption('#routeDefault',{label:'Local mock · Mock model'});
+    assert.equal(await page.inputValue('#routeMaxTokens'),'','max tokens default is unlimited (empty)');await page.fill('#routeMaxTokens','8192');
+    // Concurrency: office-wide limit defaults to 3; a provider can have its own cap (rate limits differ per provider).
+    assert.equal(await page.inputValue('#routeConcurrency'),'3','office concurrency defaults to 3');await page.fill('#routeConcurrency','2');
+    await page.fill('#providerConcurrency-'+saved.providers[0].id,'1');
+    await page.getByRole('button',{name:'Simpan routing',exact:true}).click();
+    await page.waitForFunction(()=>fetch('/api/settings').then(r=>r.json()).then(s=>s.maxTokens===8192));
+    await page.waitForFunction(()=>fetch('/api/settings').then(r=>r.json()).then(s=>s.concurrency===2&&s.providers[0].maxConcurrent===1));
     await page.waitForFunction(()=>document.querySelector('#settingsMessage').textContent.includes('Routing disimpan'));
     const routed=await page.evaluate(()=>fetch('/api/settings').then(response=>response.json()));assert.equal(routed.defaultRoute.modelId,'mock-model');assert.equal(routed.providers[0].models[0].enabled,true);
     // Per-agent model from the organization chart AI tab: unlock, pick a model for Kak Rani, saved as a settings override.

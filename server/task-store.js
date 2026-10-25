@@ -5,7 +5,10 @@ const crypto=require('node:crypto');
 const clone=value=>structuredClone(value);
 const collections=['tasks','threads','messages','decisions','events','projects','jobs'];
 function conflict(code,message){return Object.assign(new Error(message),{status:409,code});}
-function empty(){return {schemaVersion:1,version:0,nextSeq:1,tasks:[],threads:[],messages:[],decisions:[],events:[],projects:[],jobs:[],reads:{owner:{}},requests:{}};}
+function empty(){return {schemaVersion:1,version:0,nextSeq:1,tasks:[],threads:[],messages:[],decisions:[],events:[],projects:[],jobs:[],reads:{owner:{}},requests:{},memories:{}};}
+// Agent memory: at most 20 short notes per agent, newest last. Notes are summaries, never whole drafts.
+const MEMORY_LIMIT=20,MEMORY_TEXT=300;
+function remember(draft,agent,notes){draft.memories=draft.memories||{};const list=[...(draft.memories[agent]||[]),...notes.map(text=>({text:String(text).replace(/\s+/g,' ').trim().slice(0,MEMORY_TEXT),at:new Date().toISOString()})).filter(n=>n.text)];draft.memories[agent]=list.slice(-MEMORY_LIMIT);return draft.memories[agent];}
 function atomicWrite(file,data){const tmp=`${file}.${process.pid}.${crypto.randomUUID()}.tmp`;try{fs.writeFileSync(tmp,data,{mode:0o600});fs.renameSync(tmp,file);}finally{try{fs.unlinkSync(tmp);}catch(error){if(error.code!=='ENOENT')throw error;}}}
 // Console/model text: strip terminal escapes and anything that looks like a credential before it is stored.
 const SECRET_PATTERNS=[/\b(sk|pk|rk)-[A-Za-z0-9_-]{8,}/g,/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi,/\b(api[_-]?key|token|secret|password|credential)\s*[:=]\s*\S+/gi];
@@ -42,7 +45,7 @@ function openDecision(draft,emit,{task,questions,target,path:route,askedBy}){
 function threadSummaries(state){
   const reads=state.reads.owner;
   return state.threads.map(thread=>{const messages=state.messages.filter(m=>m.threadId===thread.id),last=messages.at(-1),seen=reads[thread.id]||0,task=state.tasks.find(t=>t.id===thread.taskId);
-    return {...thread,title:task?.title||thread.title,status:task?.status||null,assignee:task?.assignee||null,lastMessage:last?{text:last.text.slice(0,160),sender:last.sender,at:last.at,seq:last.seq}:null,unread:messages.filter(m=>m.seq>seen&&m.sender.type!=='owner').length,openDecisions:state.decisions.filter(d=>d.threadId===thread.id&&d.status==='open').length};})
+    return {...thread,title:task?.title||thread.title,status:task?.status||null,assignee:task?.assignee||null,lastMessage:last?{text:last.text.slice(0,160),sender:last.sender,at:last.at,seq:last.seq}:null,unread:messages.filter(m=>m.seq>seen&&m.sender.type!=='owner').length,openDecisions:state.decisions.filter(d=>d.threadId===thread.id&&d.status==='open').length,ownerDecisions:state.decisions.filter(d=>d.threadId===thread.id&&d.status==='open'&&(!d.target||d.target==='owner')).length};})
     .sort((a,b)=>(b.lastMessage?.seq||0)-(a.lastMessage?.seq||0));
 }
 function validate(state){
@@ -77,7 +80,7 @@ function repairLegacyDecisions(draft,emit){
 function createTaskStore({dataDir,write=atomicWrite}){
   fs.mkdirSync(dataDir,{recursive:true});const file=path.join(dataDir,'workspace.json'),legacy=path.join(dataDir,'tasks.json');let state;
   try{
-    if(fs.existsSync(file)){state=JSON.parse(fs.readFileSync(file,'utf8'));validate(state);}
+    if(fs.existsSync(file)){state=JSON.parse(fs.readFileSync(file,'utf8'));validate(state);state.memories=state.memories||{};}
     else{state=fs.existsSync(legacy)?migrate(JSON.parse(fs.readFileSync(legacy,'utf8'))):empty();validate(state);write(file,JSON.stringify(state,null,2));}
   }catch(error){throw new Error(`Cannot read task workspace: ${error.message}`);}
   {const draft=clone(state);if(repairLegacyDecisions(draft,event=>emitEvent(draft,event))){draft.version=state.version+1;validate(draft);write(file,JSON.stringify(draft,null,2));state=draft;}}
@@ -104,4 +107,4 @@ function createTaskStore({dataDir,write=atomicWrite}){
   }
   return {snapshot:()=>clone(state),saveTasks,transaction,eventsAfter:(after=0,limit=200)=>clone(state.events.filter(e=>e.seq>after).slice(0,Math.max(1,Math.min(500,limit)))),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);}};
 }
-module.exports={acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries};
+module.exports={remember,MEMORY_LIMIT,MEMORY_TEXT,acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries};

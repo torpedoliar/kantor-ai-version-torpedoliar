@@ -224,6 +224,8 @@
     modelOptions:()=>window.officeModels?.options()||[],
     routeOf:value=>window.officeModels?.routeOf(value)||null,
     memberRoute:name=>window.officeModels?.routeValue(window.officeModels.overrides?.()[name])||'',
+    memory:name=>call('GET',`/api/agents/${encodeURIComponent(name)}/memory`),
+    saveMemory:(name,items)=>call('PUT',`/api/agents/${encodeURIComponent(name)}/memory`,{items}),
     async saveMemberRoutes(map){const routes=Object.fromEntries(Object.entries(map).map(([name,value])=>[name,window.officeModels.routeOf(value)]));await call('PUT','/api/settings/member-routes',{routes});await window.officeModels.load(true);},
     async save(next){orgState=await call('PUT','/api/org',{...next,version:orgState.version});orgChanged();return orgState;},
     async reload(){orgState=await call('GET','/api/org');orgChanged();},
@@ -410,10 +412,12 @@
     if (!list.length && storageHealthy && tasks.length) {
       list = await call('POST', '/api/tasks/import', tasks).then(imported => { feedback(`${imported.length} tugas dari browser ini dipindahkan ke server.`); return imported; }).catch(() => list);
     }
+    // Load the organization before marking the server ready, so an org dialog opened now never renders the offline fallback.
+    const org = await call('GET','/api/org').catch(() => fallbackOrg());
     server = info;
     el('bLock').disabled=false;el('bLock').removeAttribute('title');syncLock();
     tasks = list;
-    orgState = await call('GET','/api/org').catch(() => fallbackOrg());
+    orgState = org;
     describeAgents(info);
     render();
     resolveReady(orgState);
@@ -433,6 +437,7 @@
   }
   window.officeTasks = {
     activeFor: name => tasks.find(t => t.assignee === name && t.status === 'active'),
+    online: () => !!server,
     state: () => structuredClone(orgState),
     ready,
     events: () => events.map(event => ({...event})),

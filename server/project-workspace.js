@@ -101,6 +101,32 @@ function createProjectWorkspace({dataDir,writeFile=(file,data)=>fs.writeFileSync
     for(const file of m.files){const target=path.join(root,...file.path.split('/'));let cursor=root;for(const part of file.path.split('/')){cursor=path.join(cursor,part);if(fs.lstatSync(cursor).isSymbolicLink())fail('Sumber berubah menjadi link.','SOURCE_CHANGED');}if(sha256(fs.readFileSync(target))!==file.sha256)fail('Hash sumber berubah sejak revisi disimpan.','SOURCE_CHANGED');}
     return m;
   }
-  return {createProject,writeRevision,manifest,readFile,exportSource,sourceDir,verifyRevision};
+  // Copy a verified revision to a folder the owner chose (e.g. E:\Vibe\Calculator). Owner-only at the route level.
+  // Refuses relative paths, Kantor Kita's own data folder, files, links/junctions, and non-empty folders unless
+  // overwrite is confirmed. Exported copies are ordinary writable files.
+  function exportRevision(projectId,revisionId,target,{overwrite=false}={}){
+    const bad=message=>fail(message,'EXPORT_PATH');
+    if(typeof target!=='string'||!target.trim()||!path.isAbsolute(target.trim()))bad('Folder tujuan harus path lengkap, misalnya E:\\Vibe\\Calculator.');
+    const dest=path.resolve(target.trim()),dataRoot=path.resolve(dataDir);
+    const inside=(child,parent)=>{const rel=path.relative(parent,child);return rel===''||(!rel.startsWith('..')&&!path.isAbsolute(rel));};
+    if(inside(dest,dataRoot)||inside(dataRoot,dest))bad('Folder tujuan tidak boleh berada di dalam (atau berisi) folder data Kantor Kita.');
+    // Each existing ancestor must be a real directory (no symlink or junction redirecting the copy elsewhere).
+    let cursor=path.parse(dest).root;
+    for(const part of path.relative(cursor,dest).split(path.sep).filter(Boolean)){
+      cursor=path.join(cursor,part);let stat;try{stat=fs.lstatSync(cursor);}catch(error){if(error.code==='ENOENT')break;throw error;}
+      if(stat.isSymbolicLink()||!stat.isDirectory())bad(`Folder tujuan memuat link atau file: ${cursor}`);
+    }
+    const m=verifyRevision(projectId,revisionId),src=sourceDir(projectId,revisionId);
+    if(fs.existsSync(dest)&&fs.readdirSync(dest).length&&!overwrite)fail('Folder tujuan sudah berisi file. Konfirmasi timpa untuk melanjutkan.','EXPORT_NOT_EMPTY');
+    fs.mkdirSync(dest,{recursive:true});
+    for(const file of m.files){
+      const to=path.join(dest,...file.path.split('/'));if(!inside(to,dest))bad('Path file keluar dari folder tujuan.');
+      fs.mkdirSync(path.dirname(to),{recursive:true});
+      try{if(fs.lstatSync(to).isSymbolicLink())bad(`File tujuan berupa link: ${file.path}`);fs.chmodSync(to,0o644);}catch(error){if(error.code!=='ENOENT')throw error;}
+      fs.writeFileSync(to,fs.readFileSync(path.join(src,...file.path.split('/'))));
+    }
+    return {target:dest,files:m.files.map(f=>f.path),revisionId,sourceHash:m.sourceHash};
+  }
+  return {createProject,writeRevision,manifest,readFile,exportSource,sourceDir,verifyRevision,exportRevision};
 }
 module.exports={createProjectWorkspace,validateBundle,LIMITS};

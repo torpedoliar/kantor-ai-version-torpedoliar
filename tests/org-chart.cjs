@@ -34,7 +34,19 @@ const member=(page,name)=>page.evaluate(n=>window.officeTasks.state().members.fi
   await page.getByRole('tab',{name:'Kerja'}).click();await page.fill('#orgSideWorkload','60');await page.click('#orgSideSave');
   await page.locator('#pinDialog').waitFor({state:'visible'});await page.fill('#orgPin','2468');await page.click('#pinSubmit');
   await page.waitForFunction(()=>window.officeTasks.state().members.find(m=>m.name==='Kak Dewi').workloadPct===60);
-  assert.doesNotMatch(await page.locator('.org-toolbar').innerText(),/terkunci/i);
+  // AI tab: the agent's memory is visible, editable and can be cleared.
+  await page.click('.org-card[data-member="Kak Dewi"]');await page.getByRole('tab',{name:'AI'}).click();
+  const mem=page.locator('#orgSideMemory');await mem.waitFor();assert.match(await page.locator('#orgSide').innerText(),/Memori agen/);
+  // Unsaved notes survive a chart re-render (e.g. another org change arriving).
+  await mem.fill('Catatan belum disimpan');await page.evaluate(()=>window.OrgChart.render());await page.waitForTimeout(400);
+  assert.equal(await page.locator('#orgSideMemory').inputValue(),'Catatan belum disimpan','unsaved memory text survives a re-render');
+  await mem.fill('Owner suka nada santai\nGunakan bahasa Indonesia');await page.click('#orgSideMemorySave');
+  await page.waitForFunction(async()=>{const r=await fetch('/api/agents/Kak%20Dewi/memory',{headers:{'x-kantor-org':sessionStorage.getItem('kantor-ai.orgToken')}});return (await r.json()).items?.length===2;});
+  if(process.env.SHOT)await page.screenshot({path:path.join(process.env.SHOT,'agent-memory-desktop.png')});
+  await page.click('#orgSideMemoryClear');
+  await page.waitForFunction(async()=>{const r=await fetch('/api/agents/Kak%20Dewi/memory',{headers:{'x-kantor-org':sessionStorage.getItem('kantor-ai.orgToken')}});return (await r.json()).items?.length===0;});
+  assert.equal(await mem.inputValue(),'');
+  assert.doesNotMatch(await page.locator('.org-toolbar[role="toolbar"]').innerText(),/terkunci/i);
   // Drag onto a card in another division: new manager and division.
   await dragTo(page,'.org-card[data-member="Tari"]','.org-card[data-member="Gilang"]');
   await page.getByRole('button',{name:'Terapkan perpindahan',exact:true}).click();
@@ -53,7 +65,8 @@ const member=(page,name)=>page.evaluate(n=>window.officeTasks.state().members.fi
   await page.waitForSelector('path.org-collab');
   assert.deepEqual((await page.evaluate(()=>window.officeTasks.state().divisions.find(d=>d.id==='marketing').collaboratesWith)),['service']);
   // Division panel: new division, escaped name, area name.
-  await page.click('#orgAddDivision');await page.fill('#orgSideName','<b>Riset</b>');await page.fill('#orgSideArea','Lab');await page.click('#orgSideSave');
+  // Wait for the new division's panel; the previous (member) panel shares the #orgSideName field id.
+  await page.click('#orgAddDivision');await page.waitForFunction(()=>document.querySelector('#orgSide h3')?.textContent==='Divisi baru');await page.fill('#orgSideName','<b>Riset</b>');await page.fill('#orgSideArea','Lab');await page.click('#orgSideSave');
   await page.waitForFunction(()=>window.officeTasks.state().divisions.some(d=>d.name==='<b>Riset</b>'&&d.areaName==='Lab'&&d.lead===''));
   assert.equal(await page.locator('.org-box-title b').count(),0,'division name is escaped');
   const rId=await page.evaluate(()=>window.officeTasks.state().divisions.find(d=>d.name==='<b>Riset</b>').id);

@@ -1,0 +1,33 @@
+{
+  "templates": {
+    "male": "male.gltf",
+    "female": "female.gltf"
+  },
+  "measurements": {
+    "male": {
+      "height": 1.78,
+      "headHeight": 0.16622661671682115,
+      "vertices": 16186
+    },
+    "female": {
+      "height": 1.7,
+      "headHeight": 0.14837106404626765,
+      "vertices": 19614
+    }
+  },
+  "license": "CC0",
+  "source": "https://github.com/makehumancommunity/makehuman",
+  "boneMap": {
+    "hips": "root",
+    "head": "head",
+    "spine": "spine05",
+    "leftArm": "upperarm01.L",
+    "leftElbow": "lowerarm01.L",
+    "rightArm": "upperarm01.R",
+    "rightElbow": "lowerarm01.R",
+    "leftThigh": "upperleg01.L",
+    "leftKnee": "lowerleg01.L",
+    "rightThigh": "upperleg01.R",
+    "rightKnee": "lowerleg01.R"
+  }
+}

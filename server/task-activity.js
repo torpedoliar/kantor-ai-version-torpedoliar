@@ -1,6 +1,6 @@
 // What an agent is doing right now, and what has happened so far, for one task thread.
 // Built only from task state and stored events: no percentages, no guessed progress.
-const PURPOSE={plan:'menyusun rencana',synthesize:'mereview hasil tim',work:'mengerjakan',application:'menulis kode aplikasi'};
+const PURPOSE={plan:'menyusun rencana',synthesize:'mereview hasil tim',review:'mereview hasil',work:'mengerjakan',application:'menulis kode aplikasi'};
 const secs=(from,to)=>Math.max(0,Math.round((Date.parse(to)-Date.parse(from))/1000));
 const duration=s=>s<60?`${s} dtk`:`${Math.floor(s/60)} mnt ${s%60} dtk`;
 
@@ -23,7 +23,7 @@ function statusOf(state,task,{agents=[]}={}){
     return {...base,label:'Menunggu jawabanmu'};
   }
   if(task.status==='queued'){
-    if(task.error)return {...base,label:`Gagal: ${String(task.error).replace(/[.s]+$/,"")}. Kirim "lanjutkan" untuk mencoba lagi.`};
+    if(task.error)return {...base,label:`Gagal: ${String(task.error).replace(/[.\s]+$/,"")}. Kirim "lanjutkan" untuk mencoba lagi.`};
     const blocker=(task.dependencyIds||[]).map(id=>state.tasks.find(t=>t.id===id)).find(t=>t&&t.status!=='done');
     if(blocker)return {...base,label:`Menunggu "${blocker.title}" selesai`};
     if(!agents.includes(task.assignee))return {...base,label:`${task.assignee} bukan agen AI: dikerjakan manual`};

@@ -1,0 +1,327 @@
+{
+  "textures": {
+    "parquet_herringbone": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/parquet_herringbone/1k/diff.jpg",
+        "nor": "assets/textures/parquet_herringbone/1k/nor.jpg",
+        "rough": "assets/textures/parquet_herringbone/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/parquet_herringbone/2k/diff.jpg"
+      }
+    },
+    "wood_planks_light": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/wood_planks_light/1k/diff.jpg",
+        "nor": "assets/textures/wood_planks_light/1k/nor.jpg",
+        "rough": "assets/textures/wood_planks_light/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/wood_planks_light/2k/diff.jpg"
+      }
+    },
+    "plaster_white": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/plaster_white/1k/diff.jpg",
+        "nor": "assets/textures/plaster_white/1k/nor.jpg",
+        "rough": "assets/textures/plaster_white/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/plaster_white/2k/diff.jpg"
+      }
+    },
+    "wood_panel_walnut": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/wood_panel_walnut/1k/diff.jpg",
+        "nor": "assets/textures/wood_panel_walnut/1k/nor.jpg",
+        "rough": "assets/textures/wood_panel_walnut/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/wood_panel_walnut/2k/diff.jpg"
+      }
+    },
+    "concrete_ceiling": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/concrete_ceiling/1k/diff.jpg",
+        "nor": "assets/textures/concrete_ceiling/1k/nor.jpg",
+        "rough": "assets/textures/concrete_ceiling/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/concrete_ceiling/2k/diff.jpg"
+      }
+    },
+    "fabric_sofa": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/fabric_sofa/1k/diff.jpg",
+        "nor": "assets/textures/fabric_sofa/1k/nor.jpg",
+        "rough": "assets/textures/fabric_sofa/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/fabric_sofa/2k/diff.jpg"
+      }
+    },
+    "rug_shaggy": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/rug_shaggy/1k/diff.jpg",
+        "nor": "assets/textures/rug_shaggy/1k/nor.jpg",
+        "rough": "assets/textures/rug_shaggy/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/rug_shaggy/2k/diff.jpg"
+      }
+    },
+    "rug_pattern": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/rug_pattern/1k/diff.jpg",
+        "nor": "assets/textures/rug_pattern/1k/nor.jpg",
+        "rough": "assets/textures/rug_pattern/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/rug_pattern/2k/diff.jpg"
+      }
+    },
+    "metal_brushed": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/metal_brushed/1k/diff.jpg",
+        "nor": "assets/textures/metal_brushed/1k/nor.jpg",
+        "rough": "assets/textures/metal_brushed/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/metal_brushed/2k/diff.jpg"
+      }
+    },
+    "metal_black": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/metal_black/1k/diff.jpg",
+        "nor": "assets/textures/metal_black/1k/nor.jpg",
+        "rough": "assets/textures/metal_black/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/metal_black/2k/diff.jpg"
+      }
+    },
+    "leather_brown": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/leather_brown/1k/diff.jpg",
+        "nor": "assets/textures/leather_brown/1k/nor.jpg",
+        "rough": "assets/textures/leather_brown/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/leather_brown/2k/diff.jpg"
+      }
+    },
+    "marble_white": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/marble_white/1k/diff.jpg",
+        "nor": "assets/textures/marble_white/1k/nor.jpg",
+        "rough": "assets/textures/marble_white/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/marble_white/2k/diff.jpg"
+      }
+    },
+    "brick_painted": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/brick_painted/1k/diff.jpg",
+        "nor": "assets/textures/brick_painted/1k/nor.jpg",
+        "rough": "assets/textures/brick_painted/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/brick_painted/2k/diff.jpg"
+      }
+    },
+    "asphalt": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/asphalt/1k/diff.jpg",
+        "nor": "assets/textures/asphalt/1k/nor.jpg",
+        "rough": "assets/textures/asphalt/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/asphalt/2k/diff.jpg"
+      }
+    },
+    "tiles_kitchen": {
+      "repeat": [
+        1,
+        1
+      ],
+      "1k": {
+        "diff": "assets/textures/tiles_kitchen/1k/diff.jpg",
+        "nor": "assets/textures/tiles_kitchen/1k/nor.jpg",
+        "rough": "assets/textures/tiles_kitchen/1k/rough.jpg"
+      },
+      "2k": {
+        "diff": "assets/textures/tiles_kitchen/2k/diff.jpg"
+      }
+    }
+  },
+  "hdri": {
+    "interior": "assets/hdri/interior_1k.hdr"
+  },
+  "models": {
+    "desk": {
+      "file": "assets/models/desk/metal_office_desk_1k.gltf",
+      "source": "polyhaven"
+    },
+    "laptop": {
+      "file": "assets/models/laptop/classic_laptop_1k.gltf",
+      "source": "polyhaven"
+    },
+    "sofa_sectional": {
+      "file": "assets/models/sofa_sectional/sofa_03_1k.gltf",
+      "source": "polyhaven"
+    },
+    "armchair": {
+      "file": "assets/models/armchair/modern_arm_chair_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "coffee_table_glass": {
+      "file": "assets/models/coffee_table_glass/modern_coffee_table_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "tv_cabinet": {
+      "file": "assets/models/tv_cabinet/modern_wooden_cabinet_1k.gltf",
+      "source": "polyhaven"
+    },
+    "tv": {
+      "file": "assets/models/tv/television_02_1k.gltf",
+      "source": "polyhaven"
+    },
+    "dining_table": {
+      "file": "assets/models/dining_table/dining_table_1k.gltf",
+      "source": "polyhaven"
+    },
+    "dining_chair": {
+      "file": "assets/models/dining_chair/dining_chair_02_1k.gltf",
+      "source": "polyhaven"
+    },
+    "bookshelf": {
+      "file": "assets/models/bookshelf/wooden_display_shelves_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "pendant_lamp": {
+      "file": "assets/models/pendant_lamp/hanging_industrial_lamp_1k.gltf",
+      "source": "polyhaven"
+    },
+    "arc_lamp": {
+      "file": "assets/models/arc_lamp/desk_lamp_arm_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "plant_tall": {
+      "file": "assets/models/plant_tall/potted_plant_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "plant_small": {
+      "file": "assets/models/plant_small/potted_plant_04_1k.gltf",
+      "source": "polyhaven"
+    },
+    "painting": {
+      "file": "assets/models/painting/hanging_picture_frame_02_1k.gltf",
+      "source": "polyhaven"
+    },
+    "mug": {
+      "file": "assets/models/mug/ceramic_vase_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "books": {
+      "file": "assets/models/books/book_encyclopedia_set_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "stool": {
+      "file": "assets/models/stool/bar_chair_round_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "cushions": {
+      "file": "assets/models/cushions/throw_pillows_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "lounge_chair": {
+      "file": "assets/models/lounge_chair/mid_century_lounge_chair_1k.gltf",
+      "source": "polyhaven"
+    },
+    "barber_chair": {
+      "file": "assets/models/barber_chair/BarberShopChair_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "mirror": {
+      "file": "assets/models/mirror/ornate_mirror_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "side_table": {
+      "file": "assets/models/side_table/side_table_01_1k.gltf",
+      "source": "polyhaven"
+    },
+    "clock": {
+      "file": "assets/models/clock/wall_clock_1k.gltf",
+      "source": "polyhaven"
+    },
+    "office_chair": {
+      "file": "assets/models/office_chair.glb",
+      "source": "kenney"
+    },
+    "monitor": {
+      "file": "assets/models/monitor.glb",
+      "source": "kenney"
+    },
+    "keyboard": {
+      "file": "assets/models/keyboard.glb",
+      "source": "kenney"
+    }
+  }
+}

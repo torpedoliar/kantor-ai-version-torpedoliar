@@ -6,7 +6,9 @@ Antarmuka utama memakai Bahasa Indonesia; nama tahap teknis dan keluaran provide
 
 Maket kantor empat lantai dengan 13 anggota tim, ruang kerja terbuka, dan pengelolaan tugas lokal. Nama dan peran mengikuti daftar pengguna. Denah, furnitur, dan figur orang adalah interpretasi ilustratif, bukan pengukuran atau potret asli.
 
-Tampilannya meniru maket arsitek dari karton: warna krem, garis tinta di tepi benda, satu aksen merah bata. Avatar bergaya balok seperti Roblox, dengan kepala kubus, badan kotak, lengan dan kaki bersendi, serta wajah sederhana. Tiap anggota memakai varian perempuan berambut panjang atau varian laki-laki berambut pendek, sesuai daftar tim. Semua tetap ilustratif, bukan potret rupa asli. Animasi bekerja, ngobrol, minum, menelepon, dan rutinitas lain tetap berjalan.
+Ruangan kini memakai tekstur PBR, perabot CC0, dan level grafis Low–Ultra; garis tinta gaya maket sudah dihapus. Avatar masih figur prosedural sederhana sampai tahap 2. Animasi bekerja, ngobrol, minum, menelepon, dan rutinitas lain tetap berjalan. Tampilan ruang belum berarti kualitas karakter sudah setara GTA.
+
+Jika perubahan grafis tidak terlihat, pastikan server dijalankan dari checkout yang berisi `public/graphics.js` dan `public/assets/manifest.json`. Pada sesi pengembangan ini versi baru berjalan di **http://127.0.0.1:8080/?graphics=ultra**; server lain di port 3000 dapat berasal dari checkout lama.
 
 Label, pemilih tim, detail, log, dan tugas menampilkan inisial anggota. Identitas penyimpanan tetap memakai nama lengkap agar tugas serta pilihan musholla yang sudah disimpan tetap cocok.
 
@@ -19,6 +21,25 @@ Label, pemilih tim, detail, log, dan tugas menampilkan inisial anggota. Identita
 - **View whole building:** keempat lantai terlihat dengan tangga dua bentang di sisi kiri yang menyambungkan tiap lantai. Klik salah satu lantai untuk masuk. Di tampilan ini keempat lantai tersusun rapat seperti gedung sungguhan: lantai 1 sampai 3 berdinding kaca, tangga ada di menara kaca di sisi kiri, dan sisi parkir lantai 1 dibiarkan terbuka untuk keluar-masuk kendaraan, dengan jalan masuk ke jalan raya. Isi lantai tetap terlihat menembus kaca; klik kaca suatu lantai untuk masuk ke lantai itu. Perpindahan antara satu lantai dan seluruh gedung memakai animasi kamera sekitar 1,4 detik: saat keluar, lantai-lantai lain meluncur masuk menyusun gedung; saat masuk, lantai lain bergeser menjauh. Animasi dilewati bila sistem meminta gerakan dikurangi, dan berhenti seketika bila layar disentuh atau diseret. Tampilan ini juga menampilkan alas kota bundar dengan jalan, pohon, gedung-gedung lain (yang dekat dibuat rendah agar kantor tidak tertutup), awan yang bergerak pelan di kejauhan, dan burung yang terbang berputar. Saat satu lantai dipilih, yang tampil hanya lantai itu; tangga luar dan orang yang sedang di tangga hanya terlihat di tampilan seluruh gedung.
 
 Seret untuk memutar dan memiringkan kamera. Shift + seret atau klik kanan untuk menggeser, scroll atau cubit trackpad untuk zoom, geser dua jari ke samping untuk memutar. Di layar sentuh: satu jari memutar, dua jari mencubit dan menggeser. Keyboard: panah memutar/memiringkan, W A S D menggeser, Q/E zoom. Tombol **+**, **−**, **Rotate**, dan **Reset** tetap tersedia.
+
+### Level grafis dan aset realistis
+
+Pengaturan → Pengaturan umum → **Level grafis** berlaku langsung tanpa muat ulang dan diingat per browser:
+
+| Level | Isi |
+|---|---|
+| Low | Material polos, tanpa bayangan/pantulan, resolusi ≤ 0,75×. Untuk grafis bawaan. |
+| Medium | Tekstur foto 1K (parket, plester, walnut, kain, karpet, logam, marmer) + bayangan matahari. |
+| High | + pantulan dari HDRI interior, bayangan halus, tone mapping sinematik (ACES). |
+| Ultra | + ambient occlusion (SAO), bloom lampu/layar, tekstur warna 2K, bayangan 4096, resolusi penuh. |
+
+- Level awal: Low di browser otomatis atau tanpa WebGL2, High bila GPU terdeteksi, selain itu Medium. `?graphics=low|medium|high|ultra` menimpa pilihan. Level tidak diturunkan otomatis; **Tampilkan FPS** membantu memilih.
+- Diukur di GTX 750 Ti, 1080p dengan model manusia, tampilan per lantai: 15 orang Low/High 60 FPS, Ultra sekitar 40 FPS; 30 orang High 60 FPS, Ultra sekitar 36 FPS. Tampilan **Lihat seluruh gedung** jauh lebih berat (semua lantai, fasad dan lingkungan terlihat): sekitar 20–28 FPS di Low dan 17–22 FPS di High. Bayangan di tampilan ini diperbarui 4 kali per detik, bukan setiap frame. GPU lain bisa berbeda.
+- Perabot memakai model CC0 (Poly Haven, Kenney) yang dipasang pada tapak perabot lama, sehingga kursi, jalur jalan, dan Tata ruang tidak berubah. Bila satu model gagal dimuat, bentuk sederhana dipakai dan muncul pemberitahuan.
+- Semua aset ada di `public/assets/` (±54 MiB, CC0) dengan daftar sumber dan pembuat di `public/assets/LICENSES.md`. Unduh ulang lewat `node scripts/fetch-assets.mjs` lalu `python scripts/shrink-assets.py`. Three.js 0.160 disimpan di `public/vendor/three/` (`node scripts/vendor-three.mjs`), jadi kantor tidak memakai CDN.
+- Lingkungan luar (tampilan seluruh gedung): rumput dan aspal bertekstur, pohon bercabang (Poly Haven), mobil dan motor detail (CC0) di parkiran lantai 1. Kendaraan melintas di jalan mengikuti lajur kiri dan menjaga jarak. Pengunjung barber datang naik mobil, parkir, menunggu, lalu pulang dengan mobilnya. Anggota tim yang **tidak punya tugas** (antre, berjalan, menunggu keputusan, atau review) kadang pergi naik mobil/motor (paling banyak dua orang sekaligus, hanya saat **Rutinitas** aktif); begitu ada tugas baru mereka langsung pulang lewat jalur aman, parkir, lalu kembali ke meja. Eksekusi tugas AI tidak menunggu perjalanan pulang. Bila aset lingkungan gagal dimuat, kantor tetap berjalan dengan pemberitahuan. Aset dikonversi offline oleh `scripts/prepare-environment.py`, `scripts/convert-environment-fbx.py` dan `scripts/package-environment.py`.
+- Orang memakai model manusia dewasa bertekstur dan ber-rig (MakeHuman, CC0; dikonversi offline oleh `scripts/prepare-people.py`). Warna kulit, rambut, dan postur bervariasi tetapi tetap sama untuk nama yang sama; warna kemeja mengikuti divisi. Mereka berjalan, duduk di kursi dengan tangan di keyboard, dan memegang cangkir/ponsel. `?people=legacy` memakai figur sederhana lama; figur itu juga dipakai otomatis bila aset orang gagal dimuat.
+- Material fade dari tangga/fasad yang dibuang dibersihkan saat organisasi berubah. Efek AO memakai setengah resolusi render dan mengikuti perubahan ukuran jendela. Kegagalan tekstur/HDRI memakai fallback dengan pemberitahuan di status scene.
 
 **Kamera karakter:** pilih anggota tim, lalu **First-person view** (sudut orang pertama) atau **Follow from behind**. Seret atau tombol panah untuk menoleh, scroll atau cubit untuk jarak kamera belakang. Kamera ikut berpindah lantai saat karakter naik atau turun tangga. Tekan Esc, **Exit camera**, atau **Reset** untuk kembali ke tampilan maket.
 
@@ -201,6 +222,16 @@ Worker memakai identitas eksekusi: hasil atau error terlambat tidak mengubah tug
 - Preview static web berada di port loopback terpisah dan iframe `sandbox="allow-scripts"`, tanpa same-origin. Sumber diunduh per file sebagai attachment; ZIP belum tersedia.
 - **Batas saat ini:** bundle mendukung static JavaScript web dan deklarasi Node web, tetapi smoke/preview Node service belum tersedia sehingga tidak dapat melewati gate Review. Pemeriksaan kriteria TAP bukan pembuktian aplikasi bebas bug; periksa sumber, hasil dan keterbatasan. Runner Docker me-mount sumber read-only, sehingga build yang menulis ke sumber perlu diarahkan ke `/tmp/out`.
 - Reset menolak tugas/job aktif dan membuat arsip task lama plus arsip workspace (pesan, keputusan, event dan referensi evidence). `GET /api/workspace/export` membutuhkan unlock owner dan tidak menyertakan approval/request cache atau credential Settings.
+
+## Konteks agen dan percakapan
+
+- Setiap agen memiliki **Memori agen** di Organisasi → pilih orang → tab AI. Maksimal 20 catatan pendek; catatan otomatis dibuat hanya setelah owner menyetujui hasil. Catatan berisi ringkasan tugas dan jawaban owner yang relevan, bukan seluruh draf. Owner dapat menyimpan catatan sendiri atau menghapus semuanya. Memori dikirim pada panggilan model berikutnya; tidak dibagikan antaragen.
+- Pada tugas otomatis, pertanyaan anggota ditanyakan ke lead terlebih dahulu. Jawaban lead terlihat di thread anggota. Lead meneruskan ke owner jika tidak punya informasi atau keputusan menyangkut anggaran, scope, atau keputusan bisnis akhir. Owner hanya mendapat notifikasi ketika keputusan ditujukan kepadanya.
+- Delegasi berjenjang: Direktur membagi tugas ke lead divisi; lead yang punya staf AI otomatis membagi lagi ke stafnya (maks kedalaman 3). Setiap hasil direview oleh orang yang mendelegasikannya: **disetujui**, atau **sekali revisi** dengan catatan konkret di thread. Setelah semua subtugas selesai, lead menggabungkan hasil timnya untuk atasannya; hanya tugas utama yang sampai ke owner. Subtugas yang gagal dilaporkan di thread lead.
+- **Maks token per jawaban** (Pengaturan → Model dan routing) default kosong = tanpa batas. Bila model reasoning hanya "berpikir" tanpa menulis jawaban, sistem meminta jawaban langsung sekali lagi, lalu memakai model cadangan bila ada.
+- Bila **model cadangan** sudah dipilih di Pengaturan, kegagalan model utama dicoba sekali dengan model cadangan. Pergantian langsung diumumkan di thread, bukan menunggu model cadangan selesai. Tanpa cadangan, tugas gagal dan menunggu retry eksplisit.
+- Jawaban biasa pada provider OpenAI-compatible ditampilkan bertahap sebagai **sedang menulis…**. Teks sementara disimpan hanya di memori server, lalu diganti pesan final. JSON rencana/bundle aplikasi tidak ditampilkan mentah. Provider yang tidak mendukung streaming menggunakan respons biasa; format JSON/SSE campuran 9Router tetap diterima. Anthropic-compatible saat ini memakai respons biasa.
+- Teks streaming adalah draf yang belum selesai, bukan bukti pekerjaan atau hasil pengujian. Tidak ada proses berpikir tersembunyi yang ditampilkan.
 
 ## Pengujian
 

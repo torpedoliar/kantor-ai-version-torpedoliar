@@ -11,16 +11,19 @@
   function readDraft(id) { try { return sessionStorage.getItem(draftKey(id)) || ''; } catch { return ''; } }
   function writeDraft(id, value) { try { value ? sessionStorage.setItem(draftKey(id), value) : sessionStorage.removeItem(draftKey(id)); } catch {} }
   const time = at => new Date(at).toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'});
-  const openDecisions = () => data.decisions.filter(d => d.status === 'open');
+  // Only decisions addressed to the owner notify; a question a lead is answering for its team is not yours yet.
+  const openDecisions = () => data.decisions.filter(d => d.status === 'open' && (!d.target || d.target === 'owner'));
 
   async function refresh() {
     if (!api.unlocked()) return;
     try {
       // ponytail: whole inbox per refresh; page by seq when threads × messages get large.
+      // Rebuild the open thread only when something it draws changed; idle polls must not wipe open panels or previews.
+      const before = threadKey();
       data = await api.call('GET', '/api/communications?after=0');
       loaded = true; badge(); toasts(); alertToasts(); markHere();
       if (el('communicationDialog').open && current) { const task = data.threads.find(t => t.id === current)?.taskId; if (task) activity.set(current, await api.call('GET', `/api/tasks/${task}/activity`).catch(() => null)); }
-      if (el('communicationDialog').open) render();
+      if (el('communicationDialog').open) { renderList(); if (before !== threadKey()) renderThread(); else renderStatus(); markHere(); }
     } catch (error) { api.locked(error); }
   }
   function badge() {
@@ -124,6 +127,7 @@
       const message = entry.message, decision = message.kind === 'decision' && decisions.find(d => d.id === message.decisionId);
       return decision ? decisionCard(decision, message) : bubble(message);
     }));
+    if(act?.typing?.text){const live=node('div',undefined,'bubble bubble-agent bubble-typing');live.append(node('span',`${act.typing.agent} · sedang menulis…`,'bubble-meta'),node('p',act.typing.text));timeline.append(live);}
     renderStatus();
     if(task?.outputType==='application'&&task.revisionId)window.ApplicationPanel.mount(timeline,task,{call:api.call,feedback:api.feedback,reload:async()=>{await api.reloadTasks();await refresh();},source:api.source});
     timeline.dataset.thread = current;
@@ -155,11 +159,20 @@
   }
   function markHere() { const here = el('communicationDialog').open ? openDecisions().filter(d => d.threadId === current).map(d => d.id) : []; el('notificationCenter').querySelectorAll('.toast').forEach(t => t.classList.toggle('toast-here', here.includes(t.dataset.decisionId))); }
   function render() { renderList(); renderThread(); markHere(); }
-  async function loadActivity(id) { const task = data.threads.find(t => t.id === id)?.taskId; if (!task) return; const before = JSON.stringify(activity.get(id)); activity.set(id, await api.call('GET', `/api/tasks/${task}/activity`).catch(() => null));
-    // Rebuild only when the activity actually changed, and never while the owner is typing in the thread.
-    if (current !== id) return; if (before !== JSON.stringify(activity.get(id))) renderThread(); else renderStatus(); }
+  // status.now changes on every call; compare only what is drawn so an idle poll never rebuilds the thread.
+  function threadKey() {
+    const task = current && api.task(data.threads.find(t => t.id === current)?.taskId);
+    return JSON.stringify([current, data.messages.filter(m => m.threadId === current).map(m => m.seq), data.decisions.filter(d => d.threadId === current).map(d => [d.id, d.status, d.version, d.target]),
+      task && [task.status, task.phase, task.error, task.revisionId, task.evidence?.jobId, task.version], activityKey(activity.get(current))]);
+  }
+  const activityKey = a => a ? JSON.stringify({items: a.items, typing: a.typing?.text || null, status: {...a.status, now: undefined}}) : '';
+  async function loadActivity(id) { const task = data.threads.find(t => t.id === id)?.taskId; if (!task) return; const before = activityKey(activity.get(id)); activity.set(id, await api.call('GET', `/api/tasks/${task}/activity`).catch(() => null));
+    if (current !== id) return; if (before !== activityKey(activity.get(id))) renderThread(); else renderStatus(); }
   function select(id, decisionId) {
     current = id; render(); loadActivity(id);
+    focusDecision(decisionId);
+  }
+  function focusDecision(decisionId) {
     const decision=decisionId&&data.decisions.find(d=>d.id===decisionId);
     const target = decision?.kind==='approval' ? document.querySelector('#messageApplicationPanel button') : decisionId ? document.querySelector(`.decision-card[data-decision-id="${decisionId}"] textarea`) : null;
     if (target) { target.scrollIntoView({block: 'center'}); target.focus(); }
@@ -190,7 +203,7 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden && el('communicationDialog').open) renderThread(); });
   }
   window.Messenger = {
-    mount(options) { api = options; wire(); refresh(); timer = setInterval(refresh, 2500); },
+    mount(options) { api = options; wire(); refresh(); timer = setInterval(refresh, 2500); setInterval(()=>{if(el('communicationDialog').open&&current&&api.unlocked())loadActivity(current);},500); },
     open: open_, refresh,
     // Returns false when there is nothing to open (offline or no open decision) so the caller can fall back.
     // Locked: unlock first, then jump to the oldest waiting decision. Returns false only when there is no server.

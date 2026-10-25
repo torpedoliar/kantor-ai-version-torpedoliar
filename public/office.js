@@ -7,27 +7,80 @@
   try { renderer = new THREE.WebGLRenderer({canvas: $('c'), antialias: true}); }
   catch { status('Browser ini belum bisa menampilkan WebGL. Coba browser dengan akselerasi grafis.'); return; }
   // Initials and floor signage are drawn into canvases, so the web fonts must be ready first.
+  await window.officeModels3d?.ready();
+  // A stalled people download must not block the office; without both templates it uses the legacy figures.
+  await Promise.race([window.officePeople?.ready(),new Promise(resolve=>setTimeout(resolve,20000))]);
+  // Textured humans only when both templates loaded; otherwise the whole office (desk layout included) uses the legacy figures.
+  const PEOPLE=window.officePeople?.audit().loaded===2?window.officePeople:null;
   await Promise.race([
     Promise.all(['700 20px "IBM Plex Mono"', '600 60px Archivo'].map(font => document.fonts.load(font))).catch(() => {}),
     new Promise(resolve => setTimeout(resolve, 2000))
   ]);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
   const PAPER = 0xebe5d8, CARD = 0xf7f3eb, INK = 0x2a2622, BALSA = 0xdebd8e, DARK = 0x4a453e, SCREEN = 0xa9c6c9, ACCENT = 0x385747;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(PAPER);
+  // Hazy daylight sky behind the cut-away building (was a flat paper colour).
+  const SKY_INDOOR=0x8c9aa6,SKY_HAZE=0xa9b6c0;
+  scene.background = new THREE.Color(SKY_INDOOR);
   const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, .1, 500);
-  const ambient=new THREE.HemisphereLight(0xffffff, 0xd9d2c3, .8);scene.add(ambient);
-  const sun = new THREE.DirectionalLight(0xffeed5, .75);
+  const ambient=new THREE.HemisphereLight(0xdfe9f5, 0x8a7a66, 1.1);scene.add(ambient);
+  const sun = new THREE.DirectionalLight(0xffe7c7, 2.2);
   sun.position.set(-12, 55, 25); sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   Object.assign(sun.shadow.camera, {left:-45, right:45, top:55, bottom:-40, near:1, far:130});
   sun.shadow.bias = -.001; scene.add(sun);
+  // Graphics level: pixel ratio, shadows, environment reflections, texture tier and post-processing per officeGraphics.
+  const GFX=window.officeGraphics,ADD=THREE.addons;let composer=null,envMap=null,gfxLevel=null,gfxPending=false,showFps=false,gfxSeq=0;
+  const fpsLabel=document.createElement('div');fpsLabel.id='fpsLabel';fpsLabel.className='fps-label';fpsLabel.hidden=true;document.body.append(fpsLabel);
+  let envSource=null;
+  async function environmentMap(){
+    if(envMap)return envMap;const pmrem=new THREE.PMREMGenerator(renderer);
+    const manifest=await fetch('assets/manifest.json').then(r=>r.ok?r.json():null).catch(()=>null);
+    const hdr=manifest?.hdri?.interior&&await new ADD.RGBELoader().loadAsync(manifest.hdri.interior).catch(()=>null);
+    if(hdr){envMap=pmrem.fromEquirectangular(hdr).texture;hdr.dispose();envSource='hdri';}else{envMap=pmrem.fromScene(new ADD.RoomEnvironment(),.04).texture;envSource='room';}
+    pmrem.dispose();return envMap;
+  }
+  function buildComposer(L){
+    composer?.passes.forEach(pass=>pass.dispose?.());composer?.dispose?.();composer=null;
+    if(!L.ao&&!L.bloom)return;
+    composer=new ADD.EffectComposer(renderer);composer.addPass(new ADD.RenderPass(scene,camera));
+    const half=new THREE.Vector2(innerWidth/2,innerHeight/2);
+    if(L.ao){const sao=new ADD.SAOPass(scene,camera,half);Object.assign(sao.params,{saoIntensity:.012,saoScale:4,saoKernelRadius:40,saoBlur:true});composer.addPass(sao);}
+    if(L.bloom)composer.addPass(new ADD.UnrealBloomPass(half,.35,.6,.85));
+    composer.addPass(new ADD.OutputPass());resizeComposer();
+  }
+  function resizeComposer(){
+    if(!composer)return;composer.setSize(innerWidth,innerHeight);
+    const ao=composer.passes.find(p=>p instanceof ADD.SAOPass);ao?.setSize(Math.max(1,Math.floor(innerWidth*renderer.getPixelRatio()/2)),Math.max(1,Math.floor(innerHeight*renderer.getPixelRatio()/2)));
+  }
+  async function applyGraphics(level){
+    const run=++gfxSeq,L=GFX.LEVELS[level];gfxLevel=level;gfxPending=true;
+    const report=()=>{const failed=window.officeSurfaces?.stats?.().failed||[],hdrFailed=L.env&&envSource==='room';if(failed.length||hdrFailed)status(`Sebagian aset foto gagal dimuat (${failed.length+(hdrFailed?1:0)}); memakai material atau pencahayaan cadangan.`);};
+    renderer.setPixelRatio(Math.min(devicePixelRatio,L.pixelRatio));renderer.setSize(innerWidth,innerHeight);
+    renderer.shadowMap.enabled=!!L.shadow;renderer.shadowMap.type=L.shadow>=2048?THREE.PCFSoftShadowMap:THREE.PCFShadowMap;
+    sun.castShadow=!!L.shadow;if(L.shadow){sun.shadow.mapSize.set(L.shadow,L.shadow);sun.shadow.map?.dispose();sun.shadow.map=null;}renderer.shadowMap.needsUpdate=true;
+    renderer.toneMapping=L.env?THREE.ACESFilmicToneMapping:THREE.NoToneMapping;renderer.toneMappingExposure=L.env?.85:1;
+    const environment=L.env?await environmentMap():null;
+    if(run!==gfxSeq)return; // A newer choice wins even when this HDRI request finishes later.
+    scene.environment=environment;
+    // Materials must recompile when shadow/tone-mapping settings change.
+    // Reflections are subtle (0.6): the HDRI lights metal, glass and gloss without washing out matte walls.
+    scene.traverse(o=>{if(o.material)(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if('envMapIntensity' in m)m.envMapIntensity=.6;m.needsUpdate=true;});});
+    buildComposer(L);
+    await window.officeSurfaces?.setTier?.(L.textures);
+    if(run!==gfxSeq)return;
+    report();
+    if(run===gfxSeq)gfxPending=false;
+  }
+  // info.autoReset is off so draw calls add up across all post-processing passes of one frame.
+  renderer.info.autoReset=false;
+  // The whole-building view casts shadows from five floors at once. Architecture there never moves, so refresh the
+  // shadow map at most every .25s (people and cars move slowly at that distance) instead of every frame.
+  let shadowAge=0,shadowCached=false;
+  function setShadowCaching(on){shadowCached=on;renderer.shadowMap.autoUpdate=!on;renderer.shadowMap.needsUpdate=true;shadowAge=0;}
+  function renderFrame(dt=0){renderer.info.reset();if(shadowCached&&(shadowAge+=dt)>=.25){renderer.shadowMap.needsUpdate=true;shadowAge=0;}if(composer)composer.render();else renderer.render(scene,camera);}
   const FLOOR = {
     1: {name:'Barber & parking', title:'Where every day starts.', description:'A barber on one side, parking on the other.'},
     2: {name:'Kitchen & dining', title:'Meet at the table.', description:'A shared kitchen and long tables where the whole team eats together.'},
@@ -87,22 +140,36 @@
   const FLOOR_GAP=4.4, orderOf=level=>{const i=ORDER.indexOf(level);return i<0?level-1:i;}, floorY=level=>orderOf(level)*FLOOR_GAP;
   const stairways={}, travelRoot=new THREE.Group();scene.add(travelRoot);
 
-  // Paper-model rendering: three flat tone steps plus ink edges on every folded card.
-  const toneSteps = new THREE.DataTexture(new Uint8Array([165, 215, 255]), 3, 1, THREE.LuminanceFormat);
-  toneSteps.minFilter = toneSteps.magFilter = THREE.NearestFilter; toneSteps.generateMipmaps = false; toneSteps.needsUpdate = true;
-  const lineMaterial = new THREE.LineBasicMaterial({color:linear(INK), transparent:true, opacity:.08});
-  const glassMaterial = new THREE.MeshToonMaterial({color:linear(0xc4dadb), gradientMap:toneSteps, transparent:true, opacity:.3, depthWrite:false});
+  // Glass: thin, slightly reflective physical material (no paper-model toon steps or ink edges).
+  const glassMaterial = new THREE.MeshPhysicalMaterial({color:linear(0xc4dadb), roughness:.05, metalness:0, transparent:true, opacity:.3, depthWrite:false});
   // Roof glass is clearer than wall glass so the rooftop stays readable from above.
-  const roofGlassMaterial = new THREE.MeshToonMaterial({color:linear(0xd6e6e8), gradientMap:toneSteps, transparent:true, opacity:.13, depthWrite:false});
+  const roofGlassMaterial = new THREE.MeshPhysicalMaterial({color:linear(0xd6e6e8), roughness:.05, metalness:0, transparent:true, opacity:.13, depthWrite:false});
   function material(color) {
     if (!materials.has(color)) materials.set(color, new THREE.MeshStandardMaterial({color:linear(color), roughness:.78, metalness:0}));
     return materials.get(color);
   }
+  const TERRACOTTA=0xc98f72, SAGE=0xb3c0a0, SAGE_DARK=0x7f9a82, RUST=0xc27a52;
+  // Palette colours map to real surfaces: floors/walls/ceilings by shape, furniture parts by colour role.
+  const SURFACE_OF={[CARD]:'plaster_white',[BALSA]:'wood_planks_light',[DARK]:'metal_black',[INK]:'metal_black',0x8a8479:'metal_brushed',0xa9a397:'metal_brushed',
+    0xd3cbba:'concrete_ceiling',0xdcd6ca:'wood_planks_light',0xefe8da:'wood_planks_light',0xf1ece1:'parquet_herringbone',0xddd3bf:'wood_planks_light',
+    0xe2cdb0:'parquet_herringbone',0xddc5a5:'parquet_herringbone',0xe8d5b9:'parquet_herringbone',0xe8e1d3:'tiles_kitchen',0x8a5a3c:'leather_brown',
+    0xc9a577:'wood_panel_walnut',0xb89c70:'wood_panel_walnut',0xcdb28a:'wood_panel_walnut',0xe0c7a5:'wood_planks_light',[RUST]:'fabric_sofa',[SAGE]:'fabric_sofa',[SAGE_DARK]:'fabric_sofa',[TERRACOTTA]:'fabric_sofa',
+    0xa9a8a3:'asphalt',0x9dab90:'fabric_sofa',0x86968a:'fabric_sofa',0xa98158:'leather_brown',0xefeae0:'plaster_white',0x595d54:'metal_black',0xe4dfd3:'brick_painted',0xf1eee7:'brick_painted'};
+  // Roles for colours computed at build time (division-tinted upholstery and rugs).
+  const tinted=new Map();const tint=(color,name)=>{tinted.set(color,name);return color;};
+  function surfaceFor(geometry,color){
+    const name=SURFACE_OF[color]||tinted.get(color);if(!name||!window.officeSurfaces||!geometry.parameters?.width)return null;
+    const {width:w,height:h,depth:d}=geometry.parameters;
+    // A box's largest face decides the tile repeat; thin wide slabs are floors, tall thin boxes are walls.
+    const face=h<=Math.min(w,d)?[w,d]:w<d?[d,h]:[w,h];
+    return window.officeSurfaces.surface(name,{repeat:face,tint:tinted.has(color)&&!SURFACE_OF[color]?color:undefined});
+  }
   function mesh(geometry, color, x, y, z, parent = root, edges = true) {
+    // A single material draws the whole geometry once; Box/Cylinder face groups would cost a draw call each.
+    geometry.clearGroups();
     const glass = color === 'glass' || color === 'roofglass';
-    const m = new THREE.Mesh(geometry, color === 'roofglass' ? roofGlassMaterial : glass ? glassMaterial : material(color));
+    const m = new THREE.Mesh(geometry, color === 'roofglass' ? roofGlassMaterial : glass ? glassMaterial : surfaceFor(geometry,color) || material(color));
     m.position.set(x, y, z); m.castShadow = !glass; m.receiveShadow = true;
-    if (edges) m.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 25), lineMaterial));
     parent.add(m); return m;
   }
   function box(w,h,d,color,x,y,z,parent) { return mesh(new THREE.BoxGeometry(w,h,d),color,x,y+h/2,z,parent); }
@@ -110,20 +177,24 @@
   function textPlane(text,x,z,width,color='#5c554b',parent=root) {
     const c=document.createElement('canvas'); c.width=1024;c.height=128;
     const ctx=c.getContext('2d');ctx.font='600 60px Archivo, system-ui, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=color;ctx.fillText(text,512,64,980);
-    const texture=new THREE.CanvasTexture(c);texture.encoding=THREE.sRGBEncoding;
+    const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;
     const m=new THREE.Mesh(new THREE.PlaneGeometry(width,width/8),new THREE.MeshBasicMaterial({map:texture,transparent:true,depthWrite:false}));
     m.rotation.x=-Math.PI/2;m.position.set(x,.08,z);parent.add(m);return m;
   }
   function oval(w,h,d,color,x,y,z,parent=root){
     const m=mesh(new THREE.SphereGeometry(1,16,12),color,x,y,z,parent,false);m.scale.set(w/2,h/2,d/2);return m;
   }
+  const model=(name,size,at={})=>window.officeModels3d?.place(name,size,root,at)||null;
+  // Decor: a model added only for realism. Pieces below 0.6 m are marked walkable so they never block a path.
+  function decor(name,size,parent,at={}){const o=window.officeModels3d?.place(name,size,parent,at);if(!o)return null;o.userData.decor=name;if((size.h||o.userData.footprint.h)<.6)o.userData.walkable=true;return o;}
+  // Flat decor made from surfaces (rugs, window mullions), counted like models.
+  function decorBox(kind,w,h,d,surfaceName,x,y,z,parent,walkable=true){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),window.officeSurfaces?window.officeSurfaces.surface(surfaceName,{repeat:[w,d]}):material(0x8a8479));m.position.set(x,y+h/2,z);m.receiveShadow=true;m.castShadow=h>.05;m.userData.decor=kind;m.userData.walkable=walkable;parent.add(m);return m;}
   function plant(x,z,scale=1,y=0) {
     const g=new THREE.Group();g.position.set(x,y,z);
     const floor=buildFloor(),atRoot=root;
     root=g;
-    cylinder(.32*scale,.24*scale,.55*scale,0xc9ab86,0,0,0);
-    box(.04,.9*scale,.04,0x6a5944,0,.45*scale,0);
-    for(let i=0;i<7;i++){
+    if(!model(scale<=.5?'plant_small':'plant_tall',{w:.75*scale,h:1.45*scale,d:.75*scale},{rotY:x*1.7}))for(let i=-1;i<7;i++){
+      if(i<0){cylinder(.32*scale,.24*scale,.55*scale,0xc9ab86,0,0,0);box(.04,.9*scale,.04,0x6a5944,0,.45*scale,0);continue;}
       const a=i*2.4,leaf=oval(.32*scale,.68*scale,.12*scale,i%2?0x64825b:0x839769,Math.cos(a)*.25*scale,(.75+i*.1)*scale,Math.sin(a)*.25*scale,g);
       leaf.rotation.set(.35, a,Math.sin(a)*.6);
     }
@@ -134,33 +205,64 @@
     const g=new THREE.Group();g.position.set(x,0,z);
     const floor=buildFloor(),atRoot=root;
     root=g;
+    // Facing lives only on the group (item.rot), so a later placeCustom/reseat cannot flip the chair twice.
+    // Built facing +z: the backrest sits behind the sitter at -z.
+    g.rotation.y=f>0?0:Math.PI;
+    if(!model('office_chair',{w:.88,h:1.1,d:.86})){
     cylinder(.055,.15,.46,0x595d54,0,0,0);
     for(let i=0;i<5;i++){const a=i*Math.PI*2/5;box(.06,.06,.65,DARK,0,.08,0).rotation.y=a;oval(.13,.13,.13,DARK,Math.sin(a)*.3,.08,Math.cos(a)*.3,g);}
-    const upholstery=mix(color,0xd5d8bf,.42);
+    const upholstery=tint(mix(color,0xd5d8bf,.42),'fabric_sofa');
     mesh(softBox(.87,.19,.8),upholstery,0,.52,0,g,false);
-    mesh(softBox(.88,.84,.22),upholstery,0,.94,-f*.37,g,false);
+    mesh(softBox(.88,.84,.22),upholstery,0,.94,-.37,g,false);}
     root=atRoot;atRoot.add(g);
     return registerCustom('chair',floor,g,x,z,f>0?0:180,{radius:.5});
   }
-  function table(x,z,w=5,d=1.9) {
+  function table(x,z,w=5,d=1.9,modules=Math.max(1,Math.round(w/2)),twoSided=false) {
     const g=new THREE.Group();g.position.set(x,0,z);
     const floor=buildFloor(),atRoot=root;
     root=g;
-    mesh(softBox(w,.16,d),BALSA,0,.91,0,g,false);
-    for(const sx of [-1,1])for(const sz of [-1,1])box(.1,.85,.1,DARK,sx*(w/2-.25),0,sz*(d/2-.2));
+    const desks=modules;
+    // The desk model's modesty panel is on its -z side; two-sided tables are two back-to-back rows, open sides outward.
+    const rows=twoSided?[[-d/4,Math.PI],[d/4,0]]:[[0,0]];
+    if(!window.officeModels3d?.has('desk')||!rows.flatMap(([rz,rotY])=>Array.from({length:desks},(_,i)=>model('desk',{w:w/desks,h:.99,d:twoSided?d/2:d,stretch:true},{x:-w/2+(i+.5)*w/desks,z:rz,rotY}))).every(Boolean)){
+      mesh(softBox(w,.16,d),BALSA,0,.91,0,g,false);
+      for(const sx of [-1,1])for(const sz of [-1,1])box(.1,.85,.1,DARK,sx*(w/2-.25),0,sz*(d/2-.2));}
     root=atRoot;atRoot.add(g);
     return registerCustom('table',floor,g,x,z,0,{radius:Math.hypot(w,d)/2});
   }
-  function screen(x,z,f,dual=false) {
+  // Three screen designs drawn once: code editor, document, chart. Bright enough to glow under bloom.
+  const screenContent=(()=>{
+    const draw=paint=>{const c=document.createElement('canvas');c.width=256;c.height=160;const g=c.getContext('2d');paint(g);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return new THREE.MeshBasicMaterial({map:t,toneMapped:false});};
+    return [
+      draw(g=>{g.fillStyle='#1e2430';g.fillRect(0,0,256,160);const cols=['#7fb3ff','#c3e88d','#f78c6c','#c792ea','#e6e6e6'];for(let i=0;i<14;i++){g.fillStyle=cols[i%5];g.fillRect(14+(i%4)*12,10+i*10,60+((i*37)%120),4);}}),
+      draw(g=>{g.fillStyle='#f4f2ee';g.fillRect(0,0,256,160);g.fillStyle='#2b2b2b';g.fillRect(20,14,140,8);g.fillStyle='#8a8a8a';for(let i=0;i<12;i++)g.fillRect(20,32+i*9,200-((i*29)%70),3);}),
+      draw(g=>{g.fillStyle='#10171f';g.fillRect(0,0,256,160);g.strokeStyle='#3ad29f';g.lineWidth=3;g.beginPath();[130,110,118,80,92,60,70,40].forEach((y,i)=>i?g.lineTo(20+i*30,y):g.moveTo(20,y));g.stroke();g.fillStyle='#e8a33d';for(let i=0;i<6;i++)g.fillRect(24+i*38,150-(20+i*12),18,20+i*12);}),
+    ];
+  })();
+  function screen(x,z,f,dual=false,keyboardZ=z-f*.46) {
+    if(window.officeModels3d?.has('monitor')){
+      for(const offset of (dual?[-.38,.38]:[0])){
+        const mon=model('monitor',{w:dual?.7:1.05},{x:x+offset,y:.99,z,rotY:f>0?Math.PI:0});
+        // Kenney computerScreen.glb has an 8° tilted display. These are its inner face coordinates,
+        // relative to the normalized model pivot (not its stand's overall bounding box).
+        const panel=new THREE.Mesh(new THREE.PlaneGeometry(.378,.2335),screenContent[(Math.abs(Math.round(x*7+offset*3))%screenContent.length)]);
+        panel.rotation.x=-Math.atan2(.0325193,.2313867);
+        panel.position.set(0,.171279+.0006*Math.sin(-panel.rotation.x),-.000069+.0006*Math.cos(panel.rotation.x));
+        panel.userData.decor='screen';panel.userData.walkable=true;mon.add(panel);
+      }
+      model('keyboard',{w:.55},{x,y:.99,z:keyboardZ,rotY:f>0?Math.PI:0});return;
+    }
     for(const offset of (dual?[-.38,.38]:[0])){
       box(.07,.17,.07,DARK,x+offset,.97,z);box(dual?.7:1.1,.66,.07,DARK,x+offset,1.14,z);
       box(dual?.61:1,.54,.015,SCREEN,x+offset,1.2,z-f*.045);
     }
-    box(.65,.03,.23,0x8a8479,x,.97,z-f*.46);
+    box(.65,.03,.23,0x8a8479,x,.97,keyboardZ);
     cylinder(.09,.08,.16,CARD,x+.7,.97,z-f*.42);
   }
   function sofa(x,z,w=4,rotation=0) {
     const g=new THREE.Group();root.add(g);g.position.set(x,0,z);g.rotation.y=rotation;
+    const real=window.officeModels3d?.place('sofa_sectional',{w,h:.95,d:1.15,stretch:true},g,{rotY:Math.PI/2});
+    if(real)return registerCustom('sofa',buildFloor(),g,x,z,Math.round(rotation*180/Math.PI),{radius:Math.hypot(w,1.1)/2});
     mesh(softBox(w,.5,1.1),0xb8c3a6,0,.25,0,g,false);
     mesh(softBox(w,.85,.3),0x9dab90,0,.6,-.48,g,false);
     for(const side of [-1,1]){
@@ -180,7 +282,7 @@
     const c=document.createElement('canvas');c.width=256;c.height=128;const ctx=c.getContext('2d');
     ctx.fillStyle='#1f2433';ctx.fillRect(0,0,256,128);ctx.fillStyle='#fff';ctx.font='700 72px Archivo, system-ui, sans-serif';
     ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('WC',128,68);
-    const t=new THREE.CanvasTexture(c);t.encoding=THREE.sRGBEncoding;return t;
+    const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;
   })();
   function restroom(cx,cz,w,d,face){
     const g=new THREE.Group();g.position.set(cx,0,cz);g.rotation.y={'+z':0,'+x':Math.PI/2,'-z':Math.PI,'-x':-Math.PI/2}[face];root.add(g);
@@ -245,31 +347,21 @@
   for(const x of [2,7,12]){
     box(.07,.02,8,CARD,x-2.3,.03,-5);box(4.6,.02,.07,CARD,x,.03,-9);
   }
-  function car(x,z,color) {
-    box(2.4,.65,4.7,color,x,.45,z);box(2.05,.65,2.5,color,x,1.1,z-.2);
-    box(1.88,.5,.03,SCREEN,x,1.18,z+1.07);box(1.88,.5,.03,SCREEN,x,1.18,z-1.47);
-    for(const sx of [-1,1])for(const sz of [-1,1]){const w=cylinder(.43,.43,.2,DARK,x+sx*1.22,.2,z+sz*1.4);w.rotation.z=Math.PI/2;}
-    for(const sx of [-1,1])box(.5,.2,.05,0xfff1c9,x+sx*.7,.72,z+2.38);
-  }
-  car(2,-5,0xd6d0c4);car(12,-5,0x6f8580);
-  for(const x of [3,6,9]){
-    for(const z of [2.8,4.2]){const w=cylinder(.3,.3,.16,DARK,x,.12,z);w.rotation.z=Math.PI/2;}
-    box(.45,.4,1.3,0x8a5a3c,x,.42,3.5);box(.48,.12,.8,DARK,x,.85,3.6);box(.8,.06,.08,DARK,x,1.05,2.8);
-  }
+  // Parked vehicles are local detailed CC0 models placed by officeEnvironment.
   textPlane('ENTRANCE',7,11,4);
   restroom(-14.5,10.6,2.7,2.5,'-z');
   for(const [x,z] of [[5,10],[10,10]])floorBreaks.push({x,z,f:Math.PI,floor:1,route:[[5,8],[x,8],[x,z]],state:'break',standing:true,label:'Istirahat dekat pintu masuk'});
 
   // Floor 2: back counter, an island on a terracotta rug, one long table, a coffee bar and a reading corner.
   shell(2);
-  const TERRACOTTA=0xc98f72, SAGE=0xb3c0a0, SAGE_DARK=0x7f9a82, RUST=0xc27a52;
   function stool(x,z,h=.75) {
     const g=new THREE.Group();g.position.set(x,0,z);
     const floor=buildFloor(),atRoot=root;
     root=g;
+    if(!model('stool',{w:.56,h:h+.12,d:.56})){
     for(const a of [.8,2.4,4,5.5])box(.05,h,.05,DARK,Math.cos(a)*.2,0,Math.sin(a)*.2);
     cylinder(.26,.26,.04,DARK,0,h*.35,0);
-    mesh(softBox(.56,.12,.56),CARD,0,h+.06,0,g,false);
+    mesh(softBox(.56,.12,.56),CARD,0,h+.06,0,g,false);}
     root=atRoot;atRoot.add(g);
     return registerCustom('chair',floor,g,x,z,0,{radius:.35});
   }
@@ -277,9 +369,10 @@
     const g=new THREE.Group();g.position.set(x,0,z);
     const floor=buildFloor(),atRoot=root;
     root=g;
+    if(!model('dining_chair',{w:.62,h:.98,d:.75},{rotY:f>0?Math.PI:0})){
     for(const sx of [-1,1])for(const sz of [-1,1])box(.05,.5,.05,DARK,sx*.3,0,sz*.3);
     mesh(softBox(.75,.12,.72),color,0,.56,0,g,false);
-    mesh(softBox(.75,.62,.14),color,0,.92,-f*.33,g,false);
+    mesh(softBox(.75,.62,.14),color,0,.92,-f*.33,g,false);}
     root=atRoot;atRoot.add(g);
     return registerCustom('chair',floor,g,x,z,f>0?0:180,{radius:.5});
   }
@@ -288,8 +381,9 @@
     const g=new THREE.Group();g.position.set(x,0,z);
     const floor=buildFloor(),atRoot=root;
     root=g;
+    if(!model('arc_lamp',{h:2.1,w:.7,d:.7})){
     cylinder(.28,.3,.05,DARK,0,0,0);box(.04,1.9,.04,DARK,0,.05,0);
-    cylinder(.18,.32,.36,SAGE_DARK,0,1.85,0);oval(.16,.16,.16,0xfff4d6,0,1.9,0,g);
+    cylinder(.18,.32,.36,SAGE_DARK,0,1.85,0);}oval(.16,.16,.16,0xfff4d6,0,1.9,0,g);
     root=atRoot;atRoot.add(g);
     return registerCustom('lamp',floor,g,x,z,0,{radius:.35,symmetric:true});
   }
@@ -344,8 +438,9 @@
   cylinder(3,3,.02,0xd8cfc0,11.6,.03,6.4);
   function armchair(x,z,r,color=RUST){
     const g=new THREE.Group();root.add(g);g.position.set(x,0,z);g.rotation.y=r;
+    if(window.officeModels3d?.place('armchair',{w:1.05,h:1,d:1},g,{rotY:Math.PI}))return registerCustom('sofa',buildFloor(),g,x,z,Math.round(r*180/Math.PI),{radius:.8});
     mesh(softBox(1.1,.45,1),color,0,.35,0,g,false);mesh(softBox(1.1,.75,.25),color,0,.75,-.42,g,false);
-    for(const s of [-1,1])mesh(softBox(.22,.55,.9),mix(color,INK,.1),s*.5,.45,-.02,g,false);
+    for(const s of [-1,1])mesh(softBox(.22,.55,.9),tint(mix(color,INK,.1),'fabric_sofa'),s*.5,.45,-.02,g,false);
     for(const s of [-1,1])for(const t of [-1,1])box(.05,.14,.05,DARK,s*.4,0,t*.35,g);
     return registerCustom('sofa',buildFloor(),g,x,z,Math.round(r*180/Math.PI),{radius:.8});
   }
@@ -375,20 +470,29 @@
     const slot=SLOTS[area.slot],color=colorOf(area.color),group=new THREE.Group(),atRoot=root;
     group.userData.floor=level;group.userData.deskArea=true;floors[level].add(group);root=group;
     const n=area.seats.length,full=n>2,cols=full?Math.min(4,Math.ceil(n/2)):2;
-    const xs=cols===2?[-1.65,1.65]:Array.from({length:cols},(_,c)=>(c-(cols-1)/2)*1.6);
-    mesh(softBox(cols>2?9.4:8.6,.04,full?6.6:4.4),mix(color,0xf1ece1,.55),slot.x,.02,slot.z+(full?0:.9),root,false);
-    const tableItem=table(slot.x,slot.z,cols>2?cols*1.6+.6:6.4,full?2.3:1.7);tableItem.generated=true;
+    // One desk module per seat column, seat centred on it, so knees land in the legroom between drawer pedestals.
+    const module=1.8,xs=Array.from({length:cols},(_,c)=>(c-(cols-1)/2)*module);
+    mesh(softBox(cols>2?9.4:8.6,.04,full?6.6:4.4),tint(mix(color,0xf1ece1,.55),'rug_pattern'),slot.x,.02,slot.z+(full?0:.9),root,false);
+    const tableItem=table(slot.x,slot.z,cols*module,full?2.3:1.7,cols,full);tableItem.generated=true;
     const sign=signText(area.label);textPlane(sign,slot.x,slot.z>0?10.35:.35,8);
     const seats={},items=[tableItem];
     area.seats.forEach((name,index)=>{
-      const side=full?(index<cols?-1:1):1,f=-side,x=slot.x+xs[index%cols],z=slot.z+side*2.05;
-      const item=chair(x,z,f,color);item.generated=true;items.push(item);screen(x,slot.z+side*.38,f,cols===2&&area.divisionId==='engineering');
-      if(cols===2){const notebook=mesh(softBox(.35,.04,.45),0xe6dbc4,x-.8,.99,slot.z+side*.65,root,false);notebook.rotation.y=.12;const pot=plant(x+.95,slot.z+side*.1,.24,.97);pot.generated=true;items.push(pot);}
+      // Seat clearance follows the active rig: the legacy chibi head projects far forward, the textured adult does
+      // not, so adults sit close enough for their hands to rest on the keyboard at the table edge.
+      const halfDepth=(full?2.3:1.7)/2,seatOffset=PEOPLE?halfDepth+.42:1.85;
+      const side=full?(index<cols?-1:1):1,f=-side,x=slot.x+xs[index%cols],z=slot.z+side*seatOffset;
+      const item=chair(x,z,f,color);item.generated=true;items.push(item);
+      // Adults: monitor stands back on the desk, keyboard on the near edge. Legacy rig keeps its original layout.
+      if(PEOPLE)screen(x,slot.z+side*(halfDepth-.5),f,cols===2&&area.divisionId==='engineering',slot.z+side*(halfDepth-.17));
+      else screen(x,slot.z+side*.72,f,cols===2&&area.divisionId==='engineering');
+      // Beside the monitor, clear of its stand (dual screens fill the module, so no decor there).
+      if(index%2===0&&!(cols===2&&area.divisionId==='engineering'))decor(index%4===0?'mug':'books',{h:index%4===0?.12:.22},root,{x:x+.62+(index%4===0?.03:.2),y:.99,z:slot.z+side*(PEOPLE?halfDepth-.5:.72)});
+      if(cols===2){const notebook=mesh(softBox(.35,.04,.45),0xe6dbc4,x-.72,.99,slot.z+side*.9,root,false);notebook.rotation.y=.12;const pot=plant(x+.55,slot.z+side*.1,.24,.97);pot.generated=true;items.push(pot);}
       seats[name]=linkSpot(item,seat(x,z,f,level,slot.x<0?-10.5:area.slot===1?9:10));
       seats[name].cx=slot.x;
     });
     // Pendants hang from the ceiling beam above each team table.
-    for(const dx of [-1.6,1.6]){box(.03,.88,.03,DARK,slot.x+dx,2.4,slot.z);cylinder(.07,.34,.3,0x5f7d68,slot.x+dx,2.12,slot.z);oval(.16,.16,.16,0xfff1cf,slot.x+dx,2.1,slot.z);}
+    for(const dx of [-1.6,1.6]){if(!decor('pendant_lamp',{h:.62},root,{x:slot.x+dx,y:2.32,z:slot.z})){box(.03,.88,.03,DARK,slot.x+dx,2.4,slot.z);cylinder(.07,.34,.3,0x5f7d68,slot.x+dx,2.12,slot.z);}oval(.16,.16,.16,0xfff1cf,slot.x+dx,2.1,slot.z);}
     root=atRoot;
     return {group,items,seats,sign};
   }
@@ -412,7 +516,7 @@
   box(2.8,1.5,.1,CARD,0,.55,0,taskBoard);
   for(const x of [-1.2,1.2])box(.08,.55,.08,DARK,x,0,0,taskBoard);
   const boardCanvas=document.createElement('canvas');boardCanvas.width=1024;boardCanvas.height=528;
-  const boardTexture=new THREE.CanvasTexture(boardCanvas);boardTexture.encoding=THREE.sRGBEncoding;boardTexture.anisotropy=4;
+  const boardTexture=new THREE.CanvasTexture(boardCanvas);boardTexture.colorSpace=THREE.SRGBColorSpace;boardTexture.anisotropy=4;
   for(const side of [-1,1]){
     const face=new THREE.Mesh(new THREE.PlaneGeometry(2.7,1.39),new THREE.MeshBasicMaterial({map:boardTexture}));
     face.position.set(0,1.3,side*.056);face.rotation.y=side>0?0:Math.PI;taskBoard.add(face);
@@ -498,14 +602,16 @@
   for(const [x,z,r,color] of [[.2,-9.8,-1.9,0x6e8f72],[-.2,-7.8,-2.6,0xefe7da]]){
     const g=new THREE.Group();root.add(g);g.position.set(x,0,z);g.rotation.y=r;
     mesh(softBox(1.1,.45,1),color,0,.35,0,g,false);mesh(softBox(1.1,.8,.28),color,0,.8,-.42,g,false);
-    for(const s of [-1,1])mesh(softBox(.24,.58,.92),mix(color,INK,.08),s*.5,.46,-.02,g,false);
+    for(const s of [-1,1])mesh(softBox(.24,.58,.92),tint(mix(color,INK,.08),'fabric_sofa'),s*.5,.46,-.02,g,false);
     for(const s of [-1,1])for(const t of [-1,1])box(.05,.14,.05,DARK,s*.4,0,t*.35,g);
     registerCustom('sofa',buildFloor(),g,x,z,Math.round(r*180/Math.PI),{radius:.8}).sub=color===0x6e8f72?'back-a':'back-b';
   }
-  // Bookshelf against the window wall.
-  box(3,2.1,.5,BALSA,4.6,0,-11.55);
-  for(const y of [.7,1.4])box(2.9,.04,.46,0xb89c70,4.6,y,-11.5);
-  for(let i=0;i<16;i++){const row=i>>3;box(.14+(i%3)*.04,.46+(i%4)*.06,.34,[0x2f4a6b,CARD,0xb4623a,0x3f7a58,0x74598c,0xd9a441][i%6],3.35+(i%8)*.33,.06+row*.7,-11.5);}
+  // Replace the old shelf in place instead of adding another shelf through the quote panel.
+  if(!decor('bookshelf',{w:3,h:2.1,d:.6},root,{x:4.6,z:-11.55,rotY:Math.PI/2})){
+    box(3,2.1,.5,BALSA,4.6,0,-11.55);
+    for(const y of [.7,1.4])box(2.9,.04,.46,0xb89c70,4.6,y,-11.5);
+    for(let i=0;i<16;i++){const row=i>>3;box(.14+(i%3)*.04,.46+(i%4)*.06,.34,[0x2f4a6b,CARD,0xb4623a,0x3f7a58,0x74598c,0xd9a441][i%6],3.35+(i%8)*.33,.06+row*.7,-11.5);}
+  }
   plant(5.4,-11.5,.35,1.44);plant(3.6,-11.5,.3,2.1);
   // Quote panel, painted like the lettering on the reference walls.
   {
@@ -513,7 +619,7 @@
     ctx.fillStyle='#fbf8f2';ctx.fillRect(0,0,512,384);ctx.fillStyle='#2f3a33';ctx.font='600 58px Archivo, system-ui, sans-serif';
     ['Good people','build great','work.'].forEach((line,i)=>ctx.fillText(line,40,110+i*72));
     ctx.fillStyle='#b4623a';ctx.fillRect(40,316,70,6);
-    const texture=new THREE.CanvasTexture(c);texture.encoding=THREE.sRGBEncoding;
+    const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;
     box(2.8,2.2,.14,CARD,-7.6,.4,-11.6);for(const s of [-1,1])box(.1,.4,.1,DARK,-7.6+s*1.2,0,-11.6);
     const sign=new THREE.Mesh(new THREE.PlaneGeometry(2.6,1.95),new THREE.MeshBasicMaterial({map:texture}));sign.position.set(-7.6,1.5,-11.52);root.add(sign);
   }
@@ -608,7 +714,7 @@
   {
     const c=document.createElement('canvas');c.width=c.height=128;const ctx=c.getContext('2d');
     for(let i=0;i<8;i++)for(let j=0;j<8;j++){ctx.fillStyle=(i+j)%2?'#5b4636':'#efe4cf';ctx.fillRect(i*16,j*16,16,16);}
-    const texture=new THREE.CanvasTexture(c);texture.encoding=THREE.sRGBEncoding;texture.magFilter=THREE.NearestFilter;
+    const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;texture.magFilter=THREE.NearestFilter;
     const board=new THREE.Mesh(new THREE.PlaneGeometry(.5,.5),new THREE.MeshBasicMaterial({map:texture}));board.rotation.x=-Math.PI/2;board.position.set(11.2,.735,-1.3);root.add(board);
     for(let i=0;i<6;i++)cylinder(.025,.03,.07+(i%3)*.02,i<3?0xfbf6ee:DARK,11.05+(i%3)*.1,.735,i<3?-1.48:-1.12);
   }
@@ -677,6 +783,13 @@
   }
   for(const lower of ORDER.slice(0,-1))buildStair(lower);
   // Glass curtain walls for the whole-building view: floors 1 to 3 are enclosed storeys, the stair core is glazed too.
+  // Static decoration that never moves: merge a group's direct opaque meshes per material (one draw call each).
+  function mergeGroup(group){const groups=new Map(),drop=[];group.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(group.matrixWorld).invert();
+    for(const o of [...group.children]){if(!o.isMesh||o.material.transparent||Array.isArray(o.material)||!o.visible||o.userData.level!==undefined)continue;
+      const g=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone();for(const n of Object.keys(g.attributes))if(!['position','normal','uv'].includes(n))g.deleteAttribute(n);if(!g.attributes.uv||!g.attributes.normal)continue;
+      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv,o.matrixWorld));if(!groups.has(o.material))groups.set(o.material,[]);groups.get(o.material).push(g);drop.push(o);}
+    for(const [material,list] of groups){if(list.length<2){list.forEach(g=>g.dispose());continue;}const merged=new THREE.Mesh(ADD.BufferGeometryUtils.mergeGeometries(list),material);merged.receiveShadow=true;group.add(merged);list.forEach(g=>g.dispose());
+      for(const o of drop)if(o.material===material){o.removeFromParent();o.geometry.dispose();}}return group;}
   const facade=new THREE.Group();scene.add(facade);facade.visible=false;
   // Each storey's glass sits in its own group so it can travel and fade with that floor during camera transitions.
   const facadeLevels={};
@@ -707,14 +820,14 @@
   }
   let stairCore=null;
   function buildStairCore(){
-    if(stairCore)facade.remove(stairCore);stairCore=new THREE.Group();facade.add(stairCore);
+    if(stairCore){disposeFade(stairCore);facade.remove(stairCore);}stairCore=new THREE.Group();facade.add(stairCore);
     // The stair core rises well above the rooftop floor, so people arriving on the last flight keep their heads inside it.
     const top=floorY(ROOF)+2.7;
     glazing(.05,top,9.6,-23.3,0,3.9,stairCore);glazing(7,top,.05,-19.8,0,8.7,stairCore);glazing(7,top,.05,-19.8,0,-.9,stairCore);
     for(const [x,z] of [[-23.3,-.9],[-23.3,8.7],[-16.6,-.9],[-16.6,8.7]])box(.16,top,.16,FRAME,x,0,z,stairCore);
     box(7.1,.12,9.9,FRAME,-19.95,top,3.9,stairCore);
   }
-  for(const level of ORDER)buildFacadeLevel(level);buildStairCore();
+  for(const level of ORDER)mergeGroup(buildFacadeLevel(level));buildStairCore();
   facade.traverse(o=>{o.castShadow=false;});
   const eveningLights=new THREE.Group();scene.add(eveningLights);eveningLights.visible=false;
   const lampMaterial=new THREE.MeshStandardMaterial({color:0xffdda0,emissive:0xffbb66,emissiveIntensity:1.6,roughness:.5});
@@ -722,7 +835,7 @@
   function buildLights(level){
     const y=floorY(level),lights=new THREE.Group();eveningLights.add(lights);levelLights[level]=lights;
     const strip=new THREE.Mesh(new THREE.BoxGeometry(31,.07,.08),lampMaterial);strip.position.set(0,y+.12,12.15);lights.add(strip);
-    const light=new THREE.PointLight(0xffce8c,.9,38,1);light.position.set(0,y+3,1);lights.add(light);
+    const light=new THREE.PointLight(0xffce8c,2.2,38,1);light.position.set(0,y+3,1);lights.add(light);
     for(const x of [-15,15]){
       const lamp=new THREE.Mesh(new THREE.BoxGeometry(.32,.55,.32),lampMaterial);lamp.position.set(x,y+.3,10.5);lights.add(lamp);
     }
@@ -731,12 +844,14 @@
   function buildingMood(on){
     // Bright late-morning city: warm sun, soft sky fill, interior lamps still glowing through the glass.
     document.body.classList.toggle('building-view',on);eveningLights.visible=on;
-    scene.background.set(on?0xeae6dc:PAPER);scene.fog=on?new THREE.FogExp2(0xeae6dc,.003):null;
-    ambient.color.set(on?0xf4f8ff:0xffffff);ambient.intensity=on?.6:.8;
-    sun.color.set(on?0xffe6c4:0xffeed5);sun.intensity=on?1.05:.75;
+    scene.background.set(on?SKY_HAZE:SKY_INDOOR);scene.fog=on?new THREE.FogExp2(SKY_HAZE,.003):null;
+    ambient.color.set(on?0xe4eefa:0xdfe9f5);ambient.intensity=on?.9:1.1;
+    sun.color.set(on?0xffe2bd:0xffe7c7);sun.intensity=on?2.4:2.2;
   }
   // Parts that fade during camera transitions get their own material copies, so floors keep full opacity.
-  function prepareFade(root){root.traverse(o=>{if(!o.material)return;o.material=o.material.clone();o.material.transparent=true;o.userData.baseOpacity=o.material.opacity;});}
+  function prepareFade(root){root.traverse(o=>{if(!o.material)return;o.material=o.material.clone();o.material.transparent=true;o.userData.fadeMaterial=true;o.userData.baseOpacity=o.material.opacity;});}
+  // Removed stair/facade groups own their fade clones, but not cached base or shared model materials.
+  function disposeFade(root){root?.traverse(o=>{o.geometry?.dispose();if(!o.userData.fadeMaterial)return;for(const m of [o.material].flat()){if(!window.officeSurfaces?.release(m))m?.dispose();}});}
   function setFade(root,alpha){root.visible=alpha>.001;root.traverse(o=>{if(o.userData.baseOpacity!==undefined)o.material.opacity=o.userData.baseOpacity*alpha;});}
   prepareFade(facade);Object.values(stairways).forEach(prepareFade);doorPads.forEach(prepareFade);
   function stairRoute(from,to){
@@ -769,14 +884,14 @@
   }
 
 
-  // Surroundings for the whole-building view only: a round paper base with streets, other buildings, clouds and birds.
+  // Surroundings for the whole-building view only: a round paper base with streets, other buildings and clouds.
   const skyline=new THREE.Group();scene.add(skyline);skyline.visible=false;
   {
     let seed=29;const rnd=()=>(seed=seed*16807%2147483647)/2147483647;
     const PAVEMENT=0xe4dfd3,LAWN=0xa9cc7a,SIDEWALK=0xf1eee7,ASPHALT=0xa9a8a3,LINE=0xfbfaf6;
     mesh(new THREE.CylinderGeometry(150,150,.4,64),PAVEMENT,0,-1.1,0,skyline,false);
     // The office sits on its own lawn, bounded by sidewalks on the two streets.
-    box(66,.02,46,LAWN,-6,-.9,-4.5,skyline).children.forEach(line=>line.visible=false);
+    // The office lawn is the textured grass plane from officeEnvironment.
     const flat=(w,d,color,x,y,z)=>{const m=box(w,.02,d,color,x,y,z,skyline);m.children.forEach(line=>line.visible=false);return m;};
     for(const z of [19.8,28.2])flat(290,2.4,SIDEWALK,0,-.89,z);
     for(const x of [29.8,38.2])flat(2.4,290,SIDEWALK,x,-.89,0);
@@ -786,7 +901,7 @@
     for(let i=-140;i<=140;i+=8){if(Math.abs(i-34)>5)flat(3,.25,LINE,i,-.86,24);if(Math.abs(i-24)>5)flat(.25,3,LINE,34,-.86,i);}
     // Zebra crossings at the corner.
     for(let k=0;k<6;k++){flat(.5,5,LINE,27.4-k*.9,-.855,24);flat(5,.5,LINE,34,-.855,17.4-k*.9);}
-    const tones=[0xf3eee4,0xe9e2d4,0xf7f3ec,0xe1d9ca];
+    const tones=[0xc9c2b4,0xb8b2a6,0xd2cbbd,0xa9a69d];
     for(let placed=0,tries=0;placed<64&&tries<600;tries++){
       const a=rnd()*Math.PI*2,dist=40+rnd()*100,x=Math.cos(a)*dist,z=Math.sin(a)*dist,w=6+rnd()*7,d=6+rnd()*7;
       if(Math.hypot(x,z)+Math.max(w,d)>145)continue;
@@ -796,95 +911,34 @@
       const h=dist<65?4+rnd()*10:8+rnd()*(dist/140)*42;
       flat(w+3,d+3,rnd()<.5?LAWN:SIDEWALK,x,-.895,z);
       box(w,h,d,tones[placed%4],x,-.9,z,skyline);
-      for(let y=2;y<h-1;y+=2.6)box(w+.04,.55,d+.04,0xbfd3d9,x,-.9+y,z,skyline).children.forEach(line=>line.visible=false);
+      for(let y=1.4;y<h-1;y+=3.2)box(w+.04,1.7,d+.04,0x5d7a86,x,-.9+y,z,skyline).children.forEach(line=>line.visible=false);
       if(rnd()<.35)flat(w*.8,d*.8,0x9fbf73,x,h-.88,z);else if(rnd()<.5)box(w*.35,1.2,d*.35,0xcfc8ba,x,h-.9,z,skyline);
       placed++;
     }
-    // Round, full trees drawn as three instanced batches (trunks and two leaf tones), so hundreds stay cheap.
-    const trees=[];
-    const clearOfRoads=(x,z)=>Math.abs(z-24)>4.2&&Math.abs(x-34)>4.2;
-    for(let x=-140;x<=140;x+=7)for(const z of [18.4,29.6])if(clearOfRoads(x,z)&&(x<0||x>16.5)&&Math.hypot(x,z)<142)trees.push([x,z,.9+rnd()*.3]);
-    for(let z=-140;z<=140;z+=7)for(const x of [28.4,39.6])if(clearOfRoads(x,z)&&Math.hypot(x,z)<142)trees.push([x,z,.9+rnd()*.3]);
-    // Trees around the office lawn, clear of the building, the outside stairs and the driveway.
-    for(const [x,z,s] of [[-30,-20,1.4],[-34,-8,1.2],[-32,6,1.3],[-30,15,1.1],[-24,-22,1.2],[-12,-22,1.3],[0,-23,1.1],[12,-22,1.4],[22,-18,1.2],[23,-6,1.1],[22,6,1.3],[21,15,1],[-8,17,.8],[-14,17,.7],[-2,17.5,.7],[-26,17,.9]])trees.push([x,z,s]);
-    for(let placed=0,tries=0;placed<130&&tries<900;tries++){
-      const a=rnd()*Math.PI*2,dist=30+rnd()*112,x=Math.cos(a)*dist,z=Math.sin(a)*dist;
-      if(x>-40&&x<28&&z>-28&&z<22)continue;
-      if(!clearOfRoads(x,z)||Math.abs(z-24)<6.5||Math.abs(x-34)<6.5)continue;
-      trees.push([x,z,.8+rnd()*.7]);placed++;
-    }
-    const PUFFS=[[0,2.3,0,1.25],[.6,1.85,.4,.95],[-.55,1.95,-.35,1]],GREENS=[0x6fa84a,0x8cc05a,0x5f9640];
-    const trunks=new THREE.InstancedMesh(new THREE.CylinderGeometry(.16,.24,1.6,6),material(0x7a5e45),trees.length);
-    const leaves=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1,2),new THREE.MeshStandardMaterial({color:0xffffff,roughness:.85}),trees.length*PUFFS.length);
-    const m4=new THREE.Matrix4(),q=new THREE.Quaternion(),v=new THREE.Vector3(),sc=new THREE.Vector3(),tint=new THREE.Color();
-    trees.forEach(([x,z,s],i)=>{
-      trunks.setMatrixAt(i,m4.compose(v.set(x,-.9+.8*s,z),q.identity(),sc.set(s,s,s)));
-      PUFFS.forEach(([dx,dy,dz,r],k)=>{
-        const slot=i*PUFFS.length+k;
-        leaves.setMatrixAt(slot,m4.compose(v.set(x+dx*s,-.9+dy*s,z+dz*s),q.identity(),sc.set(r*s,r*s*.92,r*s)));
-        leaves.setColorAt(slot,tint.copy(linear(GREENS[(i+k)%3])));
-      });
-    });
-    for(const inst of [trunks,leaves]){inst.instanceMatrix.needsUpdate=true;inst.receiveShadow=true;skyline.add(inst);}
-    leaves.instanceColor.needsUpdate=true;
   }
   const clouds=[];
   {
     let seed=71;const rnd=()=>(seed=seed*16807%2147483647)/2147483647;
+    // Soft, irregular cloud sprites painted once (overlapping radial gradients), not solid faceted shapes.
+    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;const g2=canvas.getContext('2d');
+    for(let k=0;k<40;k++){const x=90+rnd()*330,y=100+rnd()*70,r=30+rnd()*70,grad=g2.createRadialGradient(x,y,0,x,y,r);grad.addColorStop(0,'rgba(255,255,255,.22)');grad.addColorStop(1,'rgba(255,255,255,0)');g2.fillStyle=grad;g2.fillRect(0,0,512,256);}
+    const cloudMap=new THREE.CanvasTexture(canvas);cloudMap.colorSpace=THREE.SRGBColorSpace;
     for(let i=0;i<12;i++){
       // A ring just past the city edge: always in the distance, whichever way the camera turns.
       const a=i/12*Math.PI*2+rnd()*.3,dist=150+rnd()*25;
       const cloud=new THREE.Group();cloud.position.set(Math.cos(a)*dist,15+rnd()*10,Math.sin(a)*dist);skyline.add(cloud);
-      for(let k=0;k<4;k++){const puff=mesh(new THREE.IcosahedronGeometry(4+rnd()*4,0),0xfbf9f4,k*5-7,rnd()*2,rnd()*4-2,cloud);puff.scale.y=.55;}
+      const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:cloudMap,transparent:true,depthWrite:false,opacity:.85}));sprite.scale.set(42+rnd()*20,18+rnd()*6,1);cloud.add(sprite);
       clouds.push({cloud,speed:1+rnd()*1.5});
     }
   }
-  const birds=[];
-  for(let i=0;i<8;i++){
-    const bird=new THREE.Group(),wings=[];skyline.add(bird);
-    box(.22,.16,.7,DARK,0,-.08,0,bird);
-    for(const side of [-1,1]){const pivot=new THREE.Group();bird.add(pivot);box(.9,.04,.36,DARK,side*.45,0,0,pivot);wings.push(pivot);}
-    birds.push({bird,wings,radius:28+i*4,height:30+(i%4)*7,speed:(.18+(i%3)*.05)*(i%2?1:-1),angle:i*.8});
-  }
-  // Traffic on both streets: each vehicle keeps to its lane and loops back at the edge of the city base.
-  const traffic=[];
-  {
-    const paints=[0xd6d0c4,0x6f8580,0xb4623a,0x2f4a6b,0xd8a13a,0x8a8479,0x3f7a58];
-    function vehicle(kind,color){
-      const v=new THREE.Group();skyline.add(v);
-      if(kind==='bus'){box(2.3,1.9,7,color,0,-.6,0,v);box(2.34,.6,6.4,SCREEN,0,.35,0,v);}
-      else if(kind==='bike'){box(.35,.5,1.5,color,0,-.5,0,v);box(.4,.55,.4,DARK,0,0,-.1,v);}
-      else{box(2,.6,4,color,0,-.5,0,v);box(1.7,.55,2.1,color,0,.1,-.2,v);box(1.72,.4,.03,SCREEN,0,.18,.87,v);}
-      for(const sz of kind==='bike'?[-.6,.6]:[-1,1])for(const sx of kind==='bike'?[0]:[-1,1]){
-        const w=cylinder(.3,.3,.18,DARK,sx*(kind==='bus'?1.15:kind==='bike'?0:1),-.9,sz*(kind==='bus'?2.4:kind==='bike'?1:1.3),v);w.rotation.z=Math.PI/2;
-      }
-      return v;
-    }
-    let seed=53;const rnd=()=>(seed=seed*16807%2147483647)/2147483647;
-    // Lanes: [axis, fixed coordinate, direction]. The street along x sits at z=24, the one along z at x=34.
-    const lanes=[['x',22.5,1],['x',25.5,-1],['z',32.5,-1],['z',35.5,1]];
-    // One speed per lane, so vehicles keep their gaps and never overtake each other.
-    lanes.forEach((lane,li)=>{const laneSpeed=8+li*.8;for(let i=0;i<5;i++){
-      const kind=rnd()<.15?'bus':rnd()<.3?'bike':'car';
-      traffic.push({v:vehicle(kind,paints[(li*5+i)%paints.length]),lane,pos:-130+i*54+rnd()*14,speed:laneSpeed});
-    }});
-  }
+  const environment=window.officeEnvironment.create({scene,parkingRoot:floors[1],onWarning:status});
+  const mobility=window.OfficeMobility.create({...environment.layout,maxTeamAway:2});
+  let ambientSerial=0,nextAmbient=2;
+  mergeGroup(skyline);
   skyline.traverse(o=>{o.castShadow=false;});prepareFade(skyline);
   function animateSky(dt){
-    for(const c of traffic){
-      c.pos+=c.speed*dt;if(c.pos>135)c.pos=-135;
-      const [axis,fixed,dir]=c.lane,along=c.pos*dir;
-      if(axis==='x'){c.v.position.set(along,0,fixed);c.v.rotation.y=dir>0?Math.PI/2:-Math.PI/2;}
-      else{c.v.position.set(fixed,0,along);c.v.rotation.y=dir>0?0:Math.PI;}
-    }
     // Clouds drift slowly around the ring.
     for(const c of clouds){const p=c.cloud.position,r=Math.hypot(p.x,p.z),a=Math.atan2(p.z,p.x)+c.speed*dt/r;p.x=Math.cos(a)*r;p.z=Math.sin(a)*r;}
-    for(const b of birds){
-      b.angle+=b.speed*dt;
-      b.bird.position.set(Math.cos(b.angle)*b.radius-3,b.height+Math.sin(b.angle*3)*1.5,Math.sin(b.angle)*b.radius);
-      b.bird.rotation.y=-b.angle+(b.speed>0?Math.PI:0);
-      const flap=Math.sin(simTime*9+b.radius)*.6;b.wings[0].rotation.z=-flap;b.wings[1].rotation.z=flap;
-    }
   }
   const rand=(min,max)=>min+Math.random()*(max-min),pick=list=>list[Math.floor(Math.random()*list.length)];
   const shuffle=list=>list.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(p=>p[1]);
@@ -894,7 +948,7 @@
     ctx.beginPath();ctx.moveTo(22,4);ctx.lineTo(106,4);ctx.quadraticCurveTo(124,4,124,22);ctx.lineTo(124,44);ctx.quadraticCurveTo(124,62,106,62);
     ctx.lineTo(56,62);ctx.lineTo(40,77);ctx.lineTo(42,62);ctx.lineTo(22,62);ctx.quadraticCurveTo(4,62,4,44);ctx.lineTo(4,22);ctx.quadraticCurveTo(4,4,22,4);ctx.fill();ctx.stroke();
     ctx.fillStyle='#2a2622';for(const x of [42,64,86]){ctx.beginPath();ctx.arc(x,33,6,0,Math.PI*2);ctx.fill();}
-    const texture=new THREE.CanvasTexture(c);texture.encoding=THREE.sRGBEncoding;
+    const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;
     return new THREE.SpriteMaterial({map:texture});
   })();
 
@@ -918,13 +972,14 @@
     rig.legs.forEach(({thigh,knee},i)=>{ease(thigh.rotation,'x',leg[i][0]);ease(knee.rotation,'x',leg[i][1]);});
     rig.arms.forEach(({shoulder,elbow},i)=>{ease(shoulder.rotation,'x',arm[i][0]);ease(shoulder.rotation,'z',(i?1:-1)*arm[i][1]);ease(elbow.rotation,'x',arm[i][2]);});
     ease(rig.body.position,'y',y);ease(rig.body.position,'z',z);ease(rig.hips.rotation,'x',lean);ease(rig.hips.rotation,'z',sway);
+    rig.sync?.();
   }
   function joint(parent,x,y,z,length,width,color){
     const pivot=new THREE.Group();pivot.position.set(x,y,z);parent.add(pivot);
     part(softBox(width,length,width*.92),color,0,-length/2,0,pivot);
     return pivot;
   }
-  function buildFigure(shirt,gender,index){
+  function buildLegacyFigure(shirt,gender,index){
     const figure=new THREE.Group();figure.scale.setScalar(FIGURE_SCALE);
     const body=new THREE.Group();figure.add(body);
     const hips=new THREE.Group();hips.position.y=.88;body.add(hips);
@@ -968,10 +1023,12 @@
     const cup=part(new THREE.CylinderGeometry(.08,.07,.17,10),CARD,0,-.36,.13,arms[1].elbow);
     const phone=part(softBox(.045,.25,.14),SHOES,-.1,-.34,0,arms[1].elbow);
     cup.visible=phone.visible=false;
-    return {figure,body,hips,head,legs,arms,cup,phone};
+    return {figure,body,hips,head,legs,arms,cup,phone,seatDrop:.29};
   }
+  // Stage 2: proportional humans from office-people.js; the old chibi figure stays as fallback.
   function character(person,index) {
-    const g=new THREE.Group(),rig=buildFigure(metaOf(person.group).color,person.gender,index);g.add(rig.figure);
+    const g=new THREE.Group(),rig=PEOPLE?.build(person,metaOf(person.group).color)||buildLegacyFigure(metaOf(person.group).color,person.gender,index);
+    g.add(rig.figure);
     rig.cue=mesh(new THREE.CylinderGeometry(.012,.02,1.45,8),BALSA,0,-.3,0,rig.arms[1].elbow,false);rig.cue.visible=false;
     const bubble=new THREE.Sprite(bubbleMaterial);bubble.scale.set(.75,.45,1);bubble.center.set(-.3,-.1);bubble.visible=false;g.add(bubble);
     const label=document.createElement('button');label.className='name-label';label.type='button';label.textContent=person.initials;
@@ -987,13 +1044,65 @@
   // grown by a body radius. Built once, before any people are placed, so only the static office counts.
   // Cells are 0 open, 1 furniture (a seat can be reached through it) or 2 wall (walls, glass, partitions: never crossed).
   const NAV={cell:.2,x0:-16.4,z0:-12.4,w:164,h:124,clear:.22,soft:.16};
+  // Room dressing in the spirit of the reference interiors: art on the walls, plants, shelves, rugs, lounge pieces,
+  // pendant and arc lights, a TV in the meeting room, and dark window mullions. Placed in free space only.
+  function dress(level){
+    const f=floors[level];if(!f||f.userData.dressed)return;f.userData.dressed=true;
+    // Height is rotation-invariant: fitting a thin picture by world-X width after a quarter turn scales its depth into a giant wall.
+    const wall=(name,x,z,rotY,y=1.55,size={h:.8})=>{const o=decor(name,size,f,{x,y,z,rotY});if(o)o.userData.walkable=true;return o;};
+    // Window mullions along the long glass walls: dark frames every 2 m like floor-to-ceiling glazing.
+    if(level!==4)for(let x=-15;x<=15;x+=2)decorBox('window_frame',.06,2.38,.08,'metal_black',x,0,-12.08,f);
+    if(isWork(level)){
+      for(const [x,z,r] of [[-6.5,-11.85,0],[1.5,-11.85,0],[8,-11.85,0],[-15.85,2,Math.PI/2],[15.85,2.5,-Math.PI/2]])wall('painting',x,z,r);
+      wall('clock',-1,-11.88,0,2.05,{w:.4});
+      // Meeting room: wall TV on a walnut panel, patterned rug.
+      decorBox('wood_panel',2.6,1.6,.04,'wood_panel_walnut',-13.2,.75,-11.84,f);wall('tv',-13.2,-11.35,0,1.05,{w:1.6,h:.9,d:.6});
+      decorBox('rug',3.6,.012,2.6,'rug_pattern',-13.2,.025,-9,f);
+      // Back lounge: shaggy rug, glass coffee table, cushions, arc lamp, tall plants, bookshelf with books.
+      decorBox('rug',3.2,.012,2.2,'rug_shaggy',-2.8,.03,-9.4,f);decor('coffee_table_glass',{w:1.1},f,{x:-1.6,z:-9.2});
+      decor('cushions',{w:.9},f,{x:-3.4,y:.52,z:-10.75});decor('arc_lamp',{h:1.9},f,{x:-5.6,z:-11.3});
+      decor('plant_tall',{h:1.5},f,{x:-0.9,z:-11.4});decor('plant_tall',{h:1.5},f,{x:7,z:-11.4});
+      if(level!==3)decor('bookshelf',{w:2.6,h:2,d:.6},f,{x:4.6,z:-11.55,rotY:Math.PI/2});
+      decor('books',{w:.5,h:.25,d:.3},f,{x:4.6,y:1.1,z:-11.5});
+      // Pantry lounge: rug, side table, lamp, pendants over the counter.
+      decorBox('rug',2.4,.012,3,'rug_shaggy',13.6,.03,-7.5,f);decor('side_table',{h:.55},f,{x:13.2,z:-5.4});
+      for(const x of [10.8,12.8])decor('pendant_lamp',{h:.6},f,{x,y:2.32,z:-11});
+      decor('tv_cabinet',{w:1.8},f,{x:12.6,z:-4.6,rotY:Math.PI});
+      // Aisles: tall plants at the ends.
+      for(const [x,z] of [[-15.2,-1],[15.2,-1],[-15.2,11.4],[15.2,11.4]])decor('plant_tall',{h:1.6},f,{x,z});
+    }else if(level===1){
+      for(const [x,z,r] of [[-13.5,-11.85,0],[-8,-11.85,0]])wall('mirror',x,z,r,1.4,{h:1});
+      for(const [x,z] of [[-15.2,-10.8],[-4.2,-10.8],[-15.2,6],[-3.5,4]])decor('plant_tall',{h:1.6},f,{x,z});
+      decorBox('rug',3.4,.012,2.2,'rug_shaggy',-7,.03,7.6,f);decor('coffee_table_glass',{w:1},f,{x:-7,z:8.8});
+      wall('painting',-15.85,0,Math.PI/2);wall('painting',-2.1,-6,-Math.PI/2);wall('clock',-10.5,-11.88,0,2.05,{w:.4});
+      decor('side_table',{h:.55},f,{x:-9.3,z:7.2});decor('arc_lamp',{h:1.9},f,{x:-9.6,z:6});
+      for(const x of [-12,-9,-6])decor('pendant_lamp',{h:.6},f,{x,y:2.42,z:-8});
+    }else if(level===2){
+      for(const x of [-6,-1,4])decor('pendant_lamp',{h:.6},f,{x,y:2.42,z:5});
+      for(const [x,z,r] of [[-15.85,-2,Math.PI/2],[15.85,0,-Math.PI/2],[-4,-11.85,0],[6,-11.85,0]])wall('painting',x,z,r);
+      for(const [x,z] of [[-15.2,-10.8],[15.2,-10.8],[-15.2,11],[15.2,11]])decor('plant_tall',{h:1.6},f,{x,z});
+      decor('bookshelf',{w:1.4,h:1.8,d:.55},f,{x:-14.5,z:-11.6,rotY:Math.PI/2});wall('clock',8.5,-11.88,0,2.05,{w:.4});
+      decorBox('rug',4,.012,2.6,'rug_pattern',10.5,.03,6,f);
+    }else if(level===4){
+      for(const [x,z] of [[-15,-11],[15,-11],[-15,11],[15,11],[0,-11.2],[8,11]])decor('plant_tall',{h:1.7},f,{x,z});
+      decorBox('rug',4.2,.012,2.6,'rug_shaggy',-8,.03,-7.3,f);decor('cushions',{w:.9},f,{x:-6.5,y:.52,z:-8.85});
+      decor('coffee_table_glass',{w:1.1},f,{x:-8,z:-7.4});decor('side_table',{h:.55},f,{x:-11.3,z:-4});
+    }
+  }
+  for(const level of Object.keys(floors).map(Number))dress(level);
   const navGrids={};
-  for(const [key,root] of Object.entries(floors)){
-    const grid=new Uint8Array(NAV.w*NAV.h),bounds=new THREE.Box3(),y0=root.position.y;root.updateMatrixWorld(true);
-    root.traverse(o=>{
-      if(!o.isMesh||o.material?.isMeshBasicMaterial)return;
-      for(let a=o;a;a=a.parent)if(a.userData.walkable)return;
-      bounds.setFromObject(o);
+  // One rasterizer for start-up and furniture edits. skip(a) excludes ancestors (walkable pads, agents, hidden items).
+  function rasterize(rootF,skip=a=>a.userData.walkable){
+    const grid=rootF.userData.staticGrid?new Uint8Array(rootF.userData.staticGrid):new Uint8Array(NAV.w*NAV.h),bounds=new THREE.Box3(),y0=rootF.position.y;rootF.updateMatrixWorld(true);
+    rootF.traverse(o=>{
+      if(o.userData.merged)return; // Its original collision cells were saved before visual geometry was merged.
+      // A furniture model blocks its requested footprint (the space the procedural piece took), not mesh by mesh.
+      const isModel=!!o.userData.model;
+      if(!isModel&&(!o.isMesh||o.material?.isMeshBasicMaterial))return;
+      for(let a=o;a;a=a.parent){if(skip(a))return;if(!isModel&&a!==o&&a.userData.model)return;}
+      if(isModel){const f=o.userData.footprint,c=o.getWorldPosition(new THREE.Vector3()),yaw=new THREE.Euler().setFromQuaternion(o.getWorldQuaternion(new THREE.Quaternion())).y,sw=Math.abs(Math.sin(yaw))>.7;
+        const hw=(sw?f.d:f.w)/2,hd=(sw?f.w:f.d)/2;bounds.min.set(c.x-hw,c.y,c.z-hd);bounds.max.set(c.x+hw,c.y+f.h,c.z+hd);}
+      else bounds.setFromObject(o);
       if(bounds.max.y-y0<.18||bounds.min.y-y0>1.75)return;
       const sx=bounds.max.x-bounds.min.x,sz=bounds.max.z-bounds.min.z;
       const wall=bounds.max.y-y0>1.9||Math.min(sx,sz)<.3&&Math.max(sx,sz)>1.2,value=wall?2:1,pad=wall?NAV.clear:NAV.soft;
@@ -1001,8 +1110,34 @@
       const j0=Math.max(0,Math.floor((bounds.min.z-pad-NAV.z0)/NAV.cell)),j1=Math.min(NAV.h-1,Math.floor((bounds.max.z+pad-NAV.z0)/NAV.cell));
       for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++)if(grid[j*NAV.w+i]<value)grid[j*NAV.w+i]=value;
     });
-    navGrids[key]=grid;
+    return grid;
   }
+  for(const [key,root] of Object.entries(floors))navGrids[key]=rasterize(root);
+  // Draw-call budget: static architecture never moves, so each floor's plain meshes are merged per material after
+  // the walking grid is built. Custom furniture, desk areas, agents, models, decor and anything animated stay separate.
+  function mergeStatic(rootF){
+    const groups=new Map(),drop=[];rootF.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(rootF.matrixWorld).invert();
+    rootF.traverse(o=>{
+      if(!o.isMesh||o.isInstancedMesh||o.isSkinnedMesh||o.material.transparent||Array.isArray(o.material)||o.userData.agent)return;
+      for(let a=o;a&&a!==rootF;a=a.parent)if(a.userData.customId||a.userData.deskArea||a.userData.agent||a.userData.model||a.userData.decor||a.userData.walkable||a.userData.keep||!a.visible)return;
+      if(doorPads.includes(o)||o.parent!==rootF&&o.parent.parent!==rootF&&!o.parent.isGroup)return;
+      const geometry=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone();
+      for(const name of Object.keys(geometry.attributes))if(!['position','normal','uv'].includes(name))geometry.deleteAttribute(name);
+      if(!geometry.attributes.uv||!geometry.attributes.normal)return;
+      geometry.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv,o.matrixWorld));
+      const key=o.material.uuid+(o.castShadow?'c':'');if(!groups.has(key))groups.set(key,{material:o.material,cast:o.castShadow,list:[]});groups.get(key).list.push(geometry);drop.push(o);
+    });
+    for(const {material,cast,list} of groups.values()){
+      if(list.length<2){list.forEach(g=>g.dispose());continue;}
+      const merged=new THREE.Mesh(ADD.BufferGeometryUtils.mergeGeometries(list),material);merged.castShadow=cast;merged.receiveShadow=true;merged.userData.merged=true;rootF.add(merged);list.forEach(g=>g.dispose());
+    }
+    const kept=new Set([...groups.values()].filter(g=>g.list.length>=2).map(g=>g.material.uuid+(g.cast?'c':'')));
+    const collisionObjects=new Set(drop.filter(o=>kept.has(o.material.uuid+(o.castShadow?'c':''))));
+    // Preserve only the merged static pieces' cells, not movable desks/furniture which must be rasterized fresh.
+    rootF.userData.staticGrid=rasterize(rootF,o=>o.userData.walkable||o.isMesh&&!collisionObjects.has(o));
+    for(const o of collisionObjects){o.parent.remove(o);o.geometry.dispose();}
+  }
+  for(const rootF of Object.values(floors))mergeStatic(rootF);
   const cellOf=(x,z)=>[Math.floor((x-NAV.x0)/NAV.cell),Math.floor((z-NAV.z0)/NAV.cell)];
   const centerOf=(i,j)=>[NAV.x0+(i+.5)*NAV.cell,NAV.z0+(j+.5)*NAV.cell];
   const open=(grid,i,j)=>i>=0&&j>=0&&i<NAV.w&&j<NAV.h&&!grid[j*NAV.w+i];
@@ -1082,7 +1217,9 @@
   // pay and leave. They are generic visitors, not team members, so they carry no name labels.
   const shop={people:[],chairs:[-11,-6].map(x=>({x,customer:null})),seats:[-8.4,-7,-5.6].map(x=>({x,customer:null})),paying:null,nextArrival:6};
   function extra(shirt,gender,index,x,z,rot){
-    const g=new THREE.Group(),rig=buildFigure(shirt,gender,index);g.add(rig.figure);g.position.set(x,0,z);g.rotation.y=rot;floors[1].add(g);
+    const g=new THREE.Group(),visitor={n:`Pengunjung ${index}`,gender};
+    const rig=PEOPLE?.build(visitor,shirt)||buildLegacyFigure(shirt,gender,index);
+    g.add(rig.figure);g.position.set(x,0,z);g.rotation.y=rot;floors[1].add(g);
     return {g,rig,pose:'stand',path:[],heading:rot,seat:0};
   }
   const barbers=shop.chairs.map((c,i)=>{const b=extra(0x5c554b,i?'female':'male',i+20,c.x+1.05,-8.2,-Math.PI/2);b.chair=c;return b;});
@@ -1106,7 +1243,7 @@
     const {body,hips,legs,arms,phone}=person.rig,t=simTime+person.g.id;
     let leg=[[0,0],[0,0]],arm=[[.02,.07,-.15],[.02,.07,-.15]],bodyY=0,bodyZ=0,lean=0;
     if(person.pose==='walk'){const w=t*8;leg=[[Math.sin(w)*.5,Math.max(0,Math.sin(w+1.3))*.75],[-Math.sin(w)*.5,Math.max(0,-Math.sin(w+1.3))*.75]];arm=[[-Math.sin(w)*.4,.07,-.25],[Math.sin(w)*.4,.07,-.25]];bodyY=Math.abs(Math.sin(w))*.03;}
-    else if(person.pose==='sit'||person.pose==='phone'){leg=[[-Math.PI/2,Math.PI/2],[-Math.PI/2,Math.PI/2]];bodyY=-.29+person.seat;bodyZ=.2;arm=[[-.35,.1,-.95],[-.35,.1,-.95]];if(person.pose==='phone')arm[1]=[-.9,.05,-1.5];}
+    else if(person.pose==='sit'||person.pose==='phone'){leg=[[-Math.PI/2,Math.PI/2],[-Math.PI/2,Math.PI/2]];bodyY=-(person.rig.seatDrop??.29)+person.seat;bodyZ=.2;arm=[[-.35,.1,-.95],[-.35,.1,-.95]];if(person.pose==='phone')arm[1]=[-.9,.05,-1.5];}
     else if(person.pose==='cut'){const snip=Math.sin(t*10)*.12;arm=[[-1.25,-.15,-1.1],[-1.45+snip,.25,-1.25-snip]];lean=.12;}
     else if(person.pose==='till'){const k=Math.sin(t*9)*.08;arm=[[-.85+k,.1,-.6],[-.85-k,.1,-.6]];lean=.08;}
     else if(person.pose==='pay'){arm[1]=[-1.2,.08,-.35];}
@@ -1114,6 +1251,10 @@
     phone.visible=person.pose==='phone';
     person.g.rotation.y+=wrap(person.heading-person.g.rotation.y)*Math.min(1,dt*8);
   }
+  function updateVisitorTravel(dt){if(dt<=0)return;const snapshot=mobility.snapshot();for(const c of shop.people){if(!c.vehicleTrip)continue;const t=snapshot.trips.find(t=>t.id===c.vehicleTrip);if(!t){c.vehicleTrip=null;c.state='outside';c.g.visible=false;continue;}
+    if(t.phase==='dismount'){const seat=shop.seats.find(s=>!s.customer);if(!seat)continue;const bay=environment.layout.parking.find(b=>b.id===t.parking);c.g.visible=true;c.g.position.set(bay.position[0]+1.35,0,bay.position[2]);mobility.arrive(t.id,'dismount');seat.customer=c;c.state='toSofa';walk(c,[[7,c.g.position.z],[7,4.5],[-3,4.5],[seat.x,5.8],[seat.x,7.1]],()=>{c.state='waiting';c.since=simTime;sit(c,0,-.09);mobility.arrive(t.id,'walkToOffice');});}
+    else if(t.phase==='mount'){c.vehicleTimer=(c.vehicleTimer||0)+dt;if(c.vehicleTimer>.7){c.g.visible=false;mobility.arrive(t.id,'mount');c.state='driving';}}
+  }}
   function stepShop(dt){
     for(const person of [...shop.people,...barbers,cashier]){
       if(person.path.length){
@@ -1138,10 +1279,12 @@
     const payer=shop.paying;
     if(payer?.state==='pay'&&simTime>payer.until){
       shop.paying=null;payer.state='leaving';
-      walk(payer,[[-10,3.5],[-10,4.5],[7,4.5],[7,13]],()=>{payer.state='outside';payer.g.visible=false;});
+      if(payer.vehicleTrip){const trip=mobility.snapshot().trips.find(t=>t.id===payer.vehicleTrip),bay=trip&&environment.layout.parking.find(b=>b.id===trip.parking);if(bay){mobility.departVisitor(trip.owner);walk(payer,[[-10,3.5],[-10,4.5],[7,4.5],[bay.position[0]+1.35,bay.position[2]]],()=>{mobility.arrive(trip.id,'walkToVehicle');payer.state='mounting';payer.vehicleTimer=0;});}}
+      else walk(payer,[[-10,3.5],[-10,4.5],[7,4.5],[7,13]],()=>{payer.state='outside';payer.g.visible=false;});
     }
-    const seat=shop.seats.find(s=>!s.customer),waiting=shop.people.find(p=>p.state==='outside');
-    if(seat&&waiting&&simTime>shop.nextArrival){toSofa(waiting,seat);shop.nextArrival=simTime+7+Math.random()*8;}
+    const seat=shop.seats.find(s=>!s.customer),waiting=shop.people.find(p=>p.state==='outside'&&!p.vehicleTrip);
+    if(seat&&waiting&&simTime>shop.nextArrival&&environment.audit().loaded.includes('car')){const id=mobility.requestVisitor({id:'visitor-'+(++travelSerial),owner:'visitor-'+shop.people.indexOf(waiting),vehicle:'car',lane:'visitor-in'});if(id){waiting.vehicleTrip=id;waiting.arrivalMode='vehicle';waiting.state='driving';waiting.g.visible=false;}shop.nextArrival=simTime+12;}
+    updateVisitorTravel(dt);
     for(const barber of barbers){const busy=barber.chair.customer?.state==='cut';barber.pose=busy?'cut':'stand';barber.heading=-Math.PI/2;}
     cashier.pose=payer?.state==='pay'?'till':'stand';cashier.heading=0;
   }
@@ -1263,6 +1406,41 @@
     if(spot){assign(agent,spot,rand(6,11));log(`${agent.n} ${ACTIVITY_LOG[kind]}`,agent.group);return;}
     assign(agent,agent.stretchSpot,rand(3.5,6));
   }
+  let travelSerial=0,nextExcursion=40;
+  let travelTaskStateKnown=false;
+  document.addEventListener('officetasks:server',()=>{travelTaskStateKnown=true;});
+  const tasksKnown=()=>travelTaskStateKnown||!!window.officeTasks?.online?.();
+  function updateTeamTravel(dt){
+    if(dt<=0)return;
+    const snapshot=mobility.snapshot(),byId=new Map(snapshot.trips.map(t=>[t.id,t]));
+    for(const a of agents){
+      if(!a.vehicleTrip)continue;
+      const trip=byId.get(a.vehicleTrip);
+      if(!trip){a.vehicleTrip=null;a.vehiclePhase=null;a.g.visible=true;a.rig.figure.visible=true;setPath(a,a.desk);continue;}
+      if(!window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),tasksKnown())||!routineOn)mobility.recall(a.n);
+      a.vehiclePhase=trip.phase;
+      if(trip.phase==='walkToVehicle'){
+        if(a.floor===1&&a.spot===a.vehicleSpot)mobility.arrive(trip.id,'walkToVehicle');
+      }else if(trip.phase==='mount'){
+        a.vehicleTimer=(a.vehicleTimer||0)+dt;if(a.vehicleTimer>.7){a.vehicleTimer=0;mobility.arrive(trip.id,'mount');}
+      }else if(['outbound','away','inbound','park'].includes(trip.phase)){
+        const v=snapshot.vehicles.find(v=>v.id===trip.id);if(v){const riding=v.kind==='motorcycle';a.g.visible=riding;a.rig.figure.visible=riding;if(a.floor!==1){a.floor=1;moveTo(floors[1],a.g);}a.g.position.set(...v.pose);a.g.rotation.y=v.heading;if(riding){const rig=a.rig;rig.body.position.set(0,-(rig.seatDrop??.29)+.22,-.12);rig.hips.rotation.set(.12,0,0);for(const leg of rig.legs){leg.thigh.rotation.x=-1.35;leg.knee.rotation.x=1.3;}for(const arm of rig.arms){arm.shoulder.rotation.x=-.8;arm.shoulder.rotation.z=0;arm.elbow.rotation.x=-.6;}rig.sync?.();if(!a.helmet){a.helmet=new THREE.Mesh(new THREE.SphereGeometry(.135,16,10,0,Math.PI*2,0,Math.PI*.7),new THREE.MeshStandardMaterial({color:0x232c34,roughness:.45}));const head=rig.bones?.get('head')||rig.head;head.add(a.helmet);a.helmet.position.set(0,.13,0);}a.helmet.visible=true;}}
+      }else if(trip.phase==='dismount'){
+        a.g.visible=true;a.rig.figure.visible=true;if(a.helmet)a.helmet.visible=false;a.state='stretch';const spot=a.vehicleSpot;a.g.position.set(spot.x,0,spot.z);a.floor=1;moveTo(floors[1],a.g);a.spot=spot;a.destination=spot;
+        mobility.arrive(trip.id,'dismount');setPath(a,a.desk);
+      }else if(trip.phase==='walkToOffice'){
+        a.g.visible=true;a.rig.figure.visible=true;if(a.destination!==a.desk)setPath(a,a.desk);
+        if(a.spot===a.desk)mobility.arrive(trip.id,'walkToOffice');
+      }
+    }
+    if(!routineOn||!tasksKnown()||simTime<nextExcursion||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    nextExcursion=simTime+25;
+    const a=agents.find(a=>!a.vehicleTrip&&!a.activity&&a.spot===a.desk&&window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),true));
+    if(!a)return;const kind=travelSerial%2?'motorcycle':'car';if(!environment.audit().loaded.includes(kind))return;
+    const id=mobility.request({id:'team-trip-'+(++travelSerial),owner:a.n,kind:'team',vehicle:kind});if(!id)return;
+    const trip=mobility.snapshot().trips.find(t=>t.id===id),bay=environment.layout.parking.find(p=>p.id===trip.parking);
+    a.vehicleTrip=id;a.vehiclePhase='walkToVehicle';a.vehicleSpot={x:bay.position[0]+(kind==='car'?1.35:.85),z:bay.position[2],floor:1,f:1,state:'stretch',route:[[7,7],[7,bay.position[2]]]};setPath(a,a.vehicleSpot);
+  }
   function live(agent) {
     const activity=agent.activity;
     if(activity){if(agent.spot===activity.spot&&simTime>=activity.until)setPath(agent,agent.desk);return;}
@@ -1294,6 +1472,19 @@
     return circle.length>1&&circle[Math.floor(simTime/1.9)%circle.length]===agent;
   }
   const wrap=a=>((a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;
+  // Keyboard position relative to the seated shoulder, measured once from the real desk geometry (agent-local frame).
+  function keyboardReach(agent){
+    const kbs=[];floors[agent.floor].traverse(o=>{if(o.userData.model==='keyboard')kbs.push(o);});
+    const here=agent.g.getWorldPosition(new THREE.Vector3()),kb=kbs.sort((a,b)=>a.getWorldPosition(new THREE.Vector3()).distanceTo(here)-b.getWorldPosition(new THREE.Vector3()).distanceTo(here))[0];
+    if(!kb)return undefined;
+    agent.g.updateMatrixWorld(true);
+    const inv=new THREE.Matrix4().copy(agent.g.matrixWorld).invert(),k=kb.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
+    const rest=agent.rig.body.position.y,restZ=agent.rig.body.position.z;agent.rig.body.position.set(0,-(agent.rig.seatDrop),.2);agent.rig.figure.updateMatrixWorld(true);
+    const s=agent.rig.bones.get('upperarm01.R').getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
+    agent.rig.body.position.y=rest;agent.rig.body.position.z=restZ;agent.rig.figure.updateMatrixWorld(true);
+    // Hands rest on the keys, a little above the keyboard origin.
+    return agent.keyboardReach={dy:k.y+.04-s.y,dz:k.z-s.z};
+  }
   // One pose per state, written as joint angles: legs [thigh, knee], arms [shoulder forward, shoulder outward, elbow].
   function pose(agent,state,walking,sitting,talking,partner,dt) {
     const {body,hips,head,legs,arms,cup,phone}=agent.rig,t=simTime,i=agent.index;
@@ -1303,13 +1494,15 @@
       leg=[[Math.sin(w)*.5,Math.max(0,Math.sin(w+1.3))*.75],[-Math.sin(w)*.5,Math.max(0,-Math.sin(w+1.3))*.75]];
       arm=[[-Math.sin(w)*.4,.07,-.25],[Math.sin(w)*.4,.07,-.25]];bodyY=Math.abs(Math.sin(w))*.03;lean=.05;
     }else if(sitting){
-      leg=[[-Math.PI/2,Math.PI/2],[-Math.PI/2,Math.PI/2]];bodyY=-.29;bodyZ=state==='lounge'||state==='call'?.05:.2;
-      if(state==='work'){const typing=Math.sin(t*.65+i*2)>.1,k=typing?Math.sin(t*10+i)*.045:0;arm=[[-.9+k,.12,-.67],[typing?-.9-k:-.65,.12,typing?-.67:-.85]];lean=.08+Math.sin(t*.8+i)*.025;}
+      leg=[[-Math.PI/2,Math.PI/2],[-Math.PI/2,Math.PI/2]];bodyY=-(agent.rig.seatDrop??.29);bodyZ=state==='lounge'||state==='call'?.05:.2;
+      if(state==='work'){const typing=Math.sin(t*.65+i*2)>.1,k=typing?Math.sin(t*10+i)*.045:0;arm=[[-.9+k,.12,-.67],[typing?-.9-k:-.65,.12,typing?-.67:-.85]];lean=.08+Math.sin(t*.8+i)*.025;
+        // Textured adults reach the actual keyboard: shoulder pitch/elbow come from two-bone IK on real limb lengths.
+        if(agent.rig.reach){const r=agent.rig.reach(agent.keyboardReach||keyboardReach(agent));if(r){lean=r.lean+Math.sin(t*.8+i)*.02;arm=[[r.shoulder+k,.1,r.elbow],[typing?r.shoulder-k:r.shoulder+.25,.1,typing?r.elbow:r.elbow-.2]];}}}
       else if(state==='break'){arm=[[-.6,.1,-.9],[-.6,.1,-.9]];}
       else arm=[[-.35,.1,-.95],[-.35,.1,-.95]];
       if(state==='lounge')lean=-.15;
       // Bean bags sit lower and lean back.
-      if(agent.spot?.roofPose==='beanbag'){bodyY=-.4;lean=-.22;arm=[[-.25,.2,-.6],[-.25,.2,-.6]];}
+      if(agent.spot?.roofPose==='beanbag'){bodyY=-(agent.rig.seatDrop??.29)-.12;lean=-.22;arm=[[-.25,.2,-.6],[-.25,.2,-.6]];}
     }else if(agent.spot?.roofPose==='billiard'){
       // Bent over the table, bridge hand forward, cue arm drawing back and striking.
       const stroke=Math.max(0,Math.sin(t*1.8+i))*.35;
@@ -1340,6 +1533,7 @@
     let look=walking?Math.max(-.4,Math.min(.4,wrap(agent.heading-agent.g.rotation.y))):Math.sin(t*.45+i*2)*.08;
     if(partner&&sitting){const q=partner.g.position,p=agent.g.position;look=Math.max(-.9,Math.min(.9,wrap(Math.atan2(q.x-p.x,q.z-p.z)-agent.g.rotation.y)));}
     head.rotation.y+=(look-head.rotation.y)*(1-Math.exp(-dt*9));
+    agent.rig.sync?.();
   }
   // Local courtesy while walking: follow someone going the same way, both step right when meeting head-on,
   // the later person waits at a crossing, and people standing still are walked around. Waiting never lasts
@@ -1447,8 +1641,9 @@
     }
     // Reserve the entire group before moving anyone; a full room must not split the invitation.
     if(spots&&spots.length<members.length){status(`Hanya ${spots.length} tempat tersedia. Pilih lebih sedikit orang atau kembalikan yang sedang di sana ke meja.`);return;}
-    members.forEach(a=>clearActivity(a));
+    members.forEach(a=>{clearActivity(a);if(a.vehicleTrip)mobility.recall(a.n);});
     members.forEach((a,i)=>{
+      if(a.vehicleTrip)return;
       if(action==='meet')assign(a,spots[i],Infinity);
       else setPath(a,action==='work'?a.desk:spots[i]);
     });
@@ -1598,7 +1793,7 @@
     if(follow&&!keepCamera)stopFollow(false);
     if(transition)stepTransition(Infinity);
     const from=activeFloor;activeFloor=level;buildingMood(level===0);if(clearSelection)selectAgent(null);
-    showLevels(level?[level]:ORDER,level===0);skyline.visible=facade.visible=level===0;
+    showLevels(level?[level]:ORDER,level===0);skyline.visible=facade.visible=level===0;setShadowCaching(level===0);
     document.querySelectorAll('[data-floor]').forEach(b=>b.setAttribute('aria-pressed',Number(b.dataset.floor)===level?'true':'false'));
     if(keepCamera)return;
     status(level?'Pilih anggota tim untuk melihat perannya.':'Klik lantai untuk masuk.');
@@ -1627,7 +1822,8 @@
     const levels=a.state==='stairs'&&trip?[trip.from,trip.to]:[a.floor];
     if(a.state!=='stairs'&&activeFloor!==a.floor)setFloor(a.floor,false,true);
     showLevels(levels,a.state==='stairs');
-    a.rig.head.getWorldPosition(followEye);
+    // Skinned rigs: the eyes are the real head bone (rig.head is only a pose control there).
+    (a.rig.bones?.get('head')||a.rig.head).getWorldPosition(followEye);if(a.rig.bones)followEye.y+=.09;
     const heading=a.g.rotation.y+follow.yaw,pitch=follow.pitch,dir=new THREE.Vector3(Math.sin(heading)*Math.cos(pitch),Math.sin(pitch),Math.cos(heading)*Math.cos(pitch));
     if(follow.mode==='eyes'){
       followWanted.copy(followEye).addScaledVector(dir,.12);followLook.copy(followWanted).add(dir);
@@ -1679,19 +1875,7 @@
   }
   function rebuildNavFloor(floor){
     const rootF=floors[floor];if(!rootF)return;
-    const grid=new Uint8Array(NAV.w*NAV.h),bounds=new THREE.Box3(),y0=rootF.position.y;rootF.updateMatrixWorld(true);
-    rootF.traverse(o=>{
-      if(!o.isMesh||o.material?.isMeshBasicMaterial)return;
-      for(let a=o;a;a=a.parent)if(a.userData.walkable||a.userData.agent||a.visible===false)return;
-      bounds.setFromObject(o);
-      if(bounds.max.y-y0<.18||bounds.min.y-y0>1.75)return;
-      const sx=bounds.max.x-bounds.min.x,sz=bounds.max.z-bounds.min.z;
-      const wall=bounds.max.y-y0>1.9||Math.min(sx,sz)<.3&&Math.max(sx,sz)>1.2,value=wall?2:1,pad=wall?NAV.clear:NAV.soft;
-      const i0=Math.max(0,Math.floor((bounds.min.x-pad-NAV.x0)/NAV.cell)),i1=Math.min(NAV.w-1,Math.floor((bounds.max.x+pad-NAV.x0)/NAV.cell));
-      const j0=Math.max(0,Math.floor((bounds.min.z-pad-NAV.z0)/NAV.cell)),j1=Math.min(NAV.h-1,Math.floor((bounds.max.z+pad-NAV.z0)/NAV.cell));
-      for(let j=j0;j<=j1;j++)for(let i=i0;i<=i1;i++)if(grid[j*NAV.w+i]<value)grid[j*NAV.w+i]=value;
-    });
-    navGrids[floor]=grid;
+    navGrids[floor]=rasterize(rootF,a=>a.userData.walkable||a.userData.agent||a.visible===false);
   }
   function reseatCustom(item){
     const rad=item.rot*Math.PI/180;
@@ -2023,7 +2207,7 @@
     else cam.radius*=Math.exp(Math.sign(event.deltaY)*Math.min(Math.abs(event.deltaY),60)*.0015);
   };
   canvas.addEventListener('wheel',onWheel,{passive:false});$('labels').addEventListener('wheel',onWheel,{passive:false});
-  addEventListener('resize',()=>{if(transition)stepTransition(Infinity);if(innerWidth<=1000&&!$('log').hidden)syncLog(false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);resetCamera();});
+  addEventListener('resize',()=>{if(transition)stepTransition(Infinity);if(innerWidth<=1000&&!$('log').hidden)syncLog(false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);resizeComposer();resetCamera();});
   const TASK_LOG={active:'mulai tugas',done:'menyelesaikan tugas',blocked:'butuh keputusan sebelum lanjut',review:'mengirim draf untuk review',queued:'mengembalikan tugas ke antrean'};
   document.addEventListener('officetasks:server',()=>{
     for(const a of agents)a.label.classList.toggle('ai',!!window.officeTasks.agentFor(a.n));
@@ -2075,10 +2259,10 @@
       const caption=document.createElement('span');caption.textContent=label;item.append(number,caption);return item;
     }));
     // Needs decision: agents that asked a question instead of guessing. One click opens those tasks.
-    const waiting=list.filter(t=>t.status==='blocked'),button=$('decisions');button.hidden=!waiting.length;button.querySelector('.badge').textContent=waiting.length||'';
+    const waiting=list.filter(t=>t.status==='blocked'&&!['children','failed','interrupted','environment_unavailable'].includes(t.blockedReason)&&(!t.decisionTarget||t.decisionTarget==='owner')),button=$('decisions');button.hidden=!waiting.length;button.querySelector('.badge').textContent=waiting.length||'';
     if(waiting.length){const who=[...new Set(waiting.map(t=>agents.find(p=>p.n===t.assignee)?.initials||t.assignee))].join(', ');button.setAttribute('aria-label',`${waiting.length} tugas menunggu keputusanmu · ${who}`);}
   }
-  document.addEventListener('officetasks:change',()=>{drawBoard();drawStats();});
+  document.addEventListener('officetasks:change',()=>{for(const a of agents)if(a.vehicleTrip&&!window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),tasksKnown()))mobility.recall(a.n);drawBoard();drawStats();});
   window.officeTasks.init(TEAM,(name,state,title)=>{const a=agents.find(a=>a.n===name);if(a&&window.officeTasks.activeFor(name))setPath(a,a.desk);if(a&&SAY[state])say(a,SAY[state]);if(a&&state)log(`${name} ${TASK_LOG[state]}: ${title}`,a.group);},name=>{const a=agents.find(a=>a.n===name);if(a)selectAgent(a);});
   const projected=new THREE.Vector3(),world=new THREE.Vector3();let last=performance.now();
   function frame(now) {
@@ -2097,8 +2281,11 @@
     cam.target.x=Math.max(-25,Math.min(25,cam.target.x));cam.target.z=Math.max(-20,Math.min(20,cam.target.z));
     if(follow){if(keys.arrowleft)follow.yaw+=realDt*1.6;if(keys.arrowright)follow.yaw-=realDt*1.6;if(keys.arrowup)follow.pitch=Math.min(.9,follow.pitch+realDt);if(keys.arrowdown)follow.pitch=Math.max(-1.2,follow.pitch-realDt);}
     else{camera.position.set(cam.target.x+cam.radius*Math.sin(cam.phi)*Math.sin(cam.theta),cam.target.y+cam.radius*Math.cos(cam.phi),cam.target.z+cam.radius*Math.sin(cam.phi)*Math.cos(cam.theta));camera.lookAt(cam.target);camera.updateMatrixWorld();}
-    for(const a of agents){updateAgent(a,dt);if(dt>0)live(a);syncTaskDisplay(a);}
+    for(const a of agents){if(!a.vehicleTrip||!['outbound','away','inbound','park','mount','dismount'].includes(a.vehiclePhase))updateAgent(a,dt);if(dt>0&&!a.vehicleTrip)live(a);syncTaskDisplay(a);}
+    updateTeamTravel(dt);
+    if(dt>0&&routineOn&&!matchMedia('(prefers-reduced-motion: reduce)').matches&&skyline.visible&&simTime>=nextAmbient&&mobility.snapshot().vehicles.filter(v=>v.id.startsWith('ambient-')).length<({low:2,medium:4,high:6,ultra:8}[window.officeGraphics.level()]||2)){nextAmbient=simTime+9;const kind=ambientSerial%3===0?'motorcycle':'car';if(environment.audit().loaded.includes(kind))mobility.requestTraffic({id:'ambient-'+(++ambientSerial),vehicle:kind,lane:ambientSerial%2?'street-east':'street-west'});}
     if(skyline.visible)animateSky(dt);
+    mobility.tick(dt);environment.setLevel(window.officeGraphics.level());environment.setCityVisible(skyline.visible);environment.update(mobility.snapshot(),dt);
     stepShop(dt);
     for(const d of doors){const near=agents.some(a=>a.floor===d.floor&&a.state!=='stairs'&&a.g.position.distanceTo(d.center)<1.6);d.open+=((near?1:0)-d.open)*Math.min(1,dt*6);d.pivot.rotation.y=d.base+d.open*1.45;}
     if(follow){scene.updateMatrixWorld(true);followCamera(realDt);}
@@ -2127,8 +2314,10 @@
       const badge=document.querySelector(`[data-floor="${level}"] .floor-count`);
       if(badge&&badge.textContent!==String(count)){badge.textContent=String(count);badge.setAttribute('aria-label',`${count} team members on this floor`);}
     }
-    renderer.render(scene,camera);
+    renderFrame(realDt);
+    if(showFps){fpsFrames++;const t=performance.now();if(t-fpsSince>=1000){fpsLabel.textContent=`${fpsFrames} FPS`;fpsFrames=0;fpsSince=t;}}
   }
+  let fpsFrames=0,fpsSince=performance.now();
   // Capture the actual floor models once for the navigation previews.
   renderer.setSize(200,140,false);camera.aspect=200/140;camera.updateProjectionMatrix();
   const thumbs={};
@@ -2153,26 +2342,33 @@
   for(const level of ORDER)captureThumb(level);
   renderFloorButtons();
   renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  applyGraphics(GFX.level());GFX.onChange(level=>applyGraphics(level));
+  const modelStatus=window.officeModels3d?.status()||{loaded:0,failed:[]};
+  showFps=window.officeSettings?.preferences.read().showFps===true;fpsLabel.hidden=!showFps;
   setFloor(3);viewReady=true;requestAnimationFrame(frame);
+  if(modelStatus.failed.length)status('Sebagian aset 3D gagal dimuat; memakai bentuk sederhana.');
   // The server organization replaces the built-in team as soon as tasks.js has loaded it.
   window.officeTasks.ready?.then(state=>{if(state?.members?.length||state?.divisions)applyOrg(state);});
   // The office follows the organization: desk areas from the seating plan, one work floor per four areas,
   // the rooftop always on top. Floors that disappear send their people to their new desks.
   function setFloorCount(count){
     const want=[3,...Array.from({length:count-1},(_,i)=>ROOF+1+i)];
+    const previousY=new Map(Object.keys(facadeLevels).map(level=>[Number(level),floorY(Number(level))]));
+    // floorY depends on ORDER: update it before building extra storeys or their glazing lands at the old rooftop height.
+    ORDER.splice(0,ORDER.length,1,2,...want,ROOF);
+    for(const [level,oldY] of previousY){const delta=floorY(level)-oldY;if(delta){facadeLevels[level].children.forEach(o=>o.position.y+=delta);levelLights[level]?.children.forEach(o=>o.position.y+=delta);}}
     for(const level of Object.keys(floors).map(Number).filter(l=>l>ROOF&&!want.includes(l))){
       scene.remove(floors[level]);delete floors[level];delete navGrids[level];
-      facadeLevels[level]?.parent?.remove(facadeLevels[level]);delete facadeLevels[level];
+      disposeFade(facadeLevels[level]);facadeLevels[level]?.parent?.remove(facadeLevels[level]);delete facadeLevels[level];
       levelLights[level]?.parent?.remove(levelLights[level]);delete levelLights[level];
       for(let i=customItems.length-1;i>=0;i--)if(customItems[i].floor===level){customById.delete(customItems[i].id);customItems.splice(i,1);}
       delete thumbs[level];
     }
     for(const level of want)if(!floors[level]){
-      const atRoot=root;shell(level);for(const [x,z] of [[-14.6,-10.6],[14.6,-10.6],[14.6,10.6],[-12.5,10.6]])plant(x,z,.85);root=atRoot;
-      buildFacadeLevel(level).traverse(o=>{o.castShadow=false;});prepareFade(facadeLevels[level]);buildLights(level);
+      const atRoot=root;shell(level);for(const [x,z] of [[-14.6,-10.6],[14.6,-10.6],[14.6,10.6],[-12.5,10.6]])plant(x,z,.85);dress(level);root=atRoot;
+      mergeGroup(buildFacadeLevel(level)).traverse(o=>{o.castShadow=false;});prepareFade(facadeLevels[level]);buildLights(level);
     }
-    ORDER.splice(0,ORDER.length,1,2,...want,ROOF);
-    for(const bridge of Object.values(stairways))scene.remove(bridge);for(const key of Object.keys(stairways))delete stairways[key];
+    for(const bridge of Object.values(stairways)){disposeFade(bridge);scene.remove(bridge);}for(const key of Object.keys(stairways))delete stairways[key];
     for(const lower of ORDER.slice(0,-1))prepareFade(buildStair(lower));
     buildStairCore();stairCore.traverse(o=>{o.castShadow=false;});prepareFade(stairCore);
     for(const level of ORDER){floors[level].position.y=floorY(level);for(const pad of doorPads)if(pad.parent===floors[level])pad.position.y=-.06;}
@@ -2191,6 +2387,7 @@
     return hidden;
   }
   function applyOrg(state){
+    const followLevels=follow?Object.keys(floors).filter(k=>floors[k].visible).map(Number):null;
     const active=(state?.members||[]).filter(m=>m.active!==false);
     const plan=window.OrgModel.planSeating({divisions:state?.divisions||[],members:active});
     for(const d of state?.divisions||[])divisionMeta[d.id]={name:d.areaName||d.name,color:colorOf(d.color)};
@@ -2201,14 +2398,14 @@
     const wanted=new Map(active.map(m=>[m.name,m]));
     // People who left the organization leave the office.
     for(let i=agents.length-1;i>=0;i--){const a=agents[i];if(wanted.has(a.n)&&desks[a.n])continue;
-      clearActivity(a);if(selected===a)selectAgent(null);if(follow?.agent===a)stopFollow(false);a.g.parent?.remove(a.g);a.label.remove();agents.splice(i,1);}
+      clearActivity(a);if(selected===a)selectAgent(null);if(follow?.agent===a)stopFollow(false);mobility.removeOwner(a.n);if(a.helmet){a.helmet.geometry.dispose();a.helmet.material.dispose();}a.g.parent?.remove(a.g);a.rig.cue.geometry.dispose();a.rig.dispose?.();a.label.remove();agents.splice(i,1);}
     for(const [name,m] of wanted){
       if(!desks[name])continue;
       let a=agents.find(x=>x.n===name);
       const person={n:name,initials:m.initials||name.split(/\s+/).map(p=>p[0]).join('').slice(0,4).toUpperCase(),role:m.role,group:m.division,gender:a?.gender||TEAM.find(p=>p.n===name)?.gender||'nonbinary'};
       if(!a){a=character(person,agents.length);agents.push(a);continue;}
       Object.assign(a,{group:person.group,role:person.role,initials:person.initials});a.label.textContent=person.initials;
-      clearActivity(a);const desk=desks[name],wasAtDesk=a.spot===a.desk;a.desk=desk;
+      clearActivity(a);const desk=desks[name],wasAtDesk=a.spot===a.desk;a.desk=desk;a.keyboardReach=null;
       a.stretchSpot=linkSpot(desk._item,{x:desk.x,z:desk.z-desk.f*.95,f:desk.f,floor:desk.floor,route:[[desk.route[0][0],passage(desk.floor)],[desk.route[0][0],desk.z-desk.f*.95]],state:'stretch',local:true,label:'Berdiri sejenak'},false);a.stretchSpot._dynamic=true;
       // Anyone on a floor that is gone, or mid-stairs, is placed straight at the new desk.
       // Seated people move straight to their new desk; walkers and people on removed floors too.
@@ -2216,13 +2413,24 @@
         a.stairTrip=null;a.floor=desk.floor;moveTo(floors[desk.floor],a.g);a.g.position.set(desk.x,0,desk.z);a.heading=facing(desk);a.g.rotation.y=a.heading;
         a.spot=desk;a.destination=desk;a.path=[];a.state='work';
       }else if(!a.destination||!floors[a.destination.floor]||!a.activity)setPath(a,desk);
-      a.rig.figure.traverse(o=>{if(o.material&&o.userData.shirt)o.material=material(metaOf(a.group).color);});
+      // Division colour: textured humans retint only the shirt; the legacy figure swaps its flat shirt material.
+      if(a.rig.shirtMaterials){for(const m of a.rig.shirtMaterials)m.userData.shirt.value.set(metaOf(a.group).color);a.rig.look.shirt=metaOf(a.group).color;}
+      else{const shirtColor=material(metaOf(a.group).color);a.rig.figure.traverse(o=>{if(o.material&&o.userData.shirt)o.material=shirtColor;});}
     }
     if(activeFloor&&!floors[activeFloor])setFloor(3,false);
+    // New work floors start visible by default; reapply the selected view after rebuilding the organization.
+    // Preserve a character camera's two-floor stair view when it is following someone between floors.
+    if(follow)showLevels(followLevels.filter(l=>floors[l]),stairsShown);else showLevels(activeFloor?[activeFloor]:ORDER,activeFloor===0);
     renderFloorButtons();renderTeamList();window.officeTasks.setTeam?.(agents);drawStats();
     return {floors:plan.floors.length,seated:Object.keys(desks).length};
   }
+  // Skinned rigs keep rig.head as a detached pose control, so measure from the head bone instead.
+  // ponytail: fixed 0.24m head box above the head joint; use skinned vertex bounds if audits need more precision.
+  const headBounds=a=>{const b=a.rig.bones?.get('head');if(!b)return new THREE.Box3().setFromObject(a.rig.head);const p=b.getWorldPosition(new THREE.Vector3());return new THREE.Box3(new THREE.Vector3(p.x-.1,p.y-.02,p.z-.1),new THREE.Vector3(p.x+.1,p.y+.22,p.z+.1));};
   window.officeScene={
+    visitorTravelAudit:()=>shop.people.map(c=>({state:c.state,mode:c.arrivalMode||'walking-existing',trip:c.vehicleTrip||null})),
+    environmentAudit:()=>environment.audit(),
+    mobilitySnapshot:()=>mobility.snapshot(),
     customize:customAPI,
     applyOrg,
     floorRoles:()=>ORDER.map(level=>({level,number:orderOf(level)+1,role:level===1?'lobby':level===2?'dining':level===ROOF?'roof':`work-${level===3?1:level-ROOF+1}`,name:floorName(level)})),
@@ -2235,7 +2443,51 @@
     removeRosterMember:name=>{if(window.officeTasks?.state){const s=window.officeTasks.state();return applyOrg({...s,members:s.members.map(m=>m.name===name?{...m,active:false}:m)}).seated>=0;}const agent=agents.find(a=>a.n===name);if(!agent)return false;agent.active=false;agent.label.hidden=true;agent.g.visible=false;return true;},
     snapshot:()=>({shop:{states:shop.people.map(p=>p.state),barbers:barbers.map(b=>b.pose),cashier:cashier.pose},transitioning:!!transition,sky:skyline.visible,floor:activeFloor,paused,routine:routineOn,follow:follow&&{name:follow.agent.n,mode:follow.mode},cameraPosition:camera.position.toArray(),doors:doors.map(d=>Math.round(d.open*100)/100),camera:{theta:cam.theta,phi:cam.phi,radius:cam.radius,target:cam.target.toArray()},
       team:agents.map(a=>({name:a.n,initials:a.initials,gender:a.gender,role:a.role,group:a.group,floor:a.floor,state:a.state,visible:a.g.visible,position:a.g.getWorldPosition(new THREE.Vector3()).toArray(),heading:new THREE.Euler().setFromQuaternion(a.g.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y,spotFacing:a.spot?facing(a.spot):null,path:a.path.slice(0,4).map(q=>q.map(v=>+v.toFixed(2))),pathLeft:a.path.length,blocked:+(a.blocked||0).toFixed(2),pass:a.passUntil>simTime,dest:a.destination&&[a.destination.x,a.destination.z],sitting:SIT.has(a.state)&&!a.spot?.standing,destination:a.destination.floor,activity:a.activity?.spot.state||null,atDesk:a.spot===a.desk,talkingWith:companions(a)[0]?.n||null})),
-      visibleFloors:Object.keys(floors).filter(k=>floors[k].visible).map(Number)}),
+      visibleFloors:Object.keys(floors).filter(k=>floors[k].visible).map(Number),
+      models:window.officeModels3d?.status()||{loaded:0,failed:[]},
+      graphics:(()=>{const L=GFX.LEVELS[gfxLevel]||{};return {environmentSource:scene.environment?envSource:null,level:gfxLevel,pending:gfxPending,shadows:renderer.shadowMap.enabled,environment:!!scene.environment,post:[...(L.ao&&composer?['sao']:[]),...(L.bloom&&composer?['bloom']:[])],aoSize:(()=>{const a=composer?.passes.find(p=>p instanceof ADD.SAOPass);return a?[a.saoRenderTarget.width,a.saoRenderTarget.height]:null;})(),textures:window.officeSurfaces?.tier?.()??L.textures??null,drawCalls:renderer.info.render.calls,textureCount:renderer.info.memory.textures};})()}),
+    showFps:on=>{showFps=!!on;fpsLabel.hidden=!showFps;},
+    decor:level=>{const kinds=new Set();let total=0;floors[level]?.traverse(o=>{if(o.userData.decor){total++;kinds.add(o.userData.decor==='rug'||o.userData.decor==='wood_panel'||o.userData.decor==='window_frame'?o.userData.decor:o.userData.decor);}if(o.userData.model&&!o.userData.decor){total++;kinds.add(o.userData.model);}});return {total,kinds:[...kinds]};},
+    // Mean relative luminance (0–1) of the current frame, rendered with the active graphics pipeline.
+    luminance:()=>{renderFrame();const gl=renderer.getContext(),w=gl.drawingBufferWidth,h=gl.drawingBufferHeight,px=new Uint8Array(w*h*4);gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,px);
+      let sum=0,n=0;for(let i=0;i<px.length;i+=4*37){sum+=(.2126*px[i]+.7152*px[i+1]+.0722*px[i+2])/255;n++;}return sum/n;},
+    setRoutine:on=>{routineOn=!!on;syncRoutine();},
+    everyoneToDesk:()=>commandMembers(agents,'work'),
+    modelCount:level=>{let n=0;floors[level]?.traverse(o=>{if(o.userData.model)n++;});return n;},
+    // Human measurements and looks, for tests and the character panel.
+    people:()=>agents.map(a=>{const L=a.rig.look||{};const box=new THREE.Box3().setFromObject(a.rig.figure);const height=box.max.y-box.min.y;const floorY=a.g.parent?.position.y??0;const standing=(box.max.y-floorY);const rest=a.rig.body.position.y; a.rig.body.position.y=0; a.rig.figure.updateMatrixWorld(true); const upright=new THREE.Box3().setFromObject(a.rig.figure); const uprightHeight=upright.max.y-floorY; a.rig.body.position.y=rest; a.rig.figure.updateMatrixWorld(true);
+      const headBox=headBounds(a);return {name:a.n,height:+uprightHeight.toFixed(3),seatedHeight:+standing.toFixed(3),headHeight:+(headBox.max.y-headBox.min.y).toFixed(3),
+        shoulderWidth:+(L.shoulder??0).toFixed(3),skin:L.skin===undefined?null:'#'+L.skin.toString(16).padStart(6,'0'),hair:L.hair===undefined?null:'#'+L.hair.toString(16).padStart(6,'0'),
+        build:L.build||null,scale:a.rig.model?a.rig.model.scale.toArray():null,shirt:L.shirt===undefined?null:'#'+L.shirt.toString(16).padStart(6,'0')};}),
+    // Real bone positions vs the office geometry, for the stage-2 pose tests (skinned rigs only).
+    poseAudit:()=>{scene.updateMatrixWorld(true);const v=o=>o.getWorldPosition(new THREE.Vector3());
+      return agents.filter(a=>a.rig.bones).map(a=>{const B=n=>a.rig.bones.get(n),floorY=floors[a.floor]?.position.y??0;
+        const soles=['foot.L','foot.R'].map(n=>v(B(n)).y),hip=v(B('root')),hands=['wrist.L','wrist.R'].map(n=>v(B(n)));
+        let keyboard=null,monitor=null;floors[a.floor].traverse(o=>{if(o.userData.model==='keyboard'&&Math.abs(v(o).x-a.desk.x)<.6&&(!keyboard||v(o).distanceTo(hip)<v(keyboard).distanceTo(hip)))keyboard=o;if(o.userData.model==='monitor'&&Math.abs(v(o).x-a.desk.x)<.6&&(!monitor||v(o).distanceTo(hip)<v(monitor).distanceTo(hip)))monitor=o;});
+        const headPos=v(B('head')),mb=monitor&&new THREE.Box3().setFromObject(monitor),gap=mb?Math.hypot(...['x','y','z'].map(k=>Math.max(0,mb.min[k]-headPos[k]-.1,headPos[k]-.1-mb.max[k]))):null;
+        const k=B('lowerleg01.L').quaternion,e=B('lowerarm01.L').quaternion;
+        return {name:a.n,state:a.state,atDesk:a.spot===a.desk,soleAboveFloor:+(Math.min(...soles)-floorY-.05).toFixed(3),
+          hipAboveSeat:+(hip.y-floorY-(.46+.04)).toFixed(3),handToKeyboard:keyboard?+Math.min(...hands.map(h=>h.distanceTo(v(keyboard)))).toFixed(3):null,
+          headToMonitor:gap===null?null:+gap.toFixed(3),kneeBend:+(2*Math.acos(Math.min(1,Math.abs(k.w)))).toFixed(3),armSwing:+a.rig.arms[0].shoulder.rotation.x.toFixed(3)};});},
+    // Cached keyboard reach vs a fresh measurement at the current desk (stage-2 tests).
+    reachAudit:()=>agents.filter(a=>a.rig.reach&&a.keyboardReach).map(a=>{const cached=a.keyboardReach,fresh=keyboardReach(a);return {name:a.n,drift:Math.hypot(fresh.dy-cached.dy,fresh.dz-cached.dz)};}),
+    // Desk layout geometry (stage-2 tests): desk-top items must not overlap, each seated worker's chair back is
+    // behind them, and a horizontal ray from the hips at knee height finds no desk part before the knee.
+    deskLayoutAudit:()=>{scene.updateMatrixWorld(true);const overlaps=[];
+      for(const area of deskAreas){const tops=[];area.group.traverse(o=>{const m=o.userData.model||o.userData.decor;if(['monitor','keyboard','books','mug'].includes(m))tops.push({m,box:new THREE.Box3().setFromObject(o).expandByScalar(-.005)});});
+        for(let i=0;i<tops.length;i++)for(let j=i+1;j<tops.length;j++)if(tops[i].m!==tops[j].m&&tops[i].box.intersectsBox(tops[j].box)&&!(tops[i].m==='monitor'&&tops[j].m==='keyboard'))overlaps.push(tops[i].m+'/'+tops[j].m);}
+      const seats=agents.filter(a=>a.spot===a.desk&&a.desk?._item).map(a=>{const inv=new THREE.Matrix4().copy(a.g.matrixWorld).invert(),v=new THREE.Vector3();let n=0,zs=0;
+        a.desk._item.group.traverse(o=>{if(!o.isMesh)return;const pos=o.geometry.attributes.position;for(let i=0;i<pos.count;i+=3){v.fromBufferAttribute(pos,i).applyMatrix4(o.matrixWorld);if(v.y-(floors[a.floor]?.position.y??0)<.75)continue;v.applyMatrix4(inv);zs+=v.z;n++;}});
+        const table=deskAreas.find(d=>Object.values(d.seats).includes(a.desk))?.items[0].group,forward=new THREE.Vector3(0,0,1).applyQuaternion(a.g.getWorldQuaternion(new THREE.Quaternion())).setY(0).normalize();
+        const origin=a.g.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0,.5,0)),hit=table&&new THREE.Raycaster(origin,forward,0,1.2).intersectObject(table,true)[0];
+        const knee=a.rig.bones?a.rig.bones.get('lowerleg01.L').getWorldPosition(new THREE.Vector3()).sub(a.g.getWorldPosition(new THREE.Vector3())).dot(forward)+.06:.5;
+        return {name:a.n,backForward:n?+(zs/n).toFixed(3):null,legroom:hit?+(hit.distance-knee).toFixed(3):1};});
+      return {overlaps,seats};},
+    sendToStretch:name=>{const a=agents.find(x=>x.n===name);if(a){clearActivity(a);assign(a,a.stretchSpot,30);}},
+    workstationAudit:()=>{scene.updateMatrixWorld(true);return agents.filter(a=>a.spot===a.desk).map(a=>{const head=headBounds(a),monitors=[];floors[a.floor].traverse(o=>{if(o.userData.model!=='monitor')return;const b=new THREE.Box3().setFromObject(o);if(Math.abs(b.getCenter(new THREE.Vector3()).x-a.desk.x)<1)monitors.push(b);});const gap=b=>Math.hypot(...['x','y','z'].map(k=>Math.max(0,head.min[k]-b.max[k],b.min[k]-head.max[k])));return {name:a.n,side:a.desk.f,monitors:monitors.length,minGap:monitors.length?Math.min(...monitors.map(gap)):null};});},
+    screenAudit:()=>{scene.updateMatrixWorld(true);const out=[];scene.traverse(o=>{if(o.userData.decor!=='screen')return;const p=o.getWorldPosition(new THREE.Vector3()),normal=new THREE.Vector3(0,0,1).applyQuaternion(o.getWorldQuaternion(new THREE.Quaternion())),ray=new THREE.Raycaster(p.clone().addScaledVector(normal,.01),normal.clone().negate()),attached=o.parent.userData.model==='monitor',hit=attached?ray.intersectObjects(o.parent.children.filter(c=>c!==o),true)[0]:null;out.push({attached,gap:hit?hit.distance-.01:null});});return out;},
+    geometryAudit:()=>{scene.updateMatrixWorld(true);const decor=[];for(const [level,f] of Object.entries(floors))f.traverse(o=>{if(!o.userData.decor)return;const b=new THREE.Box3().setFromObject(o);decor.push({level:Number(level),kind:o.userData.decor,size:b.getSize(new THREE.Vector3()).toArray(),min:b.min.toArray(),max:b.max.toArray()});});return {decor,facades:Object.entries(facadeLevels).map(([level,f])=>{const b=new THREE.Box3().setFromObject(f);return {level:Number(level),minY:b.min.y,maxY:b.max.y};})};},
+    surfaceAudit:level=>{let textured=0,flat=0;floors[level]?.traverse(o=>{if(!o.isMesh||o.material?.isMeshBasicMaterial||o.material?.transparent||!o.geometry.parameters?.width)return;const {width:w,height:h,depth:d}=o.geometry.parameters;if(Math.max(w*d,w*h,d*h)<.2)return;if(o.material.map)textured++;else flat++;});return {textured,flat};},
     // The walking grid of a floor (1 = blocked), for tests and debugging.
     navGrid:level=>({cell:NAV.cell,x0:NAV.x0,z0:NAV.z0,w:NAV.w,h:NAV.h,cells:Array.from(navGrids[level]||[])}),
     // Scripted camera moves for tests and recordings: any of target [x,y,z], theta, phi, radius.

@@ -1,0 +1,32 @@
+// Rebuilding the org must not retain old fade materials; Ultra AO stays half-resolution after resize;
+// failed photo textures are visible warnings instead of silent flat fallback.
+const assert=require('node:assert/strict'),{launch}=require('./browser.cjs');
+const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
+(async()=>{const b=await launch({headless:true});try{
+ const p=await b.newPage({viewport:{width:1200,height:800}}),errors=[];p.on('pageerror',e=>errors.push(e.message));
+ await p.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1')}catch{}});
+ await p.goto(URL);await p.waitForFunction(()=>window.officeScene?.snapshot().graphics&&!officeScene.snapshot().graphics.pending,null,{timeout:90000});
+ const org=await p.evaluate(()=>officeTasks.state());
+ await p.evaluate(o=>officeScene.applyOrg(o),org);
+ const before=await p.evaluate(()=>officeSurfaces.stats());
+ for(let i=0;i<5;i++)await p.evaluate(o=>officeScene.applyOrg(o),org);
+ const after=await p.evaluate(()=>officeSurfaces.stats());
+ assert.ok(after.materials<=before.materials+5,`old fade clones retained: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+ await p.evaluate(()=>officeGraphics.set('ultra'));await p.waitForFunction(()=>!officeScene.snapshot().graphics.pending);
+ let g=await p.evaluate(()=>officeScene.snapshot().graphics);assert.deepEqual(g.aoSize,[600,400],'AO render targets at half resolution');
+ await p.setViewportSize({width:1000,height:700});
+ await p.waitForFunction(()=>officeScene.snapshot().graphics.aoSize?.[0]===500);
+ g=await p.evaluate(()=>officeScene.snapshot().graphics);assert.deepEqual(g.aoSize,[500,350],'AO stays half resolution after resize');
+ await p.close();
+ const q=await b.newPage();q.on('pageerror',e=>errors.push(e.message));await q.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1')}catch{}});
+ await q.route('**/textures/parquet_herringbone/**/diff.jpg',r=>r.abort());
+ await q.goto(URL.replace(/\/$/,'')+'?graphics=medium');await q.waitForFunction(()=>window.officeScene?.snapshot().graphics&&!officeScene.snapshot().graphics.pending,null,{timeout:90000});
+ assert.match(await q.locator('#sceneStatus').innerText(),/aset.*gagal/i,'failed texture warning');
+ await q.close();
+ const h=await b.newPage();await h.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1')}catch{}});
+ await h.route('**/assets/hdri/*.hdr',r=>r.abort());
+ await h.goto(URL.replace(/\/$/,'')+'?graphics=high');await h.waitForFunction(()=>window.officeScene?.snapshot().graphics&&!officeScene.snapshot().graphics.pending,null,{timeout:90000});
+ assert.equal(await h.evaluate(()=>officeScene.snapshot().graphics.environmentSource),'room');
+ assert.match(await h.locator('#sceneStatus').innerText(),/aset.*gagal/i,'failed HDRI warning');
+ assert.deepEqual(errors,[]);console.log('PASS: fade materials reclaimed, half-resolution AO after resize, visible texture/HDRI fallback warning');
+ }finally{await b.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

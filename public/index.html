@@ -24,7 +24,7 @@
     <button id="bOrg" class="btn" type="button" data-drawer="orgDialog">Organisasi</button>
     <button id="bTeam" class="btn" type="button">Tim</button>
     <button id="bCustom" class="btn" type="button" aria-pressed="false">Tata ruang</button>
-    <details id="railMore"><summary class="btn">Lainnya</summary><div><button id="bSettings" class="btn" type="button" data-drawer="settingsDialog">Pengaturan</button><button id="bLock" class="btn" type="button">Kunci</button></div></details>
+    <details id="railMore"><summary class="btn">Lainnya</summary><div><button id="bSettings" class="btn" type="button" data-drawer="settingsDialog">Pengaturan</button><button id="bLock" class="btn" type="button" disabled title="Menghubungkan ke server lokal…">Kunci</button></div></details>
     <button id="decisions" class="btn" type="button" data-drawer="taskDialog" hidden>Keputusan <span class="badge"></span></button>
     <div id="teamPopover" hidden><input id="teamSearch" type="search" placeholder="Cari nama atau peran"><ul id="teamList"></ul></div>
   </nav>
@@ -89,7 +89,7 @@
     <p id="settingsVersion" class="settings-meta"></p>
     <section class="settings-section" aria-labelledby="providerSettingsHeading"><h2 id="providerSettingsHeading">Provider dan kredensial</h2><p class="settings-note">Kredensial provider tersimpan di server lokal dan tidak dikirim kembali ke browser.</p><form id="providerForm" class="settings-form"><label for="providerName">Nama provider</label><input id="providerName" maxlength="80" placeholder="Anthropic Cloud"><label for="providerProtocol">Protokol</label><select id="providerProtocol"><option value="anthropic">Anthropic-compatible</option><option value="openai">OpenAI-compatible</option></select><label for="providerBaseUrl">URL dasar</label><input id="providerBaseUrl" maxlength="2048" type="url" placeholder="https://api.anthropic.com"><label for="providerCredential">API key <span>(tidak disimpan di browser)</span></label><input id="providerCredential" maxlength="512" type="password" autocomplete="new-password"><div class="settings-actions"><button type="submit" class="primary">Simpan provider</button><button type="button" id="providerCancel">Kosongkan formulir</button></div></form><div id="settingsProviders"><p>Memuat pengaturan provider…</p></div></section>
     <section class="settings-section" aria-labelledby="routingSettingsHeading"><h2 id="routingSettingsHeading">Model dan routing</h2><p class="settings-note">Pilih model dari provider yang sudah diambil. Model per orang diatur di tab AI pada Organisasi atau di wizard.</p><div id="settingsRouting"><p>Pilih provider dan model aktif di server lokal.</p></div></section>
-    <section class="settings-section" aria-labelledby="generalSettingsHeading"><h2 id="generalSettingsHeading">Pengaturan umum</h2><label><input type="checkbox" id="settingsRoutine"> Mulai rutinitas otomatis</label><label><input type="checkbox" id="settingsLog"> Buka log saat mulai</label><button type="button" id="settingsGeneralSave" class="btn primary">Simpan preferensi browser</button></section>
+    <section class="settings-section" aria-labelledby="generalSettingsHeading"><h2 id="generalSettingsHeading">Pengaturan umum</h2><label for="settingsGraphics">Level grafis</label><select id="settingsGraphics"><option value="low">Low — ringan, tanpa bayangan</option><option value="medium">Medium — tekstur dan bayangan</option><option value="high">High — pantulan dan bayangan halus</option><option value="ultra">Ultra — paling realistis, butuh GPU</option></select><label><input type="checkbox" id="settingsFps"> Tampilkan FPS</label><label><input type="checkbox" id="settingsRoutine"> Mulai rutinitas otomatis</label><label><input type="checkbox" id="settingsLog"> Buka log saat mulai</label><button type="button" id="settingsGeneralSave" class="btn primary">Simpan preferensi browser</button></section>
     <section class="settings-section" aria-labelledby="transferSettingsHeading"><h2 id="transferSettingsHeading">Impor, ekspor, dan reset</h2><p class="settings-note">Ekspor tidak pernah menyertakan API key, kredensial, tugas, atau draf.</p><button type="button" class="btn" id="settingsExport">Ekspor pengaturan aman</button><button type="button" class="btn" id="settingsReset">Reset provider dan routing</button></section>
   </dialog>
   <dialog id="taskDialog" class="drawer drawer-wide" aria-labelledby="taskHeading">
@@ -126,6 +126,7 @@
     </div><aside id="taskDetail" aria-label="Detail tugas"><div id="taskList"></div></aside></div>
   </dialog>
   <script src="nav.js"></script>
+  <script src="graphics.js"></script>
   <script src="settings.js"></script>
   <script src="org-model.js"></script>
   <script src="org-chart.js"></script>
@@ -136,7 +137,7 @@
   <script src="messenger.js"></script>
   <script src="tasks.js"></script>
   <script src="music.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="office.js"></script>
+  <script type="importmap">{"imports":{"three":"./vendor/three/three.module.min.js","three/addons/":"./vendor/three/"}}</script>
+  <script type="module" src="three-global.js"></script>
 </body>
 </html>

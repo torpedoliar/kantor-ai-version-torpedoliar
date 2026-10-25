@@ -32,6 +32,7 @@ const wait=async(fn,label,ms=20000)=>{const t=Date.now();for(;;){const v=await f
   assert.equal(await page.locator('#taskFlow .flow-node-owner').count(),1);
   const flowText=(await page.locator('#taskFlow .flow-node').allInnerTexts()).join(' | ');assert.doesNotMatch(flowText,/Kak Sinta|Yoga|Koh Arman/,'allowed-but-unused routes and rejected people are not drawn as nodes');
   assert.doesNotMatch(flowText,/\d+\s*%/,'no invented percentages');assert.match(flowText,/2\/2 subtugas selesai/);
+  await page.waitForFunction(()=>/Kak Sinta/.test(document.querySelector('#taskFlow .flow-rejected')?.innerText||''),null,{timeout:10000}).catch(()=>{});
   assert.match(await page.locator('#taskFlow .flow-rejected').innerText(),/Kak Sinta/,'route-denied delegation is listed as rejected, not as an edge');
   const events=(await call('GET','/api/task-events?after=0')).body.events.filter(e=>e.rootId===root.id);
   assert.equal(await page.locator('#taskFlow .flow-edge[data-kind="delegation"]').count(),events.filter(e=>e.type==='delegation.created').length);

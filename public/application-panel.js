@@ -19,6 +19,16 @@
         const download=button('Unduh',async()=>{try{const text=await api.source(task,file.path);const url=URL.createObjectURL(new Blob([text],{type:'text/plain'})),link=node('a');link.href=url;link.download=file.path.split('/').pop();link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(e){api.feedback(e.message);}});
         row.append(get,download);source.append(row);
       });
+      // Copy this revision to a folder the owner picks. Existing files are only replaced after an explicit confirm.
+      const exportBox=node('div',undefined,'application-export'),label=node('label','Salin ke folder'),folder=node('input');
+      folder.id=`exportTarget-${panel.id}`;folder.placeholder='Contoh: E:\\Vibe\\Calculator';label.htmlFor=folder.id;
+      const exportButton=button('Salin sumber ke folder',async()=>{const target=folder.value.trim();if(!target){api.feedback('Isi folder tujuan dulu.');return;}
+        const run=overwrite=>api.call('POST',`/api/projects/${task.projectId}/revisions/${task.revisionId}/export`,{target,overwrite});
+        exportButton.disabled=true;
+        try{let result;try{result=await run(false);}catch(e){if(e.code!=='EXPORT_NOT_EMPTY'&&!/sudah berisi/.test(e.message))throw e;if(!confirm(`${target} sudah berisi file. Timpa file dengan nama yang sama?`))return;result=await run(true);}
+          api.feedback(`${result.files.length} file disalin ke ${result.target}.`);}
+        catch(e){api.feedback(e.message);}finally{exportButton.disabled=false;}});
+      exportBox.append(label,folder,exportButton);panel.append(exportBox);
       if(task.error)panel.append(node('p',task.error,'task-error'));
       if(task.phase==='awaiting_approval'){
         const warning=node('p',task.environment==='windows'?'Windows lokal bukan sandbox. Kode memiliki akses akun Windows kamu; akses jaringan mengikuti OS. Periksa semua sumber dan perintah sebelum menyetujui.':'Docker memakai sumber read-only dan jaringan mati. Tidak beralih ke Windows jika Docker tidak tersedia.','application-warning');panel.append(warning);

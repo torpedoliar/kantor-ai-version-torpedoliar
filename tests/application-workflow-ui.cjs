@@ -37,8 +37,20 @@ try{
  const cross=await fetch(origin+'/api/tasks',{headers:{origin:new URL(src).origin}});assert.equal(cross.status,403);
  if(process.env.SHOT)await page.screenshot({path:path.join(process.env.SHOT,'t11-review-1440.png')});
  for(const [width,height] of [[390,844],[768,900]]){await page.setViewportSize({width,height});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);if(process.env.SHOT)await page.screenshot({path:path.join(process.env.SHOT,`t11-review-${width}.png`)});}
+ // Copy to an owner-chosen folder; a second copy asks before replacing files.
+ await page.setViewportSize({width:1440,height:900});
+ const outside=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-app-export-')),exportTo=path.join(outside,'Calculator');
+ await page.locator('#applicationPanel').getByLabel('Salin ke folder').fill(exportTo);
+ await page.locator('#applicationPanel').getByRole('button',{name:'Salin sumber ke folder'}).click();
+ await page.waitForFunction(()=>/file disalin ke/.test(document.querySelector('#taskFeedback')?.textContent||''),null,{timeout:15000}).catch(async e=>{throw Error(e.message+' feedback='+await page.locator('#taskFeedback').innerText());});
+ assert.match(fs.readFileSync(path.join(exportTo,'index.html'),'utf8'),/Kalkulator/);
+ let asked=null;page.once('dialog',d=>{asked=d.message();d.dismiss();});
+ fs.writeFileSync(path.join(exportTo,'index.html'),'mine');
+ await page.locator('#applicationPanel').getByRole('button',{name:'Salin sumber ke folder'}).click();
+ await page.waitForFunction(()=>true);await page.waitForTimeout(800);
+ assert.match(asked||'',/sudah berisi file/);assert.equal(fs.readFileSync(path.join(exportTo,'index.html'),'utf8'),'mine','declining keeps the owner files');
  const reviewed=(await call('GET','/api/tasks')).find(t=>t.id===task.id);
  await call('PATCH',`/api/tasks/${task.id}`,{action:'revise',version:reviewed.version,feedback:'Ubah warna tombol'});
  await assert.rejects(fetch(src),/fetch failed|ECONNREFUSED|socket/i,'replacing the revision closes its preview');
  console.log('PASS: application approval risks, source inspection, actual evidence, sandboxed separate-origin preview and responsive panel');
-}finally{if(browser)await browser.close();child.kill();mock.close();fs.rmSync(dir,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});
+}finally{if(browser)await browser.close();child.kill();mock.close();fs.rmSync(dir,{recursive:true,force:true});for(const d of fs.readdirSync(os.tmpdir()).filter(n=>n.startsWith('kantor-app-export-')))fs.rmSync(path.join(os.tmpdir(),d),{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});

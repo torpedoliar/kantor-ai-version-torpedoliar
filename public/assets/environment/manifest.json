@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "assets": {
+    "car": {
+      "file": "assets/environment/car/car.gltf",
+      "source": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ToyCar",
+      "license": "CC0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "sha256": "079065b3d70fdbcaa3fe0e3651d36e7739f473d7effcfd6c37904212fff15f0a",
+      "bounds": [
+        2.1934635706621006,
+        1.3629412131446488,
+        4.5
+      ],
+      "forward": "+z"
+    },
+    "tree": {
+      "file": "assets/environment/tree/tree.gltf",
+      "source": "https://polyhaven.com/a/island_tree_01",
+      "license": "CC0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "sha256": "19cecd817fae4c9d687377b736e1dd82663416e104eb028fc35a8b773f189379",
+      "bounds": [
+        6.613276852350113,
+        7.0,
+        6.70537113979731
+      ],
+      "forward": "+z"
+    },
+    "motorcycle": {
+      "file": "assets/environment/motorcycle/motorcycle.gltf",
+      "source": "https://opengameart.org/content/custom-harley-davidson-flh-1972",
+      "license": "CC0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "sha256": "b14abd8cc3a6acbba927d2e5036f1e97e715d5453d2d9ea009c05bc6475afbd0",
+      "bounds": [
+        1.222318172454834,
+        1.122657060623169,
+        2.3499999046325684
+      ],
+      "forward": "+z"
+    },
+    "asphalt": {
+      "file": "assets/environment/asphalt/Diffuse.jpg",
+      "source": "https://polyhaven.com/a/asphalt_02",
+      "license": "CC0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "sha256": "a0a4afde3966bc716682a5804c570769cd6a19bb56e8b6fbd54c1ce03eb963e8",
+      "normal": "assets/environment/asphalt/nor_gl.jpg",
+      "arm": "assets/environment/asphalt/arm.jpg"
+    },
+    "grass": {
+      "file": "assets/environment/grass/Diffuse.jpg",
+      "source": "https://polyhaven.com/a/grass_ground",
+      "license": "CC0",
+      "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "sha256": "f478627839d164ad11eb35801047d2961930eefdcb9e6dc8bda6ee0668f36d73",
+      "normal": "assets/environment/grass/nor_gl.jpg",
+      "arm": "assets/environment/grass/arm.jpg"
+    }
+  }
+}

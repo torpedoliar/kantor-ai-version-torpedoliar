@@ -6,6 +6,8 @@ const {addMessage,acknowledge}=require('./task-store');
 
 const PLAN_INSTRUCTIONS='MODE: PLAN\nYou lead this task. Split it into subtasks for people you are allowed to delegate to (your reports, or other division leads you collaborate with). Reply with JSON only: {"assumptions":["..."],"acceptance":["criteria the owner can check"],"children":[{"key":"short-id","title":"...","brief":"...","assignee":"exact person name","dependencyKeys":["key of a subtask that must finish first"]}]}. Use at most 12 subtasks. Do not invent people.';
 const SYNTH_INSTRUCTIONS='MODE: SYNTHESIZE\nYour team finished the subtasks below. Combine their results into one final deliverable for the owner. Note anything still missing.';
+const REVIEW_INSTRUCTIONS='MODE: REVIEW\nYou delegated this subtask. Check the result below against the brief. Reply with exactly APPROVE if it is good enough, or REVISE: followed by concrete changes the assignee must make.';
+const MAX_REVISIONS=1;
 
 function createOrchestrator({snapshot,commit,org,askModel,canRun,buildApplication,now=()=>new Date().toISOString(),log=()=>{}}){
   const planning=new Set();
@@ -29,16 +31,22 @@ function createOrchestrator({snapshot,commit,org,askModel,canRun,buildApplicatio
       commit((draft,emit)=>{
         const t=draft.tasks.find(x=>x.id===task.id);if(!t||t.runId!==runId)return;
         emit({type:'model.completed',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{purpose:'plan'}});
+        // A delegated sub-lead whose plan is unusable (bad JSON, task limit) does the subtask itself instead of stalling the tree.
+        if((!parsed||!parsed.children.length)&&t.planRunId){const why=parsed?'tidak ada subtugas':lastError;
+          Object.assign(t,{executionMode:'direct',status:'queued',phase:'queued',runId:null,version:(t.version||0)+1,updatedAt:now()});
+          addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},text:`Rencana tim ${t.assignee} tidak bisa dipakai (${why}); subtugas ini dikerjakan langsung oleh ${t.assignee}.`});return;}
         if(!parsed||!parsed.children.length){Object.assign(t,{status:'blocked',phase:'failed',blockedReason:'failed',error:parsed?'Rencana tidak berisi subtugas yang bisa dikerjakan.':`Rencana tidak valid: ${lastError}`,runId:null,version:(t.version||0)+1,updatedAt:now()});
           for(const r of parsed?.rejected||[])emit({type:'delegation.rejected',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:r.assignee,data:{title:r.title,reason:r.reason}});
           addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},text:`Perencanaan gagal: ${t.error}`});return;}
         // Idempotent: a (parent, planRunId, key) child is created once even if this commit is retried.
-        const ids=new Map();const rootId=t.rootId||t.id;
+        const ids=new Map();const rootId=t.rootId||t.id,childDepth=depthOf(draft,t)+1;
+        // A child assignee who leads AI staff plans again (Direktur → lead → staff), within the depth limit.
+        const leadsTeam=name=>childDepth<LIMITS.depth&&org.state.members.some(m=>m.manager===name&&canRun(m.name));
         for(const c of parsed.children){const existing=draft.tasks.find(x=>x.parentId===t.id&&x.planRunId===runId&&x.planKey===c.key);ids.set(c.key,existing?.id||crypto.randomUUID());}
         for(const c of parsed.children){
           if(draft.tasks.some(x=>x.id===ids.get(c.key)))continue;
           const member=org.state.members.find(m=>m.name===c.assignee);
-          const child={id:ids.get(c.key),title:c.title,assignee:c.assignee,division:member?.division||t.division,parentId:t.id,rootId,createdBy:t.assignee,asLead:false,priority:t.priority||'normal',progressPct:0,messages:[],kind:'work',legacy:false,brief:c.brief,status:'queued',phase:'queued',result:'',createdAt:now(),version:0,executionMode:c.mode,outputType:c.outputType,dependencyIds:c.dependencyKeys.map(k=>ids.get(k)),planRunId:runId,planKey:c.key};
+          const child={id:ids.get(c.key),title:c.title,assignee:c.assignee,division:member?.division||t.division,parentId:t.id,rootId,createdBy:t.assignee,asLead:false,priority:t.priority||'normal',progressPct:0,messages:[],kind:'work',legacy:false,brief:c.brief,status:'queued',phase:'queued',result:'',createdAt:now(),version:0,executionMode:c.mode==='automatic'||c.outputType!=='application'&&leadsTeam(c.assignee)?'automatic':'direct',asLead:c.mode==='automatic'||leadsTeam(c.assignee),outputType:c.outputType,dependencyIds:c.dependencyKeys.map(k=>ids.get(k)),planRunId:runId,planKey:c.key};
           draft.tasks.push(child);draft.threads.push({id:child.id,taskId:child.id,title:child.title,createdAt:child.createdAt});
           emit({type:'delegation.created',taskId:child.id,rootId,from:t.assignee,to:c.assignee,data:{parentId:t.id,title:c.title,dependencyIds:child.dependencyIds}});
           addMessage(draft,emit,{task:child,sender:{type:'agent',name:t.assignee},kind:'delegation',text:`${c.title}${c.brief?`\n${c.brief}`:''}`});
@@ -63,8 +71,8 @@ function createOrchestrator({snapshot,commit,org,askModel,canRun,buildApplicatio
       commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);if(!t||t.runId!==runId)return;
         emit({type:'model.completed',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{purpose:'synthesize'}});
         const result=answer.text.slice(0,10000),final=!t.parentId;
-        // A sub-lead's synthesis is accepted by its own lead; only the root goes to the owner for review.
-        Object.assign(t,{status:final?'review':'done',phase:final?'review':'done',result,by:answer.by,runId:null,history:[...(t.history||[]),{result,by:answer.by,createdAt:now(),feedback:''}],version:(t.version||0)+1,updatedAt:now()});
+        // A sub-lead's synthesis is reviewed by its own lead (see review); only the root goes to the owner.
+        Object.assign(t,{status:'review',phase:'review',result,by:answer.by,runId:null,history:[...(t.history||[]),{result,by:answer.by,createdAt:now(),feedback:t.feedback||''}],version:(t.version||0)+1,updatedAt:now()});
         emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:final?'owner':draft.tasks.find(p=>p.id===t.parentId)?.assignee,data:{final}});
         addMessage(draft,emit,{task:t,sender:{type:'agent',name:t.assignee},kind:'result',text:result});
       });
@@ -72,20 +80,51 @@ function createOrchestrator({snapshot,commit,org,askModel,canRun,buildApplicatio
       commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);if(!t||t.runId!==runId)return;Object.assign(t,{status:'blocked',phase:'waiting_children',blockedReason:'children',runId:null,error:error.message,version:(t.version||0)+1,updatedAt:now()});emit({type:'model.failed',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{purpose:'synthesize',error:error.message}});});
     }finally{planning.delete(task.id);}
   }
-  // Leaf results from automatic plans are accepted by the lead internally, not left for owner review.
-  function acceptChildren(){
-    const state=snapshot(),accept=state.tasks.filter(t=>t.planRunId&&t.status==='review'&&!childrenOf(state,t.id).length);
-    if(!accept.length)return;
-    commit((draft,emit)=>{for(const a of accept){const t=draft.tasks.find(x=>x.id===a.id);if(t.status!=='review')continue;const lead=draft.tasks.find(p=>p.id===t.parentId);
-      Object.assign(t,{status:'done',phase:'done',reviewedAt:now(),reviewedBy:lead?.assignee||null,version:(t.version||0)+1,updatedAt:now()});
-      emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:lead?.assignee||'owner',data:{accepted:true}});}});
+  // Every delegated result is reviewed by the person who delegated it: approve, or one revision with concrete changes.
+  // A human (non-AI) delegator cannot review automatically, so the result is accepted as before.
+  function settleReview(id,verdict,note){
+    commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===id);if(!t||t.status!=='review')return;const lead=draft.tasks.find(p=>p.id===t.parentId),by=lead?.assignee||'owner';
+      if(verdict==='revise'){
+        // A sub-lead revises by synthesizing again from its finished team; a worker reruns its own draft.
+        const team=draft.tasks.some(c=>c.parentId===t.id);
+        Object.assign(t,{status:team?'blocked':'queued',phase:team?'waiting_children':'queued',blockedReason:team?'children':null,feedback:note,revisions:(t.revisions||0)+1,error:undefined,version:(t.version||0)+1,updatedAt:now()});
+        emit({type:'review.revise',taskId:t.id,rootId:t.rootId||t.id,from:by,to:t.assignee,data:{feedback:note}});
+        addMessage(draft,emit,{task:t,sender:{type:'agent',name:by},text:`Revisi diminta: ${note}`});return;}
+      Object.assign(t,{status:'done',phase:'done',reviewedAt:now(),reviewedBy:by,version:(t.version||0)+1,updatedAt:now()});
+      emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:by,data:{accepted:true}});
+      if(note!==null)addMessage(draft,emit,{task:t,sender:{type:lead&&canRun(by)?'agent':'system',name:lead&&canRun(by)?by:'Sistem'},text:note});});
+  }
+  async function review(task){
+    const state=snapshot(),lead=state.tasks.find(p=>p.id===task.parentId);
+    if(!lead||!canRun(lead.assignee)){settleReview(task.id,'approve',null);return;}
+    if(planning.has(task.id))return;planning.add(task.id);
+    try{
+      commit((draft,emit)=>{emit({type:'model.started',taskId:task.id,rootId:task.rootId||task.id,agent:lead.assignee,data:{purpose:'review'}});});
+      const answer=await askModel(lead.assignee,{...task,feedback:'',childResults:'',brief:`${REVIEW_INSTRUCTIONS}\n\nBrief:\n${task.brief||'(tanpa brief)'}\n\nResult from ${task.assignee}:\n${task.result||'(kosong)'}`});
+      commit((draft,emit)=>{emit({type:'model.completed',taskId:task.id,rootId:task.rootId||task.id,agent:lead.assignee,data:{purpose:'review'}});});
+      const asked=answer.text.match(/REVISE:\s*([\s\S]+)/);
+      if(asked&&(task.revisions||0)<MAX_REVISIONS)settleReview(task.id,'revise',asked[1].trim().slice(0,2000));
+      else settleReview(task.id,'approve',asked?`Hasil diterima setelah ${MAX_REVISIONS} revisi. Catatan: ${asked[1].trim().slice(0,500)}`:'Hasil disetujui.');
+    }catch(error){
+      // A review that cannot run must not stall the plan: accept, and say so in the thread.
+      commit((draft,emit)=>{emit({type:'model.failed',taskId:task.id,rootId:task.rootId||task.id,agent:lead.assignee,data:{purpose:'review',error:error.message}});});
+      settleReview(task.id,'approve',`Review oleh ${lead.assignee} gagal (${error.message}); hasil diterima tanpa review.`);
+    }finally{planning.delete(task.id);}
+  }
+  // Monitoring: a delegated subtask that fails is reported once (per error) in its lead's thread.
+  function reportFailures(){
+    const state=snapshot(),failed=state.tasks.filter(t=>t.planRunId&&t.error&&t.errorReported!==t.error);
+    if(!failed.length)return;
+    commit((draft,emit)=>{for(const f of failed){const t=draft.tasks.find(x=>x.id===f.id),lead=draft.tasks.find(p=>p.id===t.parentId);if(!t.error||t.errorReported===t.error)continue;t.errorReported=t.error;
+      if(lead)addMessage(draft,emit,{task:lead,sender:{type:'system',name:'Sistem'},kind:'error',text:`Subtugas "${t.title}" (${t.assignee}) gagal: ${t.error}\nBuka subtugas itu lalu klik Coba lagi, atau alihkan ke orang lain.`});}});
   }
   // Called whenever something changes: plan new automatic tasks, accept finished leaves, synthesize completed parents.
   function wake(){
-    acceptChildren();
+    reportFailures();
     const state=snapshot();
     for(const t of state.tasks){
-      if(t.status==='queued'&&t.executionMode==='automatic'&&!childrenOf(state,t.id).length&&canRun(t.assignee))plan(t);
+      if(t.planRunId&&t.status==='review')review(t);
+      if(t.status==='queued'&&!t.error&&t.executionMode==='automatic'&&!childrenOf(state,t.id).length&&dependenciesMet(state,t)&&canRun(t.assignee))plan(t);
       if(t.phase==='waiting_children'){const kids=childrenOf(state,t.id).filter(c=>c.planRunId);if(kids.length&&kids.every(c=>c.status==='done')&&canRun(t.assignee))synthesize(t);}
     }
   }

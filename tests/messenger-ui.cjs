@@ -41,6 +41,7 @@ const wait=async(fn,label,ms=20000)=>{const t=Date.now();for(;;){const v=await f
   await toast.click();await page.locator('#communicationDialog[open]').waitFor();
   assert.equal(await page.locator('#threadList [aria-current="true"]').getAttribute('data-thread-id'),ask.id);
   const card=page.locator('#messageTimeline .decision-card[data-status="open"]');await card.waitFor();assert.match(await card.innerText(),/who is this for/);
+  await page.waitForFunction(()=>document.activeElement.id==='decisionAnswer',null,{timeout:5000}).catch(()=>{});
   assert.equal(await page.evaluate(()=>document.activeElement.id),'decisionAnswer','answer box gets focus');
   // The thread shows a live status bar and activity lines between bubbles.
   assert.match(await page.locator('#threadStatus').innerText(),/Menunggu jawabanmu/);
@@ -52,7 +53,7 @@ const wait=async(fn,label,ms=20000)=>{const t=Date.now();for(;;){const v=await f
   assert.equal(await page.locator('#bCommunications .decision-dot').isVisible(),true,'read status does not resolve a decision');
   // Draft survives reload.
   await page.fill('#decisionAnswer','Untuk pengikut Instagram, peluncuran Jumat.');
-  await page.reload();await page.waitForFunction(()=>window.Messenger);await page.click('#bCommunications');
+  await page.reload();await page.waitForFunction(()=>window.Messenger&&!document.querySelector('#bLock').disabled);await page.click('#bCommunications');
   await page.locator(`#threadList [data-thread-id="${ask.id}"]`).click();
   assert.equal(await page.inputValue('#decisionAnswer'),'Untuk pengikut Instagram, peluncuran Jumat.');
   // Keyboard-only send: Ctrl+Enter answers; the worker resumes exactly once.

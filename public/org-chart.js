@@ -6,6 +6,7 @@
   const ZOOMS=[.5,.6,.7,.8,.9,1,1.15,1.3,1.5];
   const EFFORTS=[['light','Ringan'],['standard','Standar'],['deep','Mendalam']];
   let api,root,zoom=1,selection=null,connectFrom=null,connecting=false,tab='Profil',pendingBusy=null,notice='';
+  const memoryDrafts=new Map();
 
   function h(tag,props={},...children){
     const node=document.createElement(tag);
@@ -166,6 +167,18 @@
         try{for(const from of new Set(pendingBusy.tasks.map(t=>t.assignee)))await api.reassign(from,target.value);}catch(error){notice=error.message;render();return;}
         const {next,message}=pendingBusy;pendingBusy=null;await commit(next,message);}}));
   }
+  // Memory is saved on its own (not with the profile Simpan) because it lives with the task workspace, not org.json.
+  function memoryEditor(name){
+    const box=h('textarea',{rows:5,maxLength:6000,placeholder:'Belum ada memori. Diisi otomatis saat tugas disetujui, atau tulis satu catatan per baris.'}),status=h('p',{class:'org-hint',role:'status'});
+    // Unsaved edits live in memoryDrafts so a chart re-render (any org change) never discards them.
+    box.oninput=()=>{memoryDrafts.set(name,box.value);};
+    const load=async()=>{if(!api.isUnlocked()){status.textContent='Buka kunci owner untuk melihat memori.';return;}try{const r=await api.memory(name);if(memoryDrafts.has(name)){status.textContent=`Belum disimpan · ${r.items.length}/${r.limit} catatan tersimpan.`;return;}box.value=r.items.map(i=>i.text).join('\n');status.textContent=`${r.items.length}/${r.limit} catatan. Dikirim ke agen di setiap tugas berikutnya.`;}catch(error){status.textContent=error.message;}};
+    const save=async items=>{try{const r=await api.saveMemory(name,items);memoryDrafts.delete(name);box.value=r.items.map(i=>i.text).join('\n');status.textContent=`Memori tersimpan · ${r.items.length}/${r.limit} catatan.`;}catch(error){status.textContent=error.message;}};
+    box.id='orgSideMemory';if(memoryDrafts.has(name))box.value=memoryDrafts.get(name);load();
+    return h('section',{class:'org-memory'},h('h4',{text:'Memori agen'}),field('Catatan (satu per baris)','orgSideMemory',box),status,
+      h('div',{class:'org-toolbar'},h('button',{type:'button',class:'org-tool',id:'orgSideMemorySave',text:'Simpan memori',onclick:()=>save(box.value.split('\n').map(t=>t.trim()).filter(Boolean).map(text=>({text})))}),
+        h('button',{type:'button',class:'org-tool',id:'orgSideMemoryClear',text:'Hapus semua',onclick:()=>save([])})));
+  }
   function memberPanel(){
     const m=member(selection.name);if(!m){selection=null;return sidePanel();}
     const s=state(),d=division(m.division),tabs=['Profil','Kerja','AI'];
@@ -179,7 +192,7 @@
     const panes={
       Profil:[field('Nama','orgSideName',name),field('Inisial','orgSideInitials',initials),field('Peran','orgSideRole',role),field('Divisi','orgSideDivision',div),h('label',{class:'org-check'},withTeam,' Pindahkan beserta timnya'),field('Atasan','orgSideManager',manager)],
       Kerja:[field('Effort','orgSideEffort',effort),field('Kapasitas kerja (%)','orgSideWorkload',workload),field('Instruksi anggota','orgSideInstructions',instructions)],
-      AI:[h('label',{class:'org-check'},agent,' Jadikan agen AI'),field('Model','orgSideModel',model),h('p',{class:'org-hint',text:api.modelOptions().length?'Daftar berasal dari model yang diambil di Pengaturan. Instruksi ada di tab Kerja.':'Belum ada model: buka Pengaturan, tambah provider, lalu klik Ambil model.'})]
+      AI:[h('label',{class:'org-check'},agent,' Jadikan agen AI'),field('Model','orgSideModel',model),h('p',{class:'org-hint',text:api.modelOptions().length?'Daftar berasal dari model yang diambil di Pengaturan. Instruksi ada di tab Kerja.':'Belum ada model: buka Pengaturan, tambah provider, lalu klik Ambil model.'}),memoryEditor(m.name)]
     };
     withTeam.id='orgMoveWithTeam';agent.id='orgSideAgent';
     const tablist=h('div',{class:'org-tabs',role:'tablist'},tabs.map(t=>h('button',{type:'button',role:'tab','aria-selected':String(t===tab),text:t,onclick:()=>{collect();tab=t;render();}})));

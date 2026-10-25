@@ -39,4 +39,5 @@ assert.match(activityFor({tasks:[{id:'n',title:'N',assignee:'Rani',status:'queue
 assert.match(activityFor({tasks:[{id:'f',title:'F',assignee:'Rani',status:'queued',error:'timeout'}],events:[]},'f',{agents:['Rani']}).status.label,/Gagal/);
 assert.equal(activityFor({tasks:[{id:'d',title:'D',assignee:'Rani',status:'blocked',blockedReason:'decision'}],events:[]},'d',{agents:['Rani']}).status.label,'Menunggu jawabanmu');
 assert.equal(activityFor({tasks:[{id:'v',title:'V',assignee:'Rani',status:'review'}],events:[]},'v',{agents:['Rani']}).status.label,'Siap kamu review');
+assert.match(activityFor({tasks:[{id:'f',title:'F',assignee:'Rani',status:'queued',error:'Provider access'}],events:[]},'f',{agents:['Rani']}).status.label,/Provider access\./,'failure text keeps its trailing letters');
 console.log('PASS: thread status (planning/working/reviewing/queued reasons/real subtask counts) and ordered activity lines from events');

@@ -33,12 +33,30 @@
     const options=modelOptions();if(!options.length){box.append(Object.assign(document.createElement('p'),{textContent:'Belum ada model. Tambahkan provider lalu klik Ambil model.'}));return;}
     const form=document.createElement('form');form.className='settings-form';
     form.append(routeSelect('routeDefault','Model default untuk semua agen AI',routeValue(state.defaultRoute),'Tanpa model (mode dry run)'),routeSelect('routeFallback','Model cadangan bila model default gagal',routeValue(state.fallbackRoute),'Tanpa cadangan'));
+    // Max output tokens per call. Empty = unlimited (default), so reasoning models are never cut off by a hidden cap.
+    const tokens=Object.assign(document.createElement('input'),{id:'routeMaxTokens',type:'number',min:256,max:1000000,step:256,placeholder:'Tanpa batas',value:state.maxTokens??''});
+    const tokensLabel=Object.assign(document.createElement('label'),{htmlFor:'routeMaxTokens',textContent:'Maks token per jawaban (kosong = tanpa batas)'});
+    form.append(tokensLabel,tokens);
+    // How many agents may call a model at the same time. Protects the provider's rate limit; the rest wait in the queue
+    // and start by task priority. Each provider can also have its own lower cap.
+    const conc=Object.assign(document.createElement('input'),{id:'routeConcurrency',type:'number',min:1,max:100,step:1,placeholder:'Tanpa batas',value:state.concurrency??''});
+    const concLabel=Object.assign(document.createElement('label'),{htmlFor:'routeConcurrency',textContent:'Maks agen bersamaan di seluruh kantor (kosong = tanpa batas)'});
+    form.append(concLabel,conc);
+    for(const p of state.providers.filter(p=>!p.environmentManaged)){
+      const id='providerConcurrency-'+p.id;
+      const input=Object.assign(document.createElement('input'),{id,type:'number',min:1,max:100,step:1,placeholder:'Ikuti batas kantor',value:p.maxConcurrent??''});
+      form.append(Object.assign(document.createElement('label'),{htmlFor:id,textContent:`Maks bersamaan untuk ${p.displayName} (kosong = ikuti batas kantor)`}),input);
+    }
+    form.append(Object.assign(document.createElement('p'),{className:'settings-hint',textContent:'Agen yang melebihi batas menunggu giliran; tugas prioritas tinggi jalan lebih dulu.'}));
     const save=Object.assign(document.createElement('button'),{type:'submit',className:'primary',textContent:'Simpan routing'});form.append(save);
     form.onsubmit=async event=>{event.preventDefault();const defaultRoute=routeOf(el('routeDefault').value),fallbackRoute=routeOf(el('routeFallback').value);
       // A chosen model is enabled so the server accepts the route.
       const used=[defaultRoute,fallbackRoute,...Object.values(state.overrides||{})].filter(Boolean);
-      const providers=state.providers.filter(p=>!p.environmentManaged).map(p=>({...p,models:p.models.map(m=>used.some(r=>r.providerId===p.id&&r.modelId===m.id)?{...m,enabled:true}:m)}));
-      try{state=await api('PUT','/api/settings',{...state,providers,defaultRoute,fallbackRoute,version:state.version});dirty=false;render();message('Routing disimpan.')}catch(error){message(error.message,true)}};
+      const cap=id=>{const v=el('providerConcurrency-'+id)?.value.trim();return v?Number(v):null;};
+      const providers=state.providers.filter(p=>!p.environmentManaged).map(p=>({...p,maxConcurrent:cap(p.id),models:p.models.map(m=>used.some(r=>r.providerId===p.id&&r.modelId===m.id)?{...m,enabled:true}:m)}));
+      const maxTokens=el('routeMaxTokens').value.trim()?Number(el('routeMaxTokens').value):null;
+      const concurrency=el('routeConcurrency').value.trim()?Number(el('routeConcurrency').value):null;
+      try{state=await api('PUT','/api/settings',{...state,providers,defaultRoute,fallbackRoute,maxTokens,concurrency,version:state.version});dirty=false;render();message('Routing disimpan.')}catch(error){message(error.message,true)}};
     box.append(form);
   }
   window.officeModels={options:()=>state?modelOptions():[],overrides:()=>state?.overrides||{},load:async(force)=>{if(!state||force)await load();return state?modelOptions():[]},routeOf,routeValue};
@@ -51,9 +69,14 @@
   window.officeNav.guard('settingsDialog',()=>!dirty||confirm('Buang perubahan Pengaturan yang belum disimpan?'));
   el('settingsClose').onclick=close;
   el('settingsDialog').addEventListener('cancel',event=>{event.preventDefault();close()});
-  el('settingsDialog').addEventListener('input',()=>dirty=true);
+  el('settingsDialog').addEventListener('input',event=>{if(!['settingsGraphics','settingsFps'].includes(event.target.id))dirty=true;});
   el('settingsGeneralSave').onclick=()=>{const prefs={...readPrefs(),routineDefault:el('settingsRoutine').checked,logVisible:el('settingsLog').checked};if(savePrefs(prefs)){dirty=false;message('Preferensi browser disimpan.')}else message('Penyimpanan browser tidak tersedia.',true)};
   el('settingsExport').onclick=()=>{const payload={schemaVersion:1,providers:state?.providers?.filter(provider=>!provider.environmentManaged).map(provider=>({...provider,hasCredential:undefined}))||[],general:readPrefs()};const url=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='kantor-kita-settings.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);message('Pengaturan aman diekspor.')};
   el('settingsReset').onclick=async()=>{if(!state||!confirm('Reset provider dan routing? Kredensial dan metadata provider akan dihapus.'))return;try{state=await api('POST','/api/settings/reset',{version:state.version});render();message('Provider dan routing direset.')}catch(error){message(error.message,true)}};
   el('settingsRoutine').checked=readPrefs().routineDefault!==false;el('settingsLog').checked=readPrefs().logVisible===true;
+  // Graphics level applies immediately (no Save needed) and is remembered per browser by officeGraphics.
+  el('settingsGraphics').value=window.officeGraphics.level();
+  el('settingsGraphics').onchange=event=>{event.stopPropagation();window.officeGraphics.set(el('settingsGraphics').value);message(`Level grafis: ${window.officeGraphics.LEVELS[window.officeGraphics.level()].label}.`);};
+  el('settingsFps').checked=readPrefs().showFps===true;
+  el('settingsFps').onchange=()=>{savePrefs({...readPrefs(),showFps:el('settingsFps').checked});window.officeScene?.showFps?.(el('settingsFps').checked);};
 })();

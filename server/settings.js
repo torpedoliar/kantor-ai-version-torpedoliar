@@ -30,7 +30,12 @@ function normalBase(value){
   url.pathname=url.pathname.replace(/\/+$/,'');
   return url.toString().replace(/\/$/,'');
 }
-function empty(){return {schemaVersion:SCHEMA_VERSION,version:0,providers:[],defaultRoute:null,fallbackRoute:null,overrides:{}};}
+function empty(){return {schemaVersion:SCHEMA_VERSION,version:0,providers:[],defaultRoute:null,fallbackRoute:null,overrides:{},maxTokens:null,concurrency:DEFAULT_CONCURRENCY};}
+// Model calls running at the same time across the office (protects provider rate limits); null = unlimited.
+const DEFAULT_CONCURRENCY=3;
+function concurrencyLimit(value,fallback){if(value===undefined)return fallback;if(value===null||value===''||Number(value)===0)return null;const n=Number(value);if(!Number.isInteger(n)||n<1||n>100)throw new Error('Maks agen bersamaan harus kosong (tanpa batas) atau bilangan bulat 1–100.');return n;}
+// Max output tokens per model call: null = unlimited (the default).
+function tokenLimit(value){if(value===null||value===undefined||value===''||Number(value)===0)return null;const n=Number(value);if(!Number.isInteger(n)||n<256||n>1000000)throw new Error('Maks token harus kosong (tanpa batas) atau bilangan bulat 256–1000000.');return n;}
 function sanitizeModel(model){
   if(!model||typeof model!=='object')throw new Error('Invalid model.');
   const id=text(model.id||model.modelId,LIMITS.model);if(!id)throw new Error('Model ID is required.');
@@ -44,7 +49,7 @@ function sanitizeProvider(provider){
   const baseUrl=normalBase(provider.baseUrl);
   const models=Array.isArray(provider.models)?provider.models.map(sanitizeModel):[];
   if(models.length>LIMITS.models)throw new Error('Too many models.');
-  return {id,displayName:text(provider.displayName||provider.name,LIMITS.name)||'Unnamed provider',protocol,baseUrl,enabled:provider.enabled!==false,models,environmentManaged:!!provider.environmentManaged};
+  return {id,displayName:text(provider.displayName||provider.name,LIMITS.name)||'Unnamed provider',protocol,baseUrl,enabled:provider.enabled!==false,models,environmentManaged:!!provider.environmentManaged,maxConcurrent:concurrencyLimit(provider.maxConcurrent,null)};
 }
 function routeValid(route,providers,allowNull=true){
   if(route==null&&allowNull)return null;
@@ -62,7 +67,7 @@ function validate(input){
   if(defaultRoute&&fallbackRoute&&defaultRoute.providerId===fallbackRoute.providerId&&defaultRoute.modelId===fallbackRoute.modelId)throw new Error('Fallback must differ from the default.');
   const overrides={};
   for(const [name,route] of Object.entries(input.overrides||{})){if(typeof name!=='string'||!name.trim())throw new Error('Unknown agent override.');overrides[name]=routeValid(route,providers);}
-  return {schemaVersion:SCHEMA_VERSION,version:Number.isInteger(input.version)?input.version:0,providers,defaultRoute,fallbackRoute,overrides};
+  return {schemaVersion:SCHEMA_VERSION,version:Number.isInteger(input.version)?input.version:0,providers,defaultRoute,fallbackRoute,overrides,maxTokens:tokenLimit(input.maxTokens),concurrency:concurrencyLimit(input.concurrency,DEFAULT_CONCURRENCY)};
 }
 
 function createSettings({dataDir,env=process.env,agents={}}){
@@ -105,7 +110,7 @@ function createSettings({dataDir,env=process.env,agents={}}){
   }
   function publicState(){
     const providers=[...state.providers.map(publicProvider)];const legacy=envProvider();if(legacy)providers.unshift(publicProvider(legacy));
-    return {schemaVersion:SCHEMA_VERSION,version:state.version,providers,defaultRoute:state.defaultRoute,fallbackRoute:state.fallbackRoute,overrides:clone(state.overrides),broken:!!broken,hasEncryptionKey:!!encryptionKey};
+    return {schemaVersion:SCHEMA_VERSION,version:state.version,providers,defaultRoute:state.defaultRoute,fallbackRoute:state.fallbackRoute,overrides:clone(state.overrides),maxTokens:state.maxTokens??null,concurrency:state.concurrency??null,broken:!!broken,hasEncryptionKey:!!encryptionKey};
   }
   function save(next,expectedVersion){
     if(broken)throw new Error('Settings storage is damaged; repair or move settings.json before saving.');
@@ -147,7 +152,9 @@ function createSettings({dataDir,env=process.env,agents={}}){
     if(fallback){const fp=state.providers.find(item=>item.id===fallback.providerId),fm=fp?.models.find(item=>item.id===fallback.modelId),fc=fp&&!fp.environmentManaged?decrypt(credentials.get(fp.id),fp.id):env.ANTHROPIC_API_KEY;if(fp&&fm&&fp.enabled&&fm.enabled&&fm.status!=='stale'&&fc)fallbackSnapshot={provider:{...fp,credential:fc},modelId:fm.id,route:fallback};}
     return {dryRun:false,settingsVersion:state.version,provider:{...provider,credential},modelId:model.id,route,fallback:fallbackSnapshot};
   }
+  // Limits for the model-call gate: office-wide plus each provider's own cap.
+  function limits(){const providers={};for(const p of state.providers)if(p.maxConcurrent)providers[p.id]=p.maxConcurrent;return {office:state.concurrency??null,providers};}
   read();
-  return {publicState,save,resolve,credential,get state(){return clone(state)},get broken(){return broken},normalizeBase:normalBase,limits:LIMITS};
+  return {publicState,save,resolve,credential,callLimits:limits,get state(){return clone(state)},get broken(){return broken},normalizeBase:normalBase,limits:LIMITS};
 }
 module.exports={createSettings,validate,keyBytes,normalBase};

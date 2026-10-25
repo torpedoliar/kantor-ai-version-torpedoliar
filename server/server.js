@@ -9,8 +9,9 @@ const {createSettings}=require('./settings');
 const {createOrg,normalize:normalizeOrg}=require('./org');
 const providers=require('./providers');
 const {parseDraft}=require('./org-draft');
-const {createTaskStore,addMessage,openDecision,threadSummaries,sanitizeText,acknowledge}=require('./task-store');
+const {createTaskStore,addMessage,openDecision,threadSummaries,sanitizeText,acknowledge,remember,MEMORY_LIMIT,MEMORY_TEXT}=require('./task-store');
 const {createOrchestrator}=require('./task-orchestrator');
+const {createGate}=require('./concurrency');
 const {createProjectWorkspace}=require('./project-workspace');
 const runner=require('./project-runner');
 const {createApplicationWorkflow}=require('./application-workflow');
@@ -43,6 +44,8 @@ const PRIORITIES = new Set(['low','normal','high']);
 const KINDS = new Set(['work','roster-review']);
 const CSRF=crypto.randomBytes(32).toString('hex');
 const settings=createSettings({dataDir:DATA_DIR,env:process.env,agents:{'Kak Rani':{model:'claude-sonnet-5-5'},'Kak Sinta':{model:'claude-haiku-4-5-20251001'}}});
+// Every model call waits here: Pengaturan → Maks agen bersamaan (office) and each provider's own cap.
+const modelGate=createGate(()=>settings.callLimits());
 const agentMembers=()=>Object.fromEntries(org.roster().filter(m=>m.isAgent).map(m=>[m.name,m]));
 const agentFor=name=>agentMembers()[name]||null;
 function archiveTasks(timestamp=Date.now()){const archiveDir=path.join(DATA_DIR,'archive');fs.mkdirSync(archiveDir,{recursive:true});const file=path.join(archiveDir,`tasks-${timestamp}.json`);fs.writeFileSync(file,JSON.stringify(tasks,null,2),{mode:0o600});return file;}
@@ -73,20 +76,65 @@ function commit(mutate,options){
   tasks=taskStore.snapshot().tasks;return result;
 }
 // Answering resolves the decision, records the owner's reply and requeues the task in one transaction.
-function answerDecision(id,answer,version,requestKey){
+// `by` is the owner (default) or the lead answering its own team member.
+function answerDecision(id,answer,version,requestKey,by={type:'owner',name:'Owner'}){
   return commit((draft,emit)=>{
     const d=draft.decisions.find(x=>x.id===id);if(!d)throw Object.assign(new Error('Keputusan tidak ditemukan.'),{status:404});
     if(d.kind==='approval')throw Object.assign(new Error('Persetujuan eksekusi harus melalui panel sumber dan perintah.'),{status:409,code:'APPROVAL_REQUIRED'});
     if(d.status!=='open'||version!==d.version)throw Object.assign(new Error('Pertanyaan ini sudah berubah. Muat ulang dan jawab yang terbaru.'),{status:409,code:'VERSION_CONFLICT'});
     const t=draft.tasks.find(x=>x.id===d.taskId);
-    Object.assign(d,{status:'answered',answer,answeredAt:new Date().toISOString(),version:d.version+1});
-    addMessage(draft,emit,{task:t,sender:{type:'owner',name:'Owner'},kind:'text',text:answer,decisionId:d.id});
-    emit({type:'decision.answered',taskId:t.id,rootId:t.rootId||t.id,data:{decisionId:d.id}});
-    Object.assign(t,{status:'queued',blockedReason:null,brief:`${t.brief}\n\nQuestions from ${t.assignee}:\n${t.questions||''}\n\nAnswers:\n${answer}`.trim().slice(0,5000),questions:undefined,askedBy:undefined,error:undefined,runId:null,version:(t.version||0)+1,updatedAt:now()});
+    Object.assign(d,{status:'answered',answer,answeredBy:by.name,answeredAt:new Date().toISOString(),version:d.version+1});
+    addMessage(draft,emit,{task:t,sender:by,kind:'text',text:answer,decisionId:d.id});
+    emit({type:'decision.answered',taskId:t.id,rootId:t.rootId||t.id,data:{decisionId:d.id,by:by.name}});
+    const label=by.type==='owner'?'Answers':`Lead menjawab (${by.name})`;
+    Object.assign(t,{status:'queued',blockedReason:null,brief:`${t.brief}\n\nQuestions from ${t.assignee}:\n${t.questions||''}\n\n${label}:\n${answer}`.trim().slice(0,5000),questions:undefined,askedBy:undefined,error:undefined,runId:null,version:(t.version||0)+1,updatedAt:now()});
     return {decision:d,task:t};
   },{requestKey});
 }
+const LEAD_ANSWER='MODE: ANSWER TEAM\nA member of your team asked the questions below while working on a subtask you delegated. Answer them yourself from the task context so they can continue. Reply with the answer only. If the question needs the owner (budget, scope, a final business decision, or facts you do not have), reply with exactly: ESCALATE: <one-line reason>.';
+const OWNER_REPLY='MODE: REPLY\nThe owner just wrote to you in this task’s chat (latest Owner line in the conversation). Answer it directly and briefly in Indonesian. Use only facts from the task, its result and the WORKSPACE FACTS below; never invent file paths, folders or URLs. If the owner asks you to change or redo the work, say what you would change and that they can request a revision; do not claim you already did it. Reply with the answer only.';
+// What actually exists for this task, so a reply never claims a folder or app that is not there.
+function workspaceFacts(task){
+  const state=taskStore.snapshot(),project=(state.projects||[]).find(p=>p.taskId===task.id||p.rootTaskId===(task.rootId||task.id));
+  if(task.outputType!=='application')return 'This task produced a text document (status: '+task.status+'). No application project or files were created for it. Generated applications are stored by Kantor Kita in its own project storage, never directly in a folder the owner names; exporting to another folder needs the owner to use the export action in the app.';
+  if(!project)return 'This is an application task (status: '+task.status+'), but no project files exist yet.';
+  return 'Application project id '+project.id+' (status: '+(project.status||task.status)+'), stored in Kantor Kita project storage: data/projects/'+project.id+'. The owner can export it to a folder of their choice from the application panel.';
+}
+// The owner wrote on a task that is not running and has no open question: the assignee answers once in the thread.
+async function ownerReply(taskId,messageId){
+  const task=tasks.find(t=>t.id===taskId);if(!task||!agentFor(task.assignee))return;
+  let reply;
+  try{reply=(await askModel(task.assignee,{...task,brief:`${OWNER_REPLY}
+
+WORKSPACE FACTS: ${workspaceFacts(task)}
+
+Task brief: ${task.brief||''}
+
+Current result (excerpt):
+${String(task.result||'').slice(0,3000)}`})).text.trim();}
+  catch(error){reply='';console.error(`Reply failed on "${task.title}": ${error.message}`);
+    commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===taskId);if(t)addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'error',text:`${task.assignee} belum bisa membalas: ${sanitizeText(error.message).slice(0,300)}`});});return;}
+  if(!reply)return;
+  commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===taskId);if(t)addMessage(draft,emit,{task:t,sender:{type:'agent',name:t.assignee},kind:'reply',text:reply.slice(0,6000)});});
+}
+// The lead answers its team member; if it escalates or fails, the same decision is handed to the owner.
+async function leadAnswer(taskId,decisionId,parent){
+  const task=tasks.find(t=>t.id===taskId);if(!task)return;
+  let reply;
+  try{reply=(await askModel(parent.assignee,{...parent,title:`Pertanyaan dari ${task.assignee}: ${task.title}`,brief:`${LEAD_ANSWER}\n\nYour task: ${parent.title}\n${parent.brief||''}\n\nSubtask: ${task.title}\n${task.brief||''}\n\nQuestions:\n${task.questions||''}`})).text.trim();}
+  catch(error){reply=`ESCALATE: ${sanitizeText(error.message)}`;}
+  const d=taskStore.snapshot().decisions.find(x=>x.id===decisionId);if(!d||d.status!=='open')return;
+  // A lead replying with its own QUESTIONS: does not know either — that is an escalation, not an answer.
+  const escalate=reply.match(/^ESCALATE:\s*(.*)/i)||(/^QUESTIONS:/i.test(reply)?[reply,'lead juga butuh informasi dari owner']:null);
+  // The owner may have answered while the lead was thinking: both paths re-check inside the transaction.
+  if(!escalate&&reply){try{answerDecision(decisionId,reply.slice(0,3000),d.version,undefined,{type:'agent',name:parent.assignee});}catch(error){if(error.code!=='VERSION_CONFLICT')throw error;return;}setImmediate(kick);return;}
+  commit((draft,emit)=>{const x=draft.decisions.find(y=>y.id===decisionId),t=draft.tasks.find(y=>y.id===taskId);if(!x||x.status!=='open'||x.version!==d.version||!t)return;Object.assign(x,{target:'owner',path:[...(x.path||[]),'owner'],version:x.version+1});Object.assign(t,{decisionTarget:'owner',version:(t.version||0)+1});
+    addMessage(draft,emit,{task:t,sender:{type:'agent',name:parent.assignee},kind:'text',text:`Saya meneruskan pertanyaan ini ke owner${escalate?.[1]?`: ${escalate[1]}`:''}.`});
+    emit({type:'decision.opened',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,data:{decisionId,target:'owner',escalatedBy:parent.assignee}});});
+}
 // Bounded conversation passed to the model: who said what, oldest first, never client-chosen authors.
+// Capped so memory can't crowd out the brief and conversation in the prompt.
+function memoryFor(name){return (taskStore.snapshot().memories?.[name]||[]).map(n=>`- ${n.text}`).join('\n').slice(-3000);}
 function conversationFor(taskId){
   return taskStore.snapshot().messages.filter(m=>m.taskId===taskId).slice(-20).map(m=>`${m.sender.type==='owner'?'Owner':m.sender.name}: ${m.text}`).join('\n').slice(-6000);
 }
@@ -125,13 +173,21 @@ const normalizeStoredTasks = list => list.map(normalizeTask);
 tasks = normalizeStoredTasks(tasks);
 
 // ---- agent worker: one task at a time per connected member, oldest first ----
-const busy = new Set();
-async function askConfigured(snapshot, agent, task) {
+const busy = new Set(),liveTyping=new Map();
+async function askConfigured(snapshot, agent, task,options={}) {
   let primaryError;
-  try { return {answer:await providers.generate(snapshot.provider,snapshot.provider.credential,snapshot.modelId,agent,task),route:snapshot.route,fallback:false}; }
+  // Settings → Maks token (null = unlimited); one empty-answer retry is announced in the thread.
+  options={maxTokens:settings.publicState().maxTokens,onEmpty:()=>commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);if(t)addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'text',text:'Model hanya berpikir tanpa menulis jawaban; diminta menjawab langsung sekali lagi.'});}),...options};
+  const gated=(provider,fn)=>modelGate.run({provider:provider.id,priority:task.priority||'normal',label:task.title||''},fn);
+  try { return {answer:await gated(snapshot.provider,()=>providers.generate(snapshot.provider,snapshot.provider.credential,snapshot.modelId,agent,task,options)),route:snapshot.route,fallback:false}; }
   catch(error){ primaryError=error; }
-  if(snapshot.fallback&&['connection','timeout','unavailable'].includes(providers.classify(primaryError)))
-    return {answer:await providers.generate(snapshot.fallback.provider,snapshot.fallback.provider.credential,snapshot.fallback.modelId,agent,task),route:snapshot.fallback.route,fallback:true,primaryError};
+  // Auth/invalid-request errors are configuration problems the owner must see; a backup model would hide them.
+  // A reasoning-only empty answer ('empty') also falls back: another model may actually answer.
+  if(snapshot.fallback&&!['auth','request','invalid'].includes(providers.classify(primaryError))){
+    commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);if(t)addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'text',text:`Model ${snapshot.modelId} ${primaryError.category==='timeout'?'timeout':'gagal'} (${sanitizeText(primaryError.message||'').slice(0,160)}), dicoba dengan model ${snapshot.fallback.modelId} (cadangan).`});});
+    options.onDelta?.('');
+    return {answer:await gated(snapshot.fallback.provider,()=>providers.generate(snapshot.fallback.provider,snapshot.fallback.provider.credential,snapshot.fallback.modelId,agent,task,options)),route:snapshot.fallback.route,fallback:true,primaryError};
+  }
   throw primaryError;
 }
 async function dryRun(agent, task) {
@@ -153,11 +209,14 @@ async function work(name) {
     if(task.outputType==='application'){await applications.generate(task.id);return;}
     commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);const retry=!!t.retryRequested;Object.assign(t,{status:'active',runId,retryRequested:undefined,version:(t.version||0)+1,updatedAt:now()});emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{from:'queued',to:'active',phase:'active'}});
       if(retry||!draft.messages.some(m=>m.taskId===t.id&&m.kind==='ack'))acknowledge(draft,emit,t,{retry});});
-    const input={...structuredClone(task),conversation:conversationFor(task.id)};
+    const input={...structuredClone(task),conversation:conversationFor(task.id),memory:memoryFor(name)};
     const worker=buildAgent(profile,org.state,snapshot.route||{});
     modelEvent('model.started',task,runId,{purpose:'work',providerId:snapshot.dryRun?null:snapshot.route?.providerId||null,modelId:snapshot.dryRun?'dry-run':snapshot.route?.modelId||null});
     let result;
-    try{result = snapshot.dryRun ? {answer:await dryRun(worker, input),route:null,fallback:false} : await askConfigured(snapshot, worker, input);}
+    try{result = snapshot.dryRun ? {answer:await dryRun(worker, input),route:null,fallback:false} : await askConfigured(snapshot, worker, input,{onDelta:text=>{
+      const current=tasks.find(t=>t.id===task.id);if(current?.runId!==runId)return;
+      liveTyping.set(task.id,{runId,agent:name,text:sanitizeText(text).slice(-10000),updatedAt:now()});
+    }});}
     catch(error){modelEvent('model.failed',task,runId,{purpose:'work',error:sanitizeText(error.message).slice(0,500)});throw error;}
     modelEvent('model.completed',task,runId,{purpose:'work',providerId:result.route?.providerId||null,modelId:snapshot.dryRun?'dry-run':result.route?.modelId||null,fallback:!!result.fallback});
     const answer=result.answer;
@@ -168,7 +227,10 @@ async function work(name) {
       // The agent asked instead of guessing: park the task until someone answers.
       if(asked){
         const target=org.escalationTarget(name),questions=asked[1].trim().slice(0,2000).split(/\n+/).map(q=>q.replace(/^\s*\d+[.)]\s*/,'').trim()).filter(Boolean).slice(0,10);
-        commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'blocked',blockedReason:'decision',questions:questions.map((q,i)=>`${i+1}. ${q}`).join('\n'),decisionTarget:target.name,decisionPath:target.path,askedBy:by,providerId:result.route?.providerId||null,modelId:result.route?.modelId||null,usedFallback:!!result.fallback,runId:null,version:(t.version||0)+1,updatedAt:now()});openDecision(draft,emit,{task:t,questions,target:target.name,path:target.path,askedBy:by});});
+        // In a delegated plan the lead (when it is an AI agent) gets the question first; the owner only if it escalates.
+        const parent=current.planRunId&&tasks.find(t=>t.id===current.parentId),leadAnswers=parent&&agentFor(parent.assignee);
+        const decision=commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===current.id);Object.assign(t,{status:'blocked',blockedReason:'decision',questions:questions.map((q,i)=>`${i+1}. ${q}`).join('\n'),decisionTarget:leadAnswers?parent.assignee:'owner',decisionPath:leadAnswers?[name,parent.assignee]:[name,'owner'],askedBy:by,providerId:result.route?.providerId||null,modelId:result.route?.modelId||null,usedFallback:!!result.fallback,runId:null,version:(t.version||0)+1,updatedAt:now()});return openDecision(draft,emit,{task:t,questions,target:leadAnswers?parent.assignee:'owner',path:leadAnswers?[name,parent.assignee]:target.path,askedBy:by});});
+        if(leadAnswers)setImmediate(()=>leadAnswer(current.id,decision.id,parent).catch(error=>console.error(`Lead answer failed: ${error.message}`)));
         return;
       }
       const draft={result:answer.slice(0,10000),by,providerId:result.route?.providerId||null,modelId:result.route?.modelId||null,usedFallback:!!result.fallback,createdAt:now(),feedback:input.feedback||''};
@@ -187,7 +249,7 @@ async function work(name) {
         addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'error',text:`${t.assignee} gagal mengerjakan tugas ini: ${reason}\nBuka tugas lalu klik Coba lagi setelah masalahnya diperbaiki.`});});
     }
     console.error(`Agent ${name} failed on "${task.title}": ${error.message}`);
-  } finally { busy.delete(name); setImmediate(() => work(name)); }
+  } finally { liveTyping.delete(task.id);busy.delete(name); setImmediate(() => work(name)); }
 }
 function modelEvent(type,task,runId,data){commit((draft,emit)=>{emit({type,taskId:task.id,rootId:task.rootId||task.id,agent:task.assignee,runId,data});});}
 // Live event streams: owner-only, replay by sequence, explicit resync when the client is too far behind.
@@ -242,7 +304,7 @@ function recoverJobs(){const stuck=taskStore.snapshot().jobs.filter(j=>['queued'
 // One model call path for planning and synthesis: same routing, fallback and dry-run rules as ordinary work.
 async function askModel(name,task){
   const profile=org.roster().find(member=>member.name===name)||{},snapshot=settings.resolve(name,profile),worker=buildAgent(profile,org.state,snapshot.route||{});
-  const input={...task,conversation:conversationFor(task.id)};
+  const input={...task,conversation:conversationFor(task.id),memory:memoryFor(name)};
   if(snapshot.dryRun)return {text:await dryRun(worker,input),by:'dry-run'};
   if(snapshot.invalid)throw new Error('Agen ini belum punya provider/model yang valid. Atur di Pengaturan.');
   const result=await askConfigured(snapshot,worker,input);return {text:result.answer,by:result.route?.modelId||worker.model};
@@ -369,7 +431,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     const stamp=Date.now(),archiveFile=archiveTasks(stamp),workspaceArchiveName=`workspace-${stamp}.json`;
     fs.writeFileSync(path.join(DATA_DIR,'archive',workspaceArchiveName),JSON.stringify(workspaceExport(state),null,2),{mode:0o600});
     const result=org.reset(input.version);for(const task of tasks)await previews.stop(task.id);
-    commit(draft=>{for(const key of ['tasks','threads','messages','decisions','events','projects','jobs'])draft[key]=[];draft.reads={owner:{}};draft.requests={};});
+    commit(draft=>{for(const key of ['tasks','threads','messages','decisions','events','projects','jobs'])draft[key]=[];draft.reads={owner:{}};draft.requests={};draft.memories={};});
     return send(res,200,{archiveFile,archiveName:path.basename(archiveFile),workspaceArchiveName,org:result});
   }
   if(url.pathname==='/api/workspace/export'&&req.method==='GET'){
@@ -391,7 +453,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     const roster=agentMembers();const entries=Object.entries(roster).map(([name,a])=>{const route=settings.resolve(name,a);return [name,{role:a.role,model:route.modelId||a.model||MODEL,provider:route.provider?.displayName||null,mode:route.dryRun?'dry-run':'claude'}]});const dry=entries.every(([,a])=>a.mode==='dry-run');return send(res,200,{mode:dry?'dry-run':'claude',model:dry?null:MODEL,settingsVersion:settings.publicState().version,members:Object.fromEntries(entries)});
   }
   if (url.pathname === '/api/settings' && req.method === 'PUT') {
-    const input=await readJson(req);const result=settings.save(input,input.version);return send(res,200,result);
+    const input=await readJson(req);const result=settings.save(input,input.version);modelGate.poke();return send(res,200,result);
   }
   const modelMatch=url.pathname.match(/^\/api\/settings\/providers\/([^/]+)\/models$/);
   if(modelMatch&&req.method==='POST'){
@@ -448,6 +510,14 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     const content=projects.readFile(projectId,revisionId,file);
     res.writeHead(200,{'content-type':'text/plain; charset=utf-8','content-disposition':`attachment; filename="${path.basename(file).replace(/[^\w.-]/g,'_')}"`,'x-content-type-options':'nosniff','cache-control':'no-store'});return res.end(content);
   }
+  // Owner copies a verified revision to a folder of their choice (e.g. E:\Vibe\Calculator); overwrite needs explicit consent.
+  const exportMatch=url.pathname.match(/^\/api\/projects\/([0-9a-f-]{36})\/revisions\/([0-9a-f-]{36})\/export$/);
+  if(exportMatch&&req.method==='POST'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req);
+    try{return send(res,200,projects.exportRevision(exportMatch[1],exportMatch[2],typeof input?.target==='string'?input.target:'',{overwrite:input?.overwrite===true}));}
+    catch(error){if(error.code==='EXPORT_NOT_EMPTY')return send(res,409,{error:error.message,code:error.code});throw error;}
+  }
   if(url.pathname==='/api/execution/environments'&&req.method==='GET')return send(res,200,await runner.environments());
   const previewMatch=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})\/application\/(preview|stop-preview)$/);
   if(previewMatch&&req.method==='POST'){
@@ -477,11 +547,20 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     return send(res,200,{threadId:id,throughSeq:taskStore.snapshot().reads.owner[id]||0});
   }
   const threadMatch=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})\/(thread|messages)$/);
+  // Agent memory: the owner reads, edits or clears what an agent carries into its next task.
+  const memoryMatch=url.pathname.match(/^\/api\/agents\/([^/]+)\/memory$/);
+  if(memoryMatch&&['GET','PUT'].includes(req.method)){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const name=decodeURIComponent(memoryMatch[1]);if(!org.state.members.some(m=>m.name===name))return send(res,404,{error:'Anggota tidak ditemukan.'});
+    if(req.method==='PUT'){const input=await readJson(req);const items=(Array.isArray(input?.items)?input.items:[]).map(i=>text(i?.text,MEMORY_TEXT)).filter(Boolean).slice(-MEMORY_LIMIT);
+      commit(draft=>{draft.memories=draft.memories||{};draft.memories[name]=items.map(t=>({text:t,at:now()}));});}
+    return send(res,200,{agent:name,items:taskStore.snapshot().memories?.[name]||[],limit:MEMORY_LIMIT});
+  }
   const activityMatch=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})\/activity$/);
   if(activityMatch&&req.method==='GET'){
     if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
     const result=activityFor(taskStore.snapshot(),activityMatch[1],{agents:Object.keys(agentMembers())});
-    return result?send(res,200,result):send(res,404,{error:'Task not found.'});
+    return result?send(res,200,{...result,typing:liveTyping.get(activityMatch[1])||null}):send(res,404,{error:'Task not found.'});
   }
   if(threadMatch&&req.method==='GET'&&threadMatch[2]==='thread'){
     const state=taskStore.snapshot();if(!state.tasks.some(t=>t.id===threadMatch[1]))return send(res,404,{error:'Task not found.'});
@@ -503,7 +582,10 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
       return send(res,201,{...message,answeredDecision:true,pendingForNextStep:false});}
     // A running agent reads this in its next model call; it is not claimed as consumed now.
     const message=commit((draft,emit)=>addMessage(draft,emit,{task:draft.tasks.find(t=>t.id===task.id),sender:{type:'owner',name:'Owner'},text:body}),{requestKey:req.headers['x-kantor-request']});
-    return send(res,201,{...message,pendingForNextStep:task.status==='active'});
+    // Not running and nothing pending: the assignee replies now instead of the message sitting unanswered.
+    const willReply=task.status!=='active'&&!!agentFor(task.assignee);
+    if(willReply)setImmediate(()=>ownerReply(task.id,message.id).catch(error=>console.error(`Owner reply failed: ${error.message}`)));
+    return send(res,201,{...message,pendingForNextStep:task.status==='active',willReply});
   }
   const decisionMatch=url.pathname.match(/^\/api\/decisions\/([0-9a-f-]{36})\/answer$/);
   if(decisionMatch&&req.method==='POST'){
@@ -569,7 +651,10 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
       if(input.action==='approve'&&!text(task.result,10000))return send(res,409,{error:'Belum ada hasil yang bisa disetujui. Minta lead menyusun hasil dulu.',code:'RESULT_REQUIRED'});
       if(input.action==='revise'&&task.outputType==='application'){await previews.stop(task.id);task.evidence=null;task.phase='queued';task.repairAttempts=0;}
       Object.assign(task,{status:input.action==='approve'?'done':'queued',feedback:input.action==='revise'?text(input.feedback,5000):'',reviewedAt:input.action==='approve'?now():null,runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
-      if(input.action==='approve')promoteParent(task.parentId);
+      if(input.action==='approve'){promoteParent(task.parentId);
+        const answers=taskStore.snapshot().decisions.filter(d=>d.taskId===task.id&&d.status==='answered'&&d.kind!=='approval').map(d=>`${!d.answeredBy||d.answeredBy==='Owner'?'Owner':`Lead ${d.answeredBy}`} menjawab untuk "${task.title}": ${d.answer}`);
+        const summary=`Tugas selesai & disetujui owner: "${task.title}". Hasil: ${String(task.result||'').split('\n').find(l=>l.trim())||'-'}`;
+        commit(draft=>{remember(draft,task.assignee,[...answers,summary]);});}
       save();send(res,200,task);setImmediate(kick);return;
     }
     if(input.message!==undefined){
@@ -603,7 +688,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
   }
   send(res, 404, {error: 'Not found.'});
 }
-const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.ico': 'image/x-icon'};
+const TYPES = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.ico': 'image/x-icon', '.jpg': 'image/jpeg', '.glb': 'model/gltf-binary', '.hdr': 'application/octet-stream'};
 function serveFile(res, url) {
   let file;
   try { file = path.join(PUBLIC, decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname)); } catch { return send(res, 400, {error: 'Bad path.'}); }
