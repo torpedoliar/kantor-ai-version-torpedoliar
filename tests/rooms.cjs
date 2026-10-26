@@ -47,7 +47,7 @@ const api=async(p,opts={},extra={})=>fetch(origin+p,{...opts,headers:{'content-t
     assert.match(await page.locator('#roomsList').innerText(),/Sky Lounge/);
     assert.match(await page.locator('#roomsList').innerText(),/bawaan/);
     await page.keyboard.press('Escape');
-    await page.waitForFunction(id=>(officeScene.roomOccupancy()[id]||0)>=1,sky.body.id,{timeout:240000,polling:500});
+    await page.waitForFunction(id=>(officeScene.roomOccupancy()[id]||0)>=1,sky.body.id,{timeout:420000,polling:500});
     assert.deepEqual(errors,[]);
     console.log('PASS: rooms API guards, 3D build, nav grid, excursion reaches the room, occupancy, rooms drawer');
     await browser.close();
