@@ -1097,7 +1097,7 @@
   // through the stairs like any built-in place. applyRooms rebuilds them without a page reload.
   let customRooms=[];
   try{const roomsResponse=await fetch('/api/rooms',{cache:'no-store'});if(roomsResponse.ok){const list=await roomsResponse.json();if(Array.isArray(list))customRooms=list.filter(r=>!r.builtIn&&Number.isFinite(r.x)&&Number.isFinite(r.z));}}catch{/* static host: built-in office only */}
-  const roomSpots=[],roomGroups=new Map();
+  const roomSpots=[],roomGroups=new Map(),roomDoors=[];
   const ROOM_RUGS={meeting:0xe6ded0,focus:0xdfe3d6,lounge:0xe8cfc0,pantry:0xb3c0a0,musholla:0xdfe3d6,custom:0xd8cfc0};
   const ROOM_SEAT=0xd9d2c3;
   function roomChair(parent,x,z,f){
@@ -1161,6 +1161,37 @@
         addSeat(lx,lz,Math.PI,'pray');
       }
     }
+    // Focus and meeting rooms are enclosed: glass partitions, window frames and an auto door
+    // with a nameplate, so a private office reads as a room instead of an open patch of rug.
+    if(room.type==='focus'||room.type==='meeting'){
+      const H=2.4,half=room.w/2-.03,front=room.d/2-.03,back=-room.d/2+.03;
+      const doorW=Math.max(.8,Math.min(.9,room.w-.6)),gapLeft=Math.max(-half+.2,half-doorW-.3),gapRight=gapLeft+doorW;
+      const wall=(w,h,d,x,y,z)=>box(w,h,d,'glass',x,y,z,group);
+      wall(room.w-.06,H,.05,0,0,back);
+      wall(.05,H,room.d-.1,-half,0,0);wall(.05,H,room.d-.1,half,0,0);
+      wall(gapLeft-half,H,.05,(gapLeft-half)/2,0,front);
+      wall(half-gapRight,H,.05,(gapRight+half)/2,0,front);
+      for(const [px,pz] of [[-half,back],[half,back],[-half,front],[half,front],[gapLeft,front],[gapRight,front]])box(.08,H,.08,DOOR_FRAME,px,0,pz,group);
+      box(room.w,.07,.1,DOOR_FRAME,0,H,back,group);box(room.w,.07,.1,DOOR_FRAME,0,H,front,group);
+      box(.1,.07,room.d,DOOR_FRAME,-half,H,0,group);box(.1,.07,room.d,DOOR_FRAME,half,H,0,group);
+      // Window transoms along the sides and the back wall.
+      for(const px of [-half,half])box(.06,.06,room.d-.1,DOOR_FRAME,px,1.05,0,group);
+      box(room.w-.1,.06,.06,DOOR_FRAME,0,1.05,back,group);
+      // The door hinges at the gap and swings inward; the walking grid treats it as open.
+      const pivot=new THREE.Group();pivot.position.set(gapLeft,0,front);pivot.userData.walkable=true;group.add(pivot);
+      box(doorW-.04,2.12,.05,'glass',doorW/2,0,0,pivot);box(.03,.5,.08,DARK,doorW-.14,1.0,0,pivot);
+      roomDoors.push({pivot,base:0,center:new THREE.Vector3(room.x+gapLeft+doorW/2,0,room.z+front),floor:room.floor,open:0});
+      // Nameplate above the door, readable from outside.
+      const c=document.createElement('canvas');c.width=512;c.height=96;const ctx=c.getContext('2d');
+      ctx.fillStyle='#fbf8f2';ctx.fillRect(0,0,512,96);ctx.strokeStyle='#2a2622';ctx.lineWidth=4;ctx.strokeRect(2,2,508,92);
+      ctx.fillStyle='#1e2230';ctx.font='700 44px Archivo, system-ui, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+      const full=String(room.name).toUpperCase();let label=full;while(ctx.measureText(label).width>480&&label.length>4)label=label.slice(0,-2);
+      if(label!==full)label=label.trimEnd()+'…';
+      ctx.fillText(label,256,50);
+      const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+      const sign=new THREE.Mesh(new THREE.PlaneGeometry(1.1,.21),new THREE.MeshBasicMaterial({map:tex}));
+      sign.position.set((gapLeft+gapRight)/2,H+.2,front+.03);group.add(sign);
+    }
     for(const item of room.furniture??[])roomFurniture(group,item);
     textPlane(String(room.name).toUpperCase(),room.x,room.z+room.d/2+.7,Math.min(6,room.w),'#5c554b',floors[room.floor]);
     return {group,seats};
@@ -1168,6 +1199,8 @@
   const roomPool=floor=>floor===1?floorBreaks:floor===2?dining:floor===ROOF?roofSpots:hangouts;
   function applyRooms(list){
     for(const group of roomGroups.values())group.parent?.remove(group);
+    for(const door of roomDoors){const at=doors.indexOf(door);if(at>=0)doors.splice(at,1);}
+    roomDoors.length=0;
     for(const spot of roomSpots){const pool=roomPool(spot.floor),i=pool.indexOf(spot);if(i>=0)pool.splice(i,1);const j=prayerSpots.indexOf(spot);if(j>=0)prayerSpots.splice(j,1);}
     roomSpots.length=0;roomGroups.clear();
     customRooms=(list||[]).filter(r=>!r.builtIn&&Number.isFinite(r.x)&&Number.isFinite(r.z));
@@ -2539,6 +2572,7 @@
     for(const level of Object.keys(floors).map(Number).filter(l=>l>ROOF&&!want.includes(l))){
       // Seats that lived on a removed storey must not strand the routine pools.
       for(let i=hangouts.length-1;i>=0;i--)if(hangouts[i].floor===level)hangouts.splice(i,1);
+      for(let i=roomDoors.length-1;i>=0;i--)if(roomDoors[i].floor===level)roomDoors.splice(i,1);
       for(let i=roomSpots.length-1;i>=0;i--)if(roomSpots[i].floor===level){const pool=roomPool(roomSpots[i].floor);const k=pool.indexOf(roomSpots[i]);if(k>=0)pool.splice(k,1);roomSpots.splice(i,1);}
       scene.remove(floors[level]);delete floors[level];delete navGrids[level];
       disposeFade(facadeLevels[level]);facadeLevels[level]?.parent?.remove(facadeLevels[level]);delete facadeLevels[level];

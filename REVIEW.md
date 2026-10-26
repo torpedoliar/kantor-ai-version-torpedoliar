@@ -4,7 +4,7 @@
 
 Ruangan kini bisa punya **pemilik**: kursinya hanya dipilih pemilik saat rutinitas, rapat/undangan memerlukan pemiliknya, dan panel detail pemilik menampilkan tombol **Ruang pribadi** (perintah eksplisit; dihormati juga saat pemilik sedang naik kendaraan — flag `commanded` mencegah reroute mobility menimpa perintah). Lantai kerja tambahan yang dibuat otomatis saat divisi banyak tidak lagi berupa meja dan kursi saja: ruang rapat kaca berisi meja dan enam kursi (kursinya dipakai rapat), pantry dengan counter dan stool, lounge sofa, rak pemisah lorong, planter jendela, dan papan nama lantai — semua dibersihkan lagi saat lantai itu dibuang.
 
-Uji: `tests/rooms.cjs` (owner API, tombol ruang pribadi, tidak ada penyusup), `tests/graphics-dynamic-floors.cjs` (perabot lantai ekstra), `tests/mobility-journey.cjs` (perintah tetap dihormati selama perjalanan kendaraan). Unit 71/71 dan suite UI terkait hijau.
+Ruangan fokus dan rapat custom kini berpagar kaca: dinding kaca, kusen putih dengan transom jendela, pintu otomatis berpegangan, dan papan nama di atas pintu; pintu memakai pad walkable sehingga nav grid dapat dilalui dan dibersihkan saat ruangan dihapus. Uji: `tests/rooms.cjs` (owner API, tombol ruang pribadi, tidak ada penyusup), `tests/graphics-dynamic-floors.cjs` (perabot lantai ekstra), `tests/mobility-journey.cjs` (perintah tetap dihormati selama perjalanan kendaraan). Unit 71/71 dan suite UI terkait hijau.
 
 ## Porting advice atasan dan ruangan custom ke arsitektur v2 (25 Okt 2026)
 
