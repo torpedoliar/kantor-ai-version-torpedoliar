@@ -480,7 +480,7 @@
     area.seats.forEach((name,index)=>{
       // Seat clearance follows the active rig: the legacy chibi head projects far forward, the textured adult does
       // not, so adults sit close enough for their hands to rest on the keyboard at the table edge.
-      const halfDepth=(full?2.3:1.7)/2,seatOffset=PEOPLE?halfDepth+.42:1.85;
+      const halfDepth=(full?2.3:1.7)/2,seatOffset=PEOPLE?halfDepth+.30:1.85;
       const side=full?(index<cols?-1:1):1,f=-side,x=slot.x+xs[index%cols],z=slot.z+side*seatOffset;
       const item=chair(x,z,f,color);item.generated=true;items.push(item);
       // Adults: monitor stands back on the desk, keyboard on the near edge. Legacy rig keeps its original layout.
@@ -1591,7 +1591,7 @@
       leg=[[Math.sin(w)*.5,Math.max(0,Math.sin(w+1.3))*.75],[-Math.sin(w)*.5,Math.max(0,-Math.sin(w+1.3))*.75]];
       arm=[[-Math.sin(w)*.4,.07,-.25],[Math.sin(w)*.4,.07,-.25]];bodyY=Math.abs(Math.sin(w))*.03;lean=.05;
     }else if(sitting){
-      leg=[[-Math.PI/2,Math.PI/2],[-Math.PI/2,Math.PI/2]];bodyY=-(agent.rig.seatDrop??.29);bodyZ=state==='lounge'||state==='call'?.05:.2;
+      leg=[[-Math.PI/2,Math.PI/2],[-Math.PI/2,Math.PI/2]];bodyY=-(agent.rig.seatDrop??.29);bodyZ=state==='lounge'||state==='call'?.05:(agent.rig.bones?.06:.2);
       if(state==='work'){const typing=Math.sin(t*.65+i*2)>.1,k=typing?Math.sin(t*10+i)*.045:0;arm=[[-.9+k,.12,-.67],[typing?-.9-k:-.65,.12,typing?-.67:-.85]];lean=.08+Math.sin(t*.8+i)*.025;
         // Textured adults reach the actual keyboard: shoulder pitch/elbow come from two-bone IK on real limb lengths.
         if(agent.rig.reach){const r=agent.rig.reach(agent.keyboardReach||keyboardReach(agent));if(r){lean=r.lean+Math.sin(t*.8+i)*.02;arm=[[r.shoulder+k,.1,r.elbow],[typing?r.shoulder-k:r.shoulder+.25,.1,typing?r.elbow:r.elbow-.2]];}}}
