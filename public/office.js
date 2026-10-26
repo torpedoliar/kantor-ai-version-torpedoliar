@@ -1142,11 +1142,26 @@
       for(let i=0;i<cap;i++)addSeat((i-(cap-1)/2)*Math.min(1.35,sw/Math.max(cap,1)),-room.d/2+.85,0,'lounge');
       cylinder(.55,.55,.06,BALSA,0,.5,room.d/2-1,group);cylinder(.07,.12,.48,DARK,0,.06,room.d/2-1,group);
     }else if(room.type==='focus'){
-      mesh(softBox(1.8,.14,.9),BALSA,0,.88,0,group,false);
-      for(const sx of [-1,1])box(.09,.82,.09,DARK,sx*.7,.06,0,group);
-      box(.07,.17,.07,DARK,0,.95,-.25,group);box(.9,.55,.06,DARK,0,1.12,-.25,group);box(.8,.45,.015,SCREEN,0,1.18,-.2,group);
-      seated(0,.95,-1,'work');
-      roomPlant(group,room.w/2-.5,-room.d/2+.5,.5);
+      // A large focus room is a leader's office: the desk sits at the back, the owner faces the
+      // door, guest chairs face the desk, and a credenza, lamp and plants fill the extra space.
+      const executive=room.w>=3.2&&room.d>=4;
+      const deskZ=executive?-room.d/2+2.2:0,dw=executive?Math.min(2.6,room.w-1.4):1.8,dd=executive?1.05:.9;
+      mesh(softBox(dw,.14,dd),BALSA,0,.88,deskZ,group,false);
+      for(const sx of [-1,1])box(.09,.82,.09,DARK,sx*(dw/2-.2),.06,deskZ,group);
+      box(.07,.17,.07,DARK,0,.95,deskZ-.25,group);box(.9,.55,.06,DARK,0,1.12,deskZ-.25,group);box(.8,.45,.015,SCREEN,0,1.18,deskZ-.2,group);
+      if(executive){
+        seated(0,deskZ+.85,1,'work'); // behind the desk, facing the door (+z)
+        for(const gx of [-.95,.95])roomChair(group,gx,deskZ+2.9,-1); // guests face the leader
+        box(.5,.72,2.2,BALSA,-room.w/2+.32,0,deskZ+1.1,group);
+        box(.55,.05,2.3,CARD,-room.w/2+.32,.72,deskZ+1.1,group);
+        cylinder(.18,.3,.36,0x7f9a82,-room.w/2+.45,0,room.d/2-1.6,group);
+        cylinder(.03,.03,.9,DARK,-room.w/2+.45,.36,room.d/2-1.6,group);
+        roomPlant(group,room.w/2-.55,room.d/2-.8,.9);
+        roomPlant(group,room.w/2-.5,-room.d/2+.6,.55);
+      }else{
+        seated(0,.95,-1,'work');
+        roomPlant(group,room.w/2-.5,-room.d/2+.5,.5);
+      }
     }else if(room.type==='pantry'){
       box(room.w-1,.9,.7,0xcdb28a,0,0,-room.d/2+.45,group);
       box(room.w-.9,.06,.8,CARD,0,.9,-room.d/2+.45,group);
