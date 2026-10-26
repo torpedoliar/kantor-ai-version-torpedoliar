@@ -13,9 +13,14 @@
   };
   const ROOM_KINDS = ['table', 'chair', 'sofa', 'board', 'plant'];
   const PLAN = {w: 360, h: 272, scale: 10}; // the 32x24 floor slab, 10px per metre
-  let roomsList = [], editingRoom = null, planRoom = null, planDrag = null, csrf = '', stamp = '';
+  let roomsList = [], editingRoom = null, planRoom = null, planDrag = null, csrf = '', stamp = '', members = [];
 
   const message = text => { el('roomsMessage').textContent = text || ''; };
+  const memberNames = () => members.map(m => m.name);
+  async function loadMembers() {
+    if (memberNames().length) return;
+    try { const org = await call('GET', '/api/org'); members = (org.members || []).filter(m => m.active !== false); } catch {/* rooms list still works without names */}
+  }
   async function call(method, path, body) {
     const token = sessionStorage.getItem('kantor-ai.orgToken') || '';
     const response = await fetch(path, {method, headers: {'content-type': 'application/json', origin: location.origin, 'x-kantor-csrf': csrf, ...(token ? {'x-kantor-org': token} : {})}, body: body && JSON.stringify(body)});
@@ -50,7 +55,7 @@
       const row = document.createElement('div'); row.className = 'room-row';
       const strong = document.createElement('strong'); strong.textContent = room.name;
       const meta = document.createElement('span'); meta.className = 'task-meta';
-      meta.textContent = `L${String(room.floor).padStart(2, '0')} · ${ROOM_TYPES[room.type]?.label || room.type} · ${room.capacity} kursi${room.builtIn ? ' · bawaan' : ''}`;
+      meta.textContent = `L${String(room.floor).padStart(2, '0')} · ${ROOM_TYPES[room.type]?.label || room.type} · ${room.capacity} kursi${room.owner ? ` · milik ${room.owner}` : ''}${room.builtIn ? ' · bawaan' : ''}`;
       const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = 'Ubah'; edit.onclick = () => openRoomForm(room);
       row.append(strong, meta, edit);
       if (!room.builtIn) {
@@ -76,6 +81,11 @@
     el('roomKind').replaceChildren(...ROOM_KINDS.map(kind => { const option = document.createElement('option'); option.value = kind; option.textContent = kind; return option; }));
     el('roomFloor').disabled = locked; el('roomType').disabled = locked; el('roomCapacity').disabled = locked;
     el('roomCapacity').value = room?.capacity ?? ROOM_TYPES.lounge.capacity;
+    // Private rooms: seats belong to one member; everyone else cannot pick them.
+    el('roomOwner').replaceChildren(...['', ...memberNames()].map(name => { const option = document.createElement('option'); option.value = name; option.textContent = name || 'Publik (siapa saja)'; return option; }));
+    el('roomOwner').value = room?.owner || '';
+    el('roomOwner').disabled = locked;
+    loadMembers().then(() => { if (!el('roomForm').hidden) { el('roomOwner').replaceChildren(...['', ...memberNames()].map(name => { const option = document.createElement('option'); option.value = name; option.textContent = name || 'Publik (siapa saja)'; return option; })); el('roomOwner').value = room?.owner || ''; } });
     const template = ROOM_TYPES[room?.type || 'lounge'];
     planRoom = room
       ? {x: room.x, z: room.z, w: room.w, d: room.d, furniture: (room.furniture || []).map(item => ({...item}))}
@@ -164,7 +174,8 @@
     const body = locked
       ? {name: el('roomName').value.trim()}
       : {name: el('roomName').value.trim(), floor: Number(el('roomFloor').value), type: el('roomType').value,
-         capacity: Number(el('roomCapacity').value) || 1, x: planRoom.x, z: planRoom.z, w: planRoom.w, d: planRoom.d, furniture: planRoom.furniture};
+         capacity: Number(el('roomCapacity').value) || 1, owner: el('roomOwner').value || null,
+         x: planRoom.x, z: planRoom.z, w: planRoom.w, d: planRoom.d, furniture: planRoom.furniture};
     try {
       const saved = editingRoom ? await call('PATCH', `/api/rooms/${encodeURIComponent(editingRoom)}`, body) : await call('POST', '/api/rooms', body);
       message(`${saved.name} tersimpan dan kantor 3D diperbarui.`);

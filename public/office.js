@@ -1175,7 +1175,7 @@
     for(const room of customRooms){
       if(!floors[room.floor])continue; // a floor the scene does not have cannot host a room
       const built=buildRoom(room);roomGroups.set(room.id,built.group);
-      for(const spot of built.seats){roomSpots.push(spot);if(spot.state==='pray')prayerSpots.push(spot);else roomPool(room.floor).push(spot);}
+      for(const spot of built.seats){spot.ownerRoom=room.owner||null;roomSpots.push(spot);if(spot.state==='pray')prayerSpots.push(spot);else roomPool(room.floor).push(spot);}
       touched.add(room.floor);
     }
     // Room furniture joins the collision grid exactly like an edited desk.
@@ -1415,6 +1415,8 @@
   const STAIR_DOOR=[-16,7.5];
   function setPath(agent,spot) {
     clearActivity(agent);
+    // A new destination (command or routine) outranks mobility's own return-to-desk reroutes.
+    agent.commanded=spot!==agent.desk;
     // A new command changes the destination, but never pulls a person off a flight mid-step.
     if(agent.state==='stairs'){agent.destination=spot;return;}
     if(agent.spot===spot){agent.destination=spot;agent.path=[];arrive(agent);return;}
@@ -1433,6 +1435,7 @@
   }
   function arrive(agent) {
     const spot=agent.destination;agent.spot=spot;agent.state=spot.state||(spot===agent.desk||isWork(spot.floor)?'work':'break');
+    agent.commanded=false;
     const activity=agent.activity;
     if(activity?.spot===spot){if(activity.meeting)settleMeeting(activity.meeting);else activity.until=simTime+activity.duration;}
     if(spot===agent.desk&&agent.nextRoutine<simTime+8)agent.nextRoutine=simTime+rand(8,25);
@@ -1468,6 +1471,8 @@
   }
   const reservedByOthers=(spot,allowed=[])=>!!spot.occupant&&!allowed.includes(spot.occupant)||agents.some(a=>a.destination===spot&&!allowed.includes(a));
   const reserved=spot=>spot.blocked||reservedByOthers(spot);
+  // An owned room is private: only its member picks its seats (a removed member makes it public again).
+  const roomOwnerAllows=(agent,spot)=>!spot.ownerRoom||spot.ownerRoom===agent.n||!agents.some(a=>a.n===spot.ownerRoom);
   const routineSpots=floor=>floor===1?floorBreaks:floor===2?dining:floor===ROOF?roofSpots:hangouts;
   function assign(agent,spot,duration,extra={}) {
     setPath(agent,spot);
@@ -1477,10 +1482,10 @@
   }
   function startActivity(agent) {
     const idle=agents.filter(o=>o!==agent&&o.floor===agent.floor&&o.state==='work'&&o.spot===o.desk&&!o.visitor&&!o.activity);
-    const excursions=shuffle([1,2,4]).map(floor=>shuffle(routineSpots(floor).filter(spot=>!reserved(spot))).find(Boolean)).filter(Boolean);
+    const excursions=shuffle([1,2,4]).map(floor=>shuffle(routineSpots(floor).filter(spot=>!reserved(spot)&&roomOwnerAllows(agent,spot))).find(Boolean)).filter(Boolean);
     const away=agents.filter(a=>a.activity).length;
     if(excursions.length&&away<MAX_AWAY&&Math.random()<.35){const spot=pick(excursions);assign(agent,spot,rand(6,11));log(`${agent.n} ${spot.label||ACTIVITY_LOG[spot.state]||'beristirahat'}`,agent.group);return;}
-    const open=kind=>hangouts.filter(s=>s.state===kind&&!reserved(s));
+    const open=kind=>hangouts.filter(s=>s.state===kind&&!reserved(s)&&roomOwnerAllows(agent,s));
     const prefer=list=>{const mates=list.filter(o=>o.group===agent.group);return mates.length&&Math.random()<.6?mates:list;};
     const roll=Math.random();
     if(roll<.28&&idle.length){const host=pick(prefer(idle));assign(agent,visitSpot(host),rand(7,12));host.visitor=agent;log(`${agent.n} menghampiri ${host.n}`,agent.group);return;}
@@ -1513,8 +1518,8 @@
     for(const a of agents){
       if(!a.vehicleTrip)continue;
       const trip=byId.get(a.vehicleTrip);
-      if(!trip){a.vehicleTrip=null;a.vehiclePhase=null;a.g.visible=true;a.rig.figure.visible=true;setPath(a,a.desk);continue;}
-      if(!window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),tasksKnown())||!routineOn)mobility.recall(a.n);
+      if(!trip){a.vehicleTrip=null;a.vehiclePhase=null;a.g.visible=true;a.rig.figure.visible=true;setPath(a,a.commanded&&a.destination?a.destination:a.desk);continue;}
+      if(!window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),tasksKnown())||!routineOn){mobility.recall(a.n);a.commanded=false;}
       a.vehiclePhase=trip.phase;
       if(trip.phase==='walkToVehicle'){
         if(a.floor===1&&a.spot===a.vehicleSpot)mobility.arrive(trip.id,'walkToVehicle');
@@ -1524,10 +1529,12 @@
         const v=snapshot.vehicles.find(v=>v.id===trip.id);if(v){const riding=v.kind==='motorcycle';a.g.visible=riding;a.rig.figure.visible=riding;if(a.floor!==1){a.floor=1;moveTo(floors[1],a.g);}a.g.position.set(...v.pose);a.g.rotation.y=v.heading;if(riding){const rig=a.rig;rig.body.position.set(0,-(rig.seatDrop??.29)+.22,-.12);rig.hips.rotation.set(.12,0,0);for(const leg of rig.legs){leg.thigh.rotation.x=-1.35;leg.knee.rotation.x=1.3;}for(const arm of rig.arms){arm.shoulder.rotation.x=-.8;arm.shoulder.rotation.z=0;arm.elbow.rotation.x=-.6;}rig.sync?.();if(!a.helmet){a.helmet=new THREE.Mesh(new THREE.SphereGeometry(.135,16,10,0,Math.PI*2,0,Math.PI*.7),new THREE.MeshStandardMaterial({color:0x232c34,roughness:.45}));const head=rig.bones?.get('head')||rig.head;head.add(a.helmet);a.helmet.position.set(0,.13,0);}a.helmet.visible=true;}}
       }else if(trip.phase==='dismount'){
         a.g.visible=true;a.rig.figure.visible=true;if(a.helmet)a.helmet.visible=false;a.state='stretch';const spot=a.vehicleSpot;a.g.position.set(spot.x,0,spot.z);a.floor=1;moveTo(floors[1],a.g);a.spot=spot;a.destination=spot;
-        mobility.arrive(trip.id,'dismount');setPath(a,a.desk);
+        mobility.arrive(trip.id,'dismount');setPath(a,a.commanded&&a.destination?a.destination:a.desk);
       }else if(trip.phase==='walkToOffice'){
-        a.g.visible=true;a.rig.figure.visible=true;if(a.destination!==a.desk)setPath(a,a.desk);
-        if(a.spot===a.desk)mobility.arrive(trip.id,'walkToOffice');
+        a.g.visible=true;a.rig.figure.visible=true;
+        // A destination commanded while away survives the return; the trip just ends here.
+        if(a.commanded){mobility.arrive(trip.id,'walkToOffice');}
+        else{if(a.destination!==a.desk)setPath(a,a.desk);if(a.spot===a.desk)mobility.arrive(trip.id,'walkToOffice');}
       }
     }
     if(!routineOn||!tasksKnown()||performance.now()<nextExcursion||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
@@ -1536,7 +1543,7 @@
     if(!a)return;const kind=travelSerial%2?'motorcycle':'car';if(!environment.audit().loaded.includes(kind))return;
     const id=mobility.request({id:'team-trip-'+(++travelSerial),owner:a.n,kind:'team',vehicle:kind});if(!id)return;
     const trip=mobility.snapshot().trips.find(t=>t.id===id),bay=environment.layout.parking.find(p=>p.id===trip.parking);
-    a.vehicleTrip=id;a.vehiclePhase='walkToVehicle';a.vehicleSpot={x:bay.position[0]+(kind==='car'?1.35:.85),z:bay.position[2],floor:1,f:1,state:'stretch',route:[[7,7],[7,bay.position[2]]]};setPath(a,a.vehicleSpot);
+    a.vehicleTrip=id;a.vehiclePhase='walkToVehicle';a.vehicleSpot={x:bay.position[0]+(kind==='car'?1.35:.85),z:bay.position[2],floor:1,f:1,state:'stretch',route:[[7,7],[7,bay.position[2]]]};setPath(a,a.vehicleSpot);a.commanded=false;
   }
   function live(agent) {
     const activity=agent.activity;
@@ -1731,7 +1738,7 @@
     if(!members.length){status('Pilih minimal satu anggota tim.');return;}
     let spots;
     if(action==='meet'){
-      const free=hangouts.filter(s=>s.state==='meet'&&!reservedByOthers(s,members));
+      const free=hangouts.filter(s=>s.state==='meet'&&!reservedByOthers(s,members)&&(!s.ownerRoom||members.some(m=>m.n===s.ownerRoom)));
       // A group meets in one room: keep the first room that fits everyone.
       const byRoom=new Map();
       for(const s of free){const k=s.room||'seed-meeting';byRoom.set(k,[...(byRoom.get(k)||[]),s]);}
@@ -1739,11 +1746,11 @@
       if(!spots){status(`Tidak ada satu ruangan yang menampung ${members.length} orang. Pilih lebih sedikit orang atau kembalikan yang sedang di sana ke meja.`);return;}
     }else if(action!=='work'){
       const pool=action==='lunch'?dining:shuffle([...roofSpots]);
-      spots=pool.filter(s=>!reservedByOthers(s,members));
+      spots=pool.filter(s=>!reservedByOthers(s,members)&&(!s.ownerRoom||members.some(m=>m.n===s.ownerRoom)));
     }
     // Reserve the entire group before moving anyone; a full room must not split the invitation.
     if(spots&&spots.length<members.length){status(`Hanya ${spots.length} tempat tersedia. Pilih lebih sedikit orang atau kembalikan yang sedang di sana ke meja.`);return;}
-    members.forEach(a=>{clearActivity(a);if(a.vehicleTrip)mobility.recall(a.n);});
+    members.forEach(a=>{clearActivity(a);if(a.vehicleTrip){mobility.recall(a.n);a.commanded=false;}});
     members.forEach((a,i)=>{
       if(a.vehicleTrip)return;
       if(action==='meet')assign(a,spots[i],Infinity);
@@ -1769,6 +1776,19 @@
     for(const [action,text] of [['meet','Rapat bersama'],['lunch','Makan siang'],['roof','Rooftop'],['work','Kembali kerja']]){
       const button=document.createElement('button');button.className='btn';button.textContent=text;button.dataset.command=action;
       button.onclick=()=>{const chosen=new Set([...people.querySelectorAll('input:checked')].map(i=>i.value));commandMembers(scope.value==='person'?[agent]:agents.filter(a=>scope.value==='division'?a.group===agent.group:chosen.has(a.n)),action);};actions.append(button);
+    }
+    // The owner of a private room can work there with one click; routine leaves them alone until another command.
+    const privateSeat=roomSpots.find(s=>s.ownerRoom===agent.n);
+    if(privateSeat){
+      const button=document.createElement('button');button.className='btn';button.textContent='Ruang pribadi';button.dataset.command='private-room';
+      button.onclick=()=>{
+        const seat=roomSpots.find(s=>s.ownerRoom===agent.n);
+        if(!seat)return;
+        if(seat.occupant&&seat.occupant!==agent){status(`${seat.roomName} sedang dipakai ${seat.occupant.initials}.`);return;}
+        clearActivity(agent);assign(agent,seat,Infinity);
+        status(`${agent.initials} bekerja di ${seat.roomName}.`);log(`${agent.n} bekerja di ${seat.roomName}`,agent.group);
+      };
+      actions.append(button);
     }
     section.append(label,scope,people,actions);return section;
   }
@@ -2457,6 +2477,58 @@
   // The server organization replaces the built-in team as soon as tasks.js has loaded it.
   window.officeTasks.ready?.then(state=>{if(state?.members?.length||state?.divisions)applyOrg(state);});
   // The office follows the organization: desk areas from the seating plan, one work floor per four areas,
+  // Extra work floors (many divisions need more storeys) carry real furniture with usable seats,
+  // not just wall decor: a glass meeting room, pantry corner, lounge, divider shelf and planters.
+  function furnishExtraWorkFloor(level){
+    const f=floors[level];if(!f)return;
+    const atRoot=root;root=f;
+    const tag=(m,kind)=>{if(m)m.userData.decor=kind;return m;};
+    const plainChair=(x,z,facing)=>{
+      cylinder(.055,.15,.46,0x595d54,x,.06,z);
+      tag(mesh(softBox(.78,.17,.72),0xc9cfc4,x,.5,z,root,false),'meeting_chair');
+      mesh(softBox(.78,.78,.2),0xc9cfc4,x,.88,z-facing*.32,root,false);
+    };
+    // Meeting room (back left), matching the wall TV and rug dress() already adds there.
+    tag(box(5.9,.02,5.3,0xe6ded0,-12.9,.02,-9.25),'meeting_floor');
+    tag(box(4.1,2.4,.05,'glass',-13.95,0,-6.5),'glass_wall');
+    tag(box(.7,2.4,.05,'glass',-10.15,0,-6.5),'glass_wall');
+    tag(box(.05,2.4,5.5,'glass',-9.8,0,-9.25),'glass_wall');
+    for(const [x,z] of [[-11.9,-6.5],[-10.5,-6.5],[-9.8,-6.5],[-9.8,-11.9]])box(.1,2.45,.1,DARK,x,0,z);
+    tag(mesh(softBox(2.8,.14,1.4),BALSA,-13.2,.88,-9,root,false),'meeting_table');
+    for(const sx of [-1,1])for(const sz of [-1,1])box(.09,.8,.09,DARK,-13.2+sx*1.2,.06,-9+sz*.55);
+    for(const [x,z,face] of [[-14.2,-10.35,1],[-13.2,-10.35,1],[-12.2,-10.35,1],[-14.2,-7.65,-1],[-13.2,-7.65,-1],[-12.2,-7.65,-1]]){
+      plainChair(x,z,face);
+      hangouts.push(seat(x,z,face,level,-11.2,{state:'meet',room:`extra-meet-${level}`,label:'Menuju ruang rapat',occupant:null}));
+    }
+    textPlane('MEETING ROOM',-12.9,-5.8,4.6);
+    // Pantry corner (back right): counter, coffee machine, cups and two stools.
+    tag(box(4.6,.9,.8,0xcdb28a,11.8,0,-11.2),'pantry_counter');
+    box(4.7,.06,.9,CARD,11.8,.9,-11.2);
+    box(.45,.55,.45,CARD,10.4,.96,-11.25);cylinder(.2,.2,.45,0xc4dadb,10.4,1.51,-11.25);
+    for(const x of [12.1,12.4])cylinder(.08,.07,.16,CARD,x,.96,-11);
+    for(const x of [10.6,12.6]){
+      cylinder(.24,.24,.48,DARK,x,0,-10.4);
+      hangouts.push(seat(x,-10.2,-1,level,10,{state:'drink',room:`extra-pantry-${level}`,label:'Menuju pantry',occupant:null}));
+    }
+    textPlane('PANTRY',11.8,-8.9,3.6);
+    // Lounge (back middle): sofa, coffee table, two seats.
+    tag(box(3.4,.5,1.1,0xb8c3a6,-3.4,.25,-10.9),'lounge_sofa');
+    tag(box(3.4,.85,.3,0x9dab90,-3.4,.6,-11.38),'lounge_sofa');
+    cylinder(.6,.6,.06,BALSA,-3.4,.42,-8.9);cylinder(.08,.14,.42,DARK,-3.4,0,-8.9);
+    for(const x of [-4.4,-2.4])hangouts.push(seat(x,-10.7,1,level,-9.3,{state:'lounge',room:`extra-lounge-${level}`,label:'Menuju lounge',occupant:null}));
+    textPlane('LOUNGE',-3.4,-7.3,3.2);
+    // Divider shelf on the centre aisle and planters under the front windows.
+    box(.6,1.15,5.2,BALSA,0,0,6.8);
+    for(const y of [.38,.76])box(.62,.03,5.22,0xb89c70,0,y,6.8);
+    for(let i=0;i<10;i++)box(.4,.26+(i%3)*.04,.1+(i%2)*.06,[0x2f4a6b,CARD,0xb4623a,0x3f7a58,0x74598c][i%5],0,.42,4.6+i*.44);
+    for(const x of [-6,6]){
+      tag(box(3.4,.55,.7,BALSA,x,0,11.35),'planter');
+      for(let i=0;i<5;i++)box(.04,.5,.03,0xc9a577,x-1.4+i*.7,.03,11);
+      for(const dx of [-1.1,0,1.1])plant(x+dx,11.35,.42,.55);
+    }
+    tag(textPlane(floorName(level).toUpperCase(),-13.6,10.9,4.2),'floor_sign');
+    root=atRoot;
+  }
   // the rooftop always on top. Floors that disappear send their people to their new desks.
   function setFloorCount(count){
     const want=[3,...Array.from({length:count-1},(_,i)=>ROOF+1+i)];
@@ -2465,6 +2537,9 @@
     ORDER.splice(0,ORDER.length,1,2,...want,ROOF);
     for(const [level,oldY] of previousY){const delta=floorY(level)-oldY;if(delta){facadeLevels[level].children.forEach(o=>o.position.y+=delta);levelLights[level]?.children.forEach(o=>o.position.y+=delta);}}
     for(const level of Object.keys(floors).map(Number).filter(l=>l>ROOF&&!want.includes(l))){
+      // Seats that lived on a removed storey must not strand the routine pools.
+      for(let i=hangouts.length-1;i>=0;i--)if(hangouts[i].floor===level)hangouts.splice(i,1);
+      for(let i=roomSpots.length-1;i>=0;i--)if(roomSpots[i].floor===level){const pool=roomPool(roomSpots[i].floor);const k=pool.indexOf(roomSpots[i]);if(k>=0)pool.splice(k,1);roomSpots.splice(i,1);}
       scene.remove(floors[level]);delete floors[level];delete navGrids[level];
       disposeFade(facadeLevels[level]);facadeLevels[level]?.parent?.remove(facadeLevels[level]);delete facadeLevels[level];
       levelLights[level]?.parent?.remove(levelLights[level]);delete levelLights[level];
@@ -2472,7 +2547,7 @@
       delete thumbs[level];
     }
     for(const level of want)if(!floors[level]){
-      const atRoot=root;shell(level);for(const [x,z] of [[-14.6,-10.6],[14.6,-10.6],[14.6,10.6],[-12.5,10.6]])plant(x,z,.85);dress(level);root=atRoot;
+      const atRoot=root;shell(level);for(const [x,z] of [[-14.6,-10.6],[14.6,-10.6],[14.6,10.6],[-12.5,10.6]])plant(x,z,.85);dress(level);if(level>ROOF)furnishExtraWorkFloor(level);root=atRoot;
       mergeGroup(buildFacadeLevel(level)).traverse(o=>{o.castShadow=false;});prepareFade(facadeLevels[level]);buildLights(level);
     }
     for(const bridge of Object.values(stairways)){disposeFade(bridge);scene.remove(bridge);}for(const key of Object.keys(stairways))delete stairways[key];
@@ -2552,7 +2627,7 @@
     syncRoster:roster=>{const before=new Set(agents.map(a=>a.n)),s=window.officeTasks.state(),names=new Set((roster||[]).map(m=>m.name));applyOrg({...s,members:[...s.members.filter(m=>!names.has(m.name)),...(roster||[])]});const assigned=agents.filter(a=>!before.has(a.n)).map(a=>a.n);return {assigned,hotDesk:[],warnings:[]};},
     removeRosterMember:name=>{if(window.officeTasks?.state){const s=window.officeTasks.state();return applyOrg({...s,members:s.members.map(m=>m.name===name?{...m,active:false}:m)}).seated>=0;}const agent=agents.find(a=>a.n===name);if(!agent)return false;agent.active=false;agent.label.hidden=true;agent.g.visible=false;return true;},
     snapshot:()=>({shop:{states:shop.people.map(p=>p.state),barbers:barbers.map(b=>b.pose),cashier:cashier.pose},transitioning:!!transition,sky:skyline.visible,floor:activeFloor,paused,routine:routineOn,follow:follow&&{name:follow.agent.n,mode:follow.mode},cameraPosition:camera.position.toArray(),doors:doors.map(d=>Math.round(d.open*100)/100),camera:{theta:cam.theta,phi:cam.phi,radius:cam.radius,target:cam.target.toArray()},
-      team:agents.map(a=>({name:a.n,initials:a.initials,gender:a.gender,role:a.role,group:a.group,floor:a.floor,state:a.state,visible:a.g.visible,position:a.g.getWorldPosition(new THREE.Vector3()).toArray(),heading:new THREE.Euler().setFromQuaternion(a.g.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y,spotFacing:a.spot?facing(a.spot):null,path:a.path.slice(0,4).map(q=>q.map(v=>+v.toFixed(2))),pathLeft:a.path.length,blocked:+(a.blocked||0).toFixed(2),pass:a.passUntil>simTime,dest:a.destination&&[a.destination.x,a.destination.z],sitting:SIT.has(a.state)&&!a.spot?.standing,destination:a.destination.floor,activity:a.activity?.spot.state||null,atDesk:a.spot===a.desk,talkingWith:companions(a)[0]?.n||null})),
+      team:agents.map(a=>({name:a.n,initials:a.initials,gender:a.gender,role:a.role,group:a.group,floor:a.floor,state:a.state,visible:a.g.visible,position:a.g.getWorldPosition(new THREE.Vector3()).toArray(),heading:new THREE.Euler().setFromQuaternion(a.g.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y,spotFacing:a.spot?facing(a.spot):null,path:a.path.slice(0,4).map(q=>q.map(v=>+v.toFixed(2))),pathLeft:a.path.length,blocked:+(a.blocked||0).toFixed(2),pass:a.passUntil>simTime,dest:a.destination&&[a.destination.x,a.destination.z],sitting:SIT.has(a.state)&&!a.spot?.standing,destination:a.destination.floor,activity:a.activity?.spot.state||null,atDesk:a.spot===a.desk,talkingWith:companions(a)[0]?.n||null,roomName:a.spot?.roomName||null})),
       visibleFloors:Object.keys(floors).filter(k=>floors[k].visible).map(Number),
       models:window.officeModels3d?.status()||{loaded:0,failed:[]},
       graphics:(()=>{const L=GFX.LEVELS[gfxLevel]||{};return {environmentSource:scene.environment?envSource:null,level:gfxLevel,pending:gfxPending,shadows:renderer.shadowMap.enabled,environment:!!scene.environment,post:[...(L.ao&&composer?['sao']:[]),...(L.bloom&&composer?['bloom']:[])],aoSize:(()=>{const a=composer?.passes.find(p=>p instanceof ADD.SAOPass);return a?[a.saoRenderTarget.width,a.saoRenderTarget.height]:null;})(),textures:window.officeSurfaces?.tier?.()??L.textures??null,drawCalls:renderer.info.render.calls,textureCount:renderer.info.memory.textures};})()}),

@@ -1,5 +1,11 @@
 # Pemeriksaan kantor empat lantai
 
+## Ruang pribadi dan lantai kerja berperabot (25 Okt 2026)
+
+Ruangan kini bisa punya **pemilik**: kursinya hanya dipilih pemilik saat rutinitas, rapat/undangan memerlukan pemiliknya, dan panel detail pemilik menampilkan tombol **Ruang pribadi** (perintah eksplisit; dihormati juga saat pemilik sedang naik kendaraan — flag `commanded` mencegah reroute mobility menimpa perintah). Lantai kerja tambahan yang dibuat otomatis saat divisi banyak tidak lagi berupa meja dan kursi saja: ruang rapat kaca berisi meja dan enam kursi (kursinya dipakai rapat), pantry dengan counter dan stool, lounge sofa, rak pemisah lorong, planter jendela, dan papan nama lantai — semua dibersihkan lagi saat lantai itu dibuang.
+
+Uji: `tests/rooms.cjs` (owner API, tombol ruang pribadi, tidak ada penyusup), `tests/graphics-dynamic-floors.cjs` (perabot lantai ekstra), `tests/mobility-journey.cjs` (perintah tetap dihormati selama perjalanan kendaraan). Unit 71/71 dan suite UI terkait hijau.
+
 ## Porting advice atasan dan ruangan custom ke arsitektur v2 (25 Okt 2026)
 
 Dua fitur dari cabang `orchestrator-patterns` yang belum ada padanannya di v2 dikembalikan, menyesuaikan arsitektur baru: **advice atasan AI** kini berupa satu panggilan model ber-purpose `manager-review` lewat `askConfigured` (routing, gerbang konkurensi, dan dry-run yang sama), rekomendasinya masuk thread tugas sebagai pesan `advice` plus event `manager.advice`, gagal diparkir di `adviceError` dengan aksi owner-only `retry-advice`, dan restart server mengulang review yang belum selesai. **Ruangan custom** kini store `data/rooms.json` dengan API owner-gated, drawer Ruang berisi denah 2D (seret snap 0,5 m + furnitur katalog), dan pembangunan ulang tanpa muat ulang lewat `officeScene.applyRooms` — spot kursi masuk pool rutinitas lantainya sehingga ekskursi antar-lantai menjemputnya, musholla custom ikut pool waktu salat, rapat selalu satu ruangan, dan hapus ruangan berpenghuni ditolak. Validasi murni tetap di `server/rooms.js`.

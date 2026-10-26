@@ -30,6 +30,7 @@ const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
   for(const facade of expandedAudit.facades)assert.ok(Math.abs(facade.minY-(floorHeights[facade.level]-.54))<.05,`facade ${facade.level} aligned to its own storey: ${facade.minY} vs ${floorHeights[facade.level]-.54}`);
   const decor=await page.evaluate(l=>officeScene.decor(l),extra.level);
   assert.ok(decor.kinds.includes('painting')&&decor.kinds.includes('window_frame'),'additional work floor gets room dressing, not an empty shell');
+  for(const kind of ['meeting_table','meeting_chair','pantry_counter','lounge_sofa','planter','floor_sign'])assert.ok(decor.kinds.includes(kind),`additional work floor is furnished with ${kind}: ${decor.kinds}`);
   await page.click(`[data-floor="${extra.level}"]`);await page.waitForFunction(()=>!officeScene.snapshot().transitioning);
   assert.deepEqual(await page.evaluate(()=>officeScene.snapshot().visibleFloors),[extra.level]);
   await page.evaluate(o=>officeScene.applyOrg(o),org);

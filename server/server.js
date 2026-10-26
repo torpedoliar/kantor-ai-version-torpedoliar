@@ -49,6 +49,7 @@ const settings=createSettings({dataDir:DATA_DIR,env:process.env,agents:{'Kak Ran
 const modelGate=createGate(()=>settings.callLimits());
 const agentMembers=()=>Object.fromEntries(org.roster().filter(m=>m.isAgent).map(m=>[m.name,m]));
 const agentFor=name=>agentMembers()[name]||null;
+const isMember=name=>org.roster().some(m=>m.name===name);
 function archiveTasks(timestamp=Date.now()){const archiveDir=path.join(DATA_DIR,'archive');fs.mkdirSync(archiveDir,{recursive:true});const file=path.join(archiveDir,`tasks-${timestamp}.json`);fs.writeFileSync(file,JSON.stringify(tasks,null,2),{mode:0o600});return file;}
 // One-time move of the older roster (data/team.json) into the organization, so custom members, AI picks and
 // manager links survive instead of a fresh seed. team.json stays as a backup; a bad roster stops startup.
@@ -638,6 +639,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     const input=await readJson(req);
     const v=roomsApi.validateRoom(input,roomList,null);
     if(!v.ok)return send(res,['dup','overlap'].includes(v.code)?409:400,{error:v.error});
+    if(v.room.owner&&!isMember(v.room.owner))return send(res,400,{error:'Unknown room owner.'});
     const room={id:`room-${crypto.randomUUID().slice(0,8)}`,furniture:[],...v.room};
     roomList.push(room);saveRooms();return send(res,201,room);
   }
@@ -663,6 +665,7 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     }
     const v=roomsApi.validateRoom(input,roomList,id);
     if(!v.ok)return send(res,['dup','overlap'].includes(v.code)?409:400,{error:v.error});
+    if(v.room.owner&&!isMember(v.room.owner))return send(res,400,{error:'Unknown room owner.'});
     Object.assign(room,v.room,{furniture:v.room.furniture??room.furniture??[]});
     saveRooms();return send(res,200,room);
   }

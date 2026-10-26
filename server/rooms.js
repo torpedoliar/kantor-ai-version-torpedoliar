@@ -49,6 +49,12 @@ function validateRoom(input, rooms, selfId) {
     if (!Number.isInteger(floor) || floor < 1 || floor > 12) return {ok: false, error: 'Pick a floor that exists in the building.', code: 'bad'};
     out.floor = floor;
   }
+  // An owned room is the private room of one member; the scene only lets that member use its seats.
+  if (get('owner') !== undefined) {
+    const owner = typeof get('owner') === 'string' ? get('owner').trim() : '';
+    if (owner.length > 120) return {ok: false, error: 'Owner name is too long.', code: 'bad'};
+    out.owner = owner || null;
+  }
   if (get('capacity') !== undefined) {
     const capacity = num(get('capacity'));
     if (!Number.isInteger(capacity) || capacity < 1 || capacity > 50) return {ok: false, error: 'Capacity must be 1-50.', code: 'bad'};

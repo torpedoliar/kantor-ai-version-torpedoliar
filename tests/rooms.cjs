@@ -24,6 +24,7 @@ const api=async(p,opts={},extra={})=>fetch(origin+p,{...opts,headers:{'content-t
     assert.equal((await call('POST','/api/rooms',{name:'war room',type:'lounge',floor:2},owner)).status,409,'duplicate name refused');
     assert.equal((await call('POST','/api/rooms',{name:'Edge',type:'lounge',floor:2,x:15,z:0},owner)).status,400,'outside the floor');
     assert.equal((await call('POST','/api/rooms',{name:'Bad kind',type:'lounge',floor:2,furniture:[{kind:'alien',x:0,z:0}]},owner)).status,400,'unknown furniture');
+    assert.equal((await call('POST','/api/rooms',{name:'Bad owner',type:'focus',floor:2,owner:'Tidak Ada'},owner)).status,400,'unknown room owner');
     assert.equal((await call('PATCH','/api/rooms/seed-meeting',{name:'Board Room'},owner)).status,200,'built-ins can be renamed');
     assert.equal((await call('PATCH','/api/rooms/seed-meeting',{type:'lounge'},owner)).status,400,'built-in type locked');
     assert.equal((await call('DELETE','/api/rooms/seed-meeting',null,owner)).status,409,'built-in delete refused');
@@ -32,7 +33,10 @@ const api=async(p,opts={},extra={})=>fetch(origin+p,{...opts,headers:{'content-t
     // 2. A room the team will roam to.
     const sky=await call('POST','/api/rooms',{name:'Sky Lounge',type:'lounge',floor:2,x:4,z:9.5,furniture:[{kind:'plant',x:1.8,z:1.5}]},owner);
     const pod=await call('POST','/api/rooms',{name:'Quiet Pod',type:'focus',floor:4,x:8,z:-8},owner);
-    assert.equal(sky.status,201);assert.equal(pod.status,201);
+    const priv=await call('POST','/api/rooms',{name:'Ruang Koh Arman',type:'focus',floor:2,x:-4,z:9.5,owner:'Koh Arman'},owner);
+    assert.equal(sky.status,201);assert.equal(pod.status,201);assert.equal(priv.status,201);assert.equal(priv.body.owner,'Koh Arman');
+    assert.equal((await call('PATCH','/api/rooms/'+priv.body.id,{owner:null},owner)).body.owner,null,'owner can be cleared');
+    assert.equal((await call('PATCH','/api/rooms/'+priv.body.id,{owner:'Koh Arman'},owner)).body.owner,'Koh Arman');
     // 3. The office builds the room into the scene and the nav grid; an excursion eventually reaches it.
     const browser=await launch();
     const page=await browser.newPage({viewport:{width:1440,height:900}});
@@ -48,6 +52,15 @@ const api=async(p,opts={},extra={})=>fetch(origin+p,{...opts,headers:{'content-t
     assert.match(await page.locator('#roomsList').innerText(),/bawaan/);
     await page.keyboard.press('Escape');
     await page.waitForFunction(id=>(officeScene.roomOccupancy()[id]||0)>=1,sky.body.id,{timeout:420000,polling:500});
+    // Private room: the owner gets a personal-room command; nobody else can be sent there.
+    await page.evaluate(()=>officeScene.select('Kak Rani'));
+    assert.equal(await page.locator('[data-command="private-room"]').count(),0,'non-owner has no private-room command');
+    await page.evaluate(()=>officeScene.select('Koh Arman'));
+    await page.locator('[data-command="private-room"]').click();
+    await page.waitForFunction(()=>{const p=officeScene.snapshot().team.find(t=>t.name==='Koh Arman');return p&&p.roomName==='Ruang Koh Arman';},null,{timeout:240000,polling:500});
+    const intruders=await page.evaluate(()=>officeScene.snapshot().team.filter(t=>t.roomName==='Ruang Koh Arman'&&t.name!=='Koh Arman').length);
+    assert.equal(intruders,0,'nobody else sits in the private room');
+    assert.match(await page.locator('#roomsList').innerText(),/milik Koh Arman/);
     assert.deepEqual(errors,[]);
     console.log('PASS: rooms API guards, 3D build, nav grid, excursion reaches the room, occupancy, rooms drawer');
     await browser.close();

@@ -57,6 +57,7 @@
         <div><label for="roomType">Tipe</label><select id="roomType"></select></div>
         <div><label for="roomCapacity">Kursi</label><input id="roomCapacity" type="number" min="1" max="8" required></div>
       </div>
+      <label for="roomOwner">Pemilik ruangan <span>(kosong = publik)</span></label><select id="roomOwner"></select>
       <p class="settings-note">Seret kotak beraksen untuk memindahkan ruangan. Klik di dalamnya untuk menaruh furnitur yang dipilih.</p>
       <canvas id="roomPlan" width="360" height="272" aria-label="Denah lantai"></canvas>
       <div class="room-furnish"><label for="roomKind">Furnitur</label><select id="roomKind"></select><div id="roomFurniture" class="furnish-list"></div></div>
