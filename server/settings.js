@@ -70,10 +70,21 @@ function validate(input){
   return {schemaVersion:SCHEMA_VERSION,version:Number.isInteger(input.version)?input.version:0,providers,defaultRoute,fallbackRoute,overrides,maxTokens:tokenLimit(input.maxTokens),concurrency:concurrencyLimit(input.concurrency,DEFAULT_CONCURRENCY)};
 }
 
+// A key from the environment wins; otherwise a local settings.key is reused, or generated once so
+// first-run provider setup works out of the box. Deleting the file makes stored credentials unreadable.
+function resolveSettingsKey(envValue,dataDir){
+  const fromEnv=keyBytes(envValue);if(fromEnv)return fromEnv;
+  const file=path.join(dataDir,'settings.key');
+  try{const stored=keyBytes(fs.readFileSync(file,'utf8').trim());if(stored)return stored;}catch{}
+  const generated=crypto.randomBytes(32);
+  try{fs.writeFileSync(file,generated.toString('base64'),{mode:0o600});console.error(`Generated ${file} to encrypt provider credentials; back it up.`);}
+  catch(error){console.error(`Cannot write ${file}: ${error.message}`);return null;}
+  return generated;
+}
 function createSettings({dataDir,env=process.env,agents={}}){
   fs.mkdirSync(dataDir,{recursive:true});
   const file=path.join(dataDir,'settings.json'),credentialFile=path.join(dataDir,'credentials.json');
-  const encryptionKey=keyBytes(env.KANTOR_SETTINGS_KEY);
+  const encryptionKey=resolveSettingsKey(env.KANTOR_SETTINGS_KEY,dataDir);
   let state=empty(),credentials=new Map(),explicit=false,broken=null;
   function read(){
     explicit=fs.existsSync(file);

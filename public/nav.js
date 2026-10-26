@@ -1,5 +1,5 @@
 (() => {
-  const drawers = new Set(['taskDialog', 'settingsDialog', 'orgDialog', 'communicationDialog']);
+  const drawers = new Set(['taskDialog', 'settingsDialog', 'orgDialog', 'communicationDialog', 'roomsDialog']);
   const guards = new Map(), listeners = [];
   let active = null;
   const el = id => document.getElementById(id);
@@ -13,11 +13,19 @@
     document.querySelectorAll('#rail [aria-current="page"]').forEach(item => item.removeAttribute('aria-current'));
     return true;
   }
+  // Scene surfaces (team search popover, furniture edit mode) are exclusive with every drawer:
+  // they live under it in z-order, so opening a drawer or clicking the other tool closes them first.
+  function closeSceneSurfaces() {
+    const popover = el('teamPopover');
+    if (popover && !popover.hidden) popover.hidden = true;
+    window.officeScene?.setEditing?.(false);
+  }
   function open(id) {
     if (!drawers.has(id)) return false;
     if (active && active !== id && !close(active)) return false;
     const dialog = el(id);
     if (!dialog) return false;
+    closeSceneSurfaces();
     dialog.show();
     active = id;
     document.querySelectorAll('#rail [aria-current="page"]').forEach(item => item.removeAttribute('aria-current'));
@@ -25,7 +33,7 @@
     listeners.forEach(listener => listener(id));
     return true;
   }
-  function closeAll() { return !active || close(active); }
+  function closeAll() { const closed = !active || close(active); closeSceneSurfaces(); return closed; }
   function guard(id, fn) { guards.set(id, fn); }
   function onOpen(fn) { listeners.push(fn); }
   function wireRail() {
@@ -35,12 +43,14 @@
     el('bSettings').onclick = () => window.officeSettings?.open?.() || open('settingsDialog');
     el('bLock').onclick = () => window.officeTasks?.toggleLock?.();
     el('decisions').onclick = () => window.Messenger?.openDecision?.() || window.officeTasks?.open?.(null, 'blocked');
-    el('bCustom').onclick = () => window.officeScene?.setEditing?.(true);
+    el('bCustom').onclick = () => { closeAll(); window.officeScene?.setEditing?.(true); };
     el('bTeam').onclick = () => {
       const popover = el('teamPopover');
       if (!popover) return;
-      popover.hidden = !popover.hidden;
-      if (!popover.hidden) el('teamSearch')?.focus();
+      const opening = popover.hidden;
+      if (opening) closeAll();
+      popover.hidden = !opening;
+      if (opening) el('teamSearch')?.focus();
     };
     el('closeOrg').onclick = closeAll;
     document.addEventListener('click', event => {

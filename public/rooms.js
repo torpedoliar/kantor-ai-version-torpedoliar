@@ -192,7 +192,7 @@
   function start() {
     if (!el('roomsDialog')) return;
     el('bRooms').hidden = false;
-    el('bRooms').onclick = () => { el('roomsDialog').showModal(); refresh(true); };
+    el('bRooms').onclick = () => { if (window.officeNav?.open?.('roomsDialog') !== true) el('roomsDialog').showModal(); refresh(true); };
     el('roomsClose').onclick = () => el('roomsDialog').close();
     el('addRoom').onclick = () => openRoomForm(null);
     el('roomForm').onsubmit = saveRoom;

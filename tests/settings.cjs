@@ -7,7 +7,11 @@ const envKey=Buffer.alloc(32,7).toString('base64');
 const {createSettings}=require('../server/settings');
 const noKeyDir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-settings-no-key-'));
 const noKeySettings=createSettings({dataDir:noKeyDir,env:{},agents:{}});
-assert.throws(()=>noKeySettings.save({version:0,providers:[{id:'no-key',displayName:'No key',protocol:'openai',baseUrl:'http://127.0.0.1:5001',models:[],credential:'sentinel'}],defaultRoute:null,fallbackRoute:null,overrides:{}},0),error=>error.status===503&&/KANTOR_SETTINGS_KEY/.test(error.message));
+// No KANTOR_SETTINGS_KEY: a local settings.key is generated once so first-run provider setup works.
+const noKeySaved=noKeySettings.save({version:0,providers:[{id:'no-key',displayName:'No key',protocol:'openai',baseUrl:'http://127.0.0.1:5001',models:[],credential:'sentinel'}],defaultRoute:null,fallbackRoute:null,overrides:{}},0);
+assert.equal(noKeySaved.hasEncryptionKey,true);
+assert.ok(fs.existsSync(path.join(noKeyDir,'settings.key')),'generated key file');
+assert.equal(noKeySettings.credential('no-key'),'sentinel');
 fs.rmSync(noKeyDir,{recursive:true,force:true});
 function start(){
   const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(port),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',KANTOR_SETTINGS_KEY:envKey},stdio:['ignore','pipe','pipe']});

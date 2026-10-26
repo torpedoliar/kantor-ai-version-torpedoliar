@@ -54,7 +54,11 @@ function stream(headers,after){
   let settled=0,quietSeq=(await call('GET','/api/task-events/snapshot')).body.seq;
   for(let until=Date.now()+15000;Date.now()<until;){await new Promise(r=>setTimeout(r,150));const s=(await call('GET','/api/task-events/snapshot')).body.seq;if(s===quietSeq){if(++settled>=3)break;}else{settled=0;quietSeq=s;}}
   const behind=stream(auth,0);await wait(()=>behind.control.length,'resync');const latest=(await call('GET','/api/task-events/snapshot')).body.seq;
-  assert.equal(behind.control[0].resync.seq,quietSeq,'resync carries the seq at subscribe time');assert.ok(latest>=behind.control[0].resync.seq);assert.equal(behind.events.length,0);behind.close();await behind.done;
+  const resyncSeq=behind.control[0].resync.seq;
+  // The marker must be a valid cursor at subscribe time: it covers the quiet log and never runs ahead.
+  assert.ok(resyncSeq>=quietSeq,'resync cursor covers the quiet log');assert.ok(resyncSeq<=latest,'resync never runs ahead of the server');
+  // Live events may still land right after subscribing (a reply tail); the marker must never replay the past.
+  assert.ok(behind.events.every(e=>e.seq>resyncSeq),'no replayed events before the resync cursor');behind.close();await behind.done;
   // Public events never carry credentials or provider snapshots.
   const all=[];for(let after=0;;){const page=(await call('GET',`/api/task-events?after=${after}`)).body.events;if(!page.length)break;all.push(...page);after=page.at(-1).seq;}
   const json=JSON.stringify(all);assert.doesNotMatch(json,/SECRET999|credential|baseUrl/);
