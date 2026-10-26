@@ -223,7 +223,7 @@ body{--i-list:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' 
 body.customizing #c{cursor:move}
 #cameraControls{position:fixed;right:24px;bottom:100px;z-index:5;display:flex;flex-direction:column;gap:6px}#cameraControls .btn{width:44px;min-height:44px;padding:8px 4px}.moment-menu{position:absolute;bottom:calc(100% + 8px);left:0;display:grid;gap:6px;padding:8px;background:var(--sheet);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(60,48,30,.12)}#moments{position:relative}#moments summary{list-style:none;cursor:pointer}#moments summary::-webkit-details-marker{display:none}
 
-:root{--rail-w:212px}
+:root{--rail-w:228px}
 .ui #rail{position:fixed;z-index:10;left:16px;top:16px;bottom:16px;width:calc(var(--rail-w) - 28px);display:flex;flex-direction:column;gap:2px;padding:12px;background:#fff;border:1px solid rgba(30,34,48,.06);border-radius:16px;box-shadow:0 10px 28px rgba(60,48,30,.12)}
 .ui #railBrand{display:flex;align-items:center;gap:10px;padding:4px 4px 14px;margin-bottom:8px;border-bottom:1px solid var(--line)}
 .ui #railBrand .brand-mark{display:grid;place-items:center;width:40px;height:40px;border-radius:10px;background:var(--accent);color:#fff;flex:none}
@@ -231,6 +231,9 @@ body.customizing #c{cursor:move}
 .ui #railBrand .brand-name{min-width:0}.ui #railBrand strong{display:block;font-size:16px;line-height:1.1}.ui #railBrand .brand-meta{display:block;margin-top:3px;font:500 11px var(--sans);color:var(--ink-2)}
 .ui #rail>.btn,.ui #railMore>summary,.ui #railMore .btn{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:0 10px;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:14px;font-weight:500;text-align:left;cursor:pointer}
 .ui #rail>.btn:hover,.ui #railMore>summary:hover,.ui #railMore .btn:hover{background:var(--hover)}
+/* Badges and dots keep their size; only the label may shrink (with an ellipsis) inside a narrow rail. */
+.ui #rail .rail-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ui #rail .badge,.ui #rail .decision-dot{flex:none}
 .ui #rail>.btn::before,.ui #railMore>summary::before,.ui #railMore .btn::before{content:'';width:18px;height:18px;flex:none;background:currentColor;opacity:.75;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}
 .ui #navOffice{--icon:var(--i-home)}.ui #bTasks{--icon:var(--i-list)}.ui #bCommunications{--icon:var(--i-chat)}.ui #bOrg{--icon:var(--i-org)}.ui #bRooms{--icon:var(--i-layout)}.ui #bTeam{--icon:var(--i-team)}.ui #bCustom{--icon:var(--i-target)}.ui #decisions{--icon:var(--i-decision)}.ui #railMore>summary{--icon:var(--i-more)}.ui #bSettings{--icon:var(--i-gear)}.ui #bLock{--icon:var(--i-lock)}
 .ui #rail [aria-current=page],.ui #rail #bCustom[aria-pressed=true]{background:#fdeee9;color:var(--accent)}
