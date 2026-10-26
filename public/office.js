@@ -594,7 +594,7 @@
     prayerSpots.push({x,z,f:-1,floor:3,route:[[10,P3],[10,10.1],[x,10.1]],state:'pray',label:'Menuju ruang salat',occupant:null});
   }
   textPlane('PRAYER ROOM',13.3,7.9,3.6);
-  plant(15,-11,.9);plant(-12.6,-3,.8);restroom(-14.45,-5.05,2.9,2.5,'+x');
+  plant(15,-11,.9);restroom(-14.45,-5.05,2.9,2.5,'+x');
   // Back lounge between the meeting room and the pantry: sofa on a round rug, two armchairs, books and a quote panel.
   cylinder(3.1,3.1,.03,0xe8cfc0,-2.6,.02,-9.6);
   const backSofa=sofa(-3.4,-10.9,3.6);
@@ -1097,7 +1097,7 @@
   // through the stairs like any built-in place. applyRooms rebuilds them without a page reload.
   let customRooms=[];
   try{const roomsResponse=await fetch('/api/rooms',{cache:'no-store'});if(roomsResponse.ok){const list=await roomsResponse.json();if(Array.isArray(list))customRooms=list.filter(r=>!r.builtIn&&Number.isFinite(r.x)&&Number.isFinite(r.z));}}catch{/* static host: built-in office only */}
-  const roomSpots=[],roomGroups=new Map(),roomDoors=[];
+  const roomSpots=[],roomGroups=new Map(),roomDoors=[],roomLabels=[],roomTextureMaps=[];
   const ROOM_RUGS={meeting:0xe6ded0,focus:0xdfe3d6,lounge:0xe8cfc0,pantry:0xb3c0a0,musholla:0xdfe3d6,custom:0xd8cfc0};
   const ROOM_SEAT=0xd9d2c3;
   function roomChair(parent,x,z,f){
@@ -1108,6 +1108,31 @@
   function roomPlant(parent,x,z,scale){
     cylinder(.3*scale,.24*scale,.5*scale,0xc9ab86,x,0,z,parent);
     for(let i=0;i<5;i++){const a=i*1.3,leaf=oval(.3*scale,.6*scale,.12*scale,i%2?0x64825b:0x839769,x+Math.cos(a)*.2*scale,.55*scale,z+Math.sin(a)*.2*scale,parent);leaf.rotation.set(.35,a,Math.sin(a)*.5);}
+  }
+  // Animated executive monitor: a small live dashboard redrawn on the simulation clock.
+  const animatedScreens=[];
+  // Open-floor plants hidden because a custom room now occupies their spot; restored when it moves away.
+  const hiddenBaseDecor=new Set();
+  function executiveScreen(){
+    const c=document.createElement('canvas');c.width=320;c.height=192;const ctx=c.getContext('2d');
+    const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;
+    const draw=t=>{
+      ctx.fillStyle='#0d121b';ctx.fillRect(0,0,320,192);
+      ctx.fillStyle='#121a26';ctx.fillRect(0,0,320,22);
+      ctx.fillStyle='#8fa7b8';ctx.font='600 11px "IBM Plex Mono", monospace';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('KANTOR KITA · LIVE',10,12);
+      ctx.fillStyle=t%2<1?'#3fae6a':'#2a6b47';ctx.beginPath();ctx.arc(300,11,4,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='rgba(120,150,170,.15)';ctx.lineWidth=1;
+      for(let y=40;y<176;y+=22){ctx.beginPath();ctx.moveTo(12,y);ctx.lineTo(308,y);ctx.stroke();}
+      for(const [color,phase,amp,off] of [['#f0a531',0,26,96],['#3fae6a',1.6,18,140]]){
+        ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();
+        for(let i=0;i<=48;i++){const x=12+i*(296/48),v=Math.sin(i*.32+t*.9+phase)+Math.sin(i*.11+t*.35+phase*2)*.6,y=off-v*amp*.55;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}
+        ctx.stroke();
+      }
+      for(let i=0;i<10;i++){const h=10+Math.abs(Math.sin(t*.7+i*.5))*26;ctx.fillStyle='#5f9a94';ctx.fillRect(226+i*8,176-h,5,h);}
+      ctx.fillStyle='#6b7f92';ctx.font='600 10px "IBM Plex Mono", monospace';ctx.fillText(new Date().toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}),12,184);
+    };
+    draw(0);
+    return {texture,draw};
   }
   function roomFurniture(parent,item){
     if(item.kind==='table'){mesh(softBox(2.6,.14,1.3),BALSA,item.x,.88,item.z,parent,false);for(const sx of [-1,1])box(.09,.82,.09,DARK,item.x+sx*1.1,.06,item.z,parent);}
@@ -1142,23 +1167,30 @@
       for(let i=0;i<cap;i++)addSeat((i-(cap-1)/2)*Math.min(1.35,sw/Math.max(cap,1)),-room.d/2+.85,0,'lounge');
       cylinder(.55,.55,.06,BALSA,0,.5,room.d/2-1,group);cylinder(.07,.12,.48,DARK,0,.06,room.d/2-1,group);
     }else if(room.type==='focus'){
-      // A large focus room is a leader's office: the desk sits at the back, the owner faces the
-      // door, guest chairs face the desk, and a credenza, lamp and plants fill the extra space.
+      // A large focus room is a leader's office: the desk sits at the back, the owner behind it
+      // facing the door, guests across the desk, and a credenza and floor lamp fill the space.
       const executive=room.w>=3.2&&room.d>=4;
       const deskZ=executive?-room.d/2+2.2:0,dw=executive?Math.min(2.6,room.w-1.4):1.8,dd=executive?1.05:.9;
       mesh(softBox(dw,.14,dd),BALSA,0,.88,deskZ,group,false);
       for(const sx of [-1,1])box(.09,.82,.09,DARK,sx*(dw/2-.2),.06,deskZ,group);
-      box(.07,.17,.07,DARK,0,.95,deskZ-.25,group);box(.9,.55,.06,DARK,0,1.12,deskZ-.25,group);box(.8,.45,.015,SCREEN,0,1.18,deskZ-.2,group);
       if(executive){
-        seated(0,deskZ+.85,1,'work'); // behind the desk, facing the door (+z)
+        // Owner behind the desk (away from the door), reading an animated monitor on the far edge.
+        seated(0,deskZ-.85,1,'work');
+        const mon=new THREE.Group();mon.position.set(0,.88,deskZ+.3);group.add(mon);
+        box(.07,.2,.07,DARK,0,.02,0,mon);box(.95,.58,.06,DARK,0,.2,0,mon);
+        const screen=executiveScreen();
+        const panel=new THREE.Mesh(new THREE.PlaneGeometry(.86,.5),new THREE.MeshBasicMaterial({map:screen.texture}));
+        panel.position.set(0,.2,-.034);panel.rotation.y=Math.PI;mon.add(panel);
+        animatedScreens.push({group,floor:room.floor,texture:screen.texture,draw:screen.draw,last:-1});
+        box(.5,.02,.16,0x2a2b2f,0,.96,deskZ-.15,group); // keyboard within reach
         for(const gx of [-.95,.95])roomChair(group,gx,deskZ+2.9,-1); // guests face the leader
         box(.5,.72,2.2,BALSA,-room.w/2+.32,0,deskZ+1.1,group);
         box(.55,.05,2.3,CARD,-room.w/2+.32,.72,deskZ+1.1,group);
-        cylinder(.18,.3,.36,0x7f9a82,-room.w/2+.45,0,room.d/2-1.6,group);
-        cylinder(.03,.03,.9,DARK,-room.w/2+.45,.36,room.d/2-1.6,group);
-        roomPlant(group,room.w/2-.55,room.d/2-.8,.9);
-        roomPlant(group,room.w/2-.5,-room.d/2+.6,.55);
+        cylinder(.18,.18,.03,DARK,-room.w/2+.45,0,room.d/2-1.6,group);
+        cylinder(.025,.025,1.12,DARK,-room.w/2+.45,.03,room.d/2-1.6,group);
+        cylinder(.15,.23,.3,0xe7d8b6,-room.w/2+.45,1.15,room.d/2-1.6,group);
       }else{
+        box(.07,.17,.07,DARK,0,.95,-.25,group);box(.9,.55,.06,DARK,0,1.12,-.25,group);box(.8,.45,.015,SCREEN,0,1.18,-.2,group);
         seated(0,.95,-1,'work');
         roomPlant(group,room.w/2-.5,-room.d/2+.5,.5);
       }
@@ -1203,19 +1235,25 @@
       const full=String(room.name).toUpperCase();let label=full;while(ctx.measureText(label).width>480&&label.length>4)label=label.slice(0,-2);
       if(label!==full)label=label.trimEnd()+'…';
       ctx.fillText(label,256,50);
-      const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+      const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;roomTextureMaps.push(tex);
       const sign=new THREE.Mesh(new THREE.PlaneGeometry(1.1,.21),new THREE.MeshBasicMaterial({map:tex}));
       sign.position.set((gapLeft+gapRight)/2,H+.2,front+.03);group.add(sign);
     }
     for(const item of room.furniture??[])roomFurniture(group,item);
-    textPlane(String(room.name).toUpperCase(),room.x,room.z+room.d/2+.7,Math.min(6,room.w),'#5c554b',floors[room.floor]);
+    roomLabels.push(textPlane(String(room.name).toUpperCase(),room.x,room.z+room.d/2+.7,Math.min(6,room.w),'#5c554b',floors[room.floor]));
     return {group,seats};
   }
   const roomPool=floor=>floor===1?floorBreaks:floor===2?dining:floor===ROOF?roofSpots:hangouts;
   function applyRooms(list){
-    for(const group of roomGroups.values())group.parent?.remove(group);
+    const removedGroups=new Set(roomGroups.values());
+    for(const group of removedGroups)group.parent?.remove(group);
     for(const door of roomDoors){const at=doors.indexOf(door);if(at>=0)doors.splice(at,1);}
     roomDoors.length=0;
+    for(const label of roomLabels){label.parent?.remove(label);label.material?.map?.dispose();label.material?.dispose();label.geometry?.dispose();}
+    roomLabels.length=0;
+    for(const map of roomTextureMaps)map.dispose();
+    roomTextureMaps.length=0;
+    for(let i=animatedScreens.length-1;i>=0;i--)if(removedGroups.has(animatedScreens[i].group)){animatedScreens[i].texture.dispose();animatedScreens.splice(i,1);}
     for(const spot of roomSpots){const pool=roomPool(spot.floor),i=pool.indexOf(spot);if(i>=0)pool.splice(i,1);const j=prayerSpots.indexOf(spot);if(j>=0)prayerSpots.splice(j,1);}
     roomSpots.length=0;roomGroups.clear();
     customRooms=(list||[]).filter(r=>!r.builtIn&&Number.isFinite(r.x)&&Number.isFinite(r.z));
@@ -1225,6 +1263,17 @@
       const built=buildRoom(room);roomGroups.set(room.id,built.group);
       for(const spot of built.seats){spot.ownerRoom=room.owner||null;roomSpots.push(spot);if(spot.state==='pray')prayerSpots.push(spot);else roomPool(room.floor).push(spot);}
       touched.add(room.floor);
+    }
+    // Loose open-floor plants are put away inside a room's footprint; moving or deleting the room brings them back.
+    for(const item of hiddenBaseDecor)if(item.parent)item.visible=true;
+    hiddenBaseDecor.clear();
+    for(const room of customRooms){
+      const floorGroup=floors[room.floor];if(!floorGroup)continue;
+      floorGroup.traverse(o=>{
+        if(o.userData.decor!=='plant_tall'&&o.userData.decor!=='plant_small')return;
+        const at=o.getWorldPosition(new THREE.Vector3());
+        if(Math.abs(at.x-room.x)<room.w/2&&Math.abs(at.z-room.z)<room.d/2){o.visible=false;hiddenBaseDecor.add(o);}
+      });
     }
     // Room furniture joins the collision grid exactly like an edited desk.
     for(const floor of touched)navGrids[floor]=rasterize(floors[floor],a=>a.userData.walkable||a.userData.agent||a.visible===false);
@@ -2462,6 +2511,8 @@
     if(skyline.visible)animateSky(dt);
     mobility.tick(dt);environment.setLevel(window.officeGraphics.level());environment.setCityVisible(skyline.visible);environment.update(mobility.snapshot(),dt);
     stepShop(dt);
+    // Keep-visible dashboards: redraw the executive monitors a few times per second while time runs.
+    if(dt>0)for(const screen of animatedScreens){if(simTime-screen.last<.45)continue;screen.last=simTime;screen.draw(simTime);screen.texture.needsUpdate=true;}
     for(const d of doors){const near=agents.some(a=>a.floor===d.floor&&a.state!=='stairs'&&a.g.position.distanceTo(d.center)<1.6);d.open+=((near?1:0)-d.open)*Math.min(1,dt*6);d.pivot.rotation.y=d.base+d.open*1.45;}
     if(follow){scene.updateMatrixWorld(true);followCamera(realDt);}
     scene.updateMatrixWorld(true);
@@ -2588,6 +2639,7 @@
       // Seats that lived on a removed storey must not strand the routine pools.
       for(let i=hangouts.length-1;i>=0;i--)if(hangouts[i].floor===level)hangouts.splice(i,1);
       for(let i=roomDoors.length-1;i>=0;i--)if(roomDoors[i].floor===level)roomDoors.splice(i,1);
+      for(let i=animatedScreens.length-1;i>=0;i--)if(animatedScreens[i].floor===level)animatedScreens.splice(i,1);
       for(let i=roomSpots.length-1;i>=0;i--)if(roomSpots[i].floor===level){const pool=roomPool(roomSpots[i].floor);const k=pool.indexOf(roomSpots[i]);if(k>=0)pool.splice(k,1);roomSpots.splice(i,1);}
       scene.remove(floors[level]);delete floors[level];delete navGrids[level];
       disposeFade(facadeLevels[level]);facadeLevels[level]?.parent?.remove(facadeLevels[level]);delete facadeLevels[level];

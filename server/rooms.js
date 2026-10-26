@@ -12,7 +12,7 @@ const TYPES = {
 };
 const FURNITURE = new Set(['table', 'chair', 'sofa', 'board', 'plant']);
 // Floor slab is 32x25; keep rooms clear of the walls and the stair core on the left.
-const BOUNDS = {x: 15, z: 11.5};
+const BOUNDS = {x: 15.9, z: 11.5};
 
 // Read-only mirrors of the rooms hardcoded in office.js. Seats and geometry stay in the
 // scene; these entries only feed the list, renaming and the room API surface.

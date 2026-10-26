@@ -152,7 +152,7 @@
     canvas.addEventListener('pointermove', event => {
       if (!planDrag || !planRoom) return;
       const [x, z] = canvasToPlan(...point(event));
-      const nx = Math.max(-15 + planRoom.w / 2, Math.min(15 - planRoom.w / 2, x + planDrag.offX));
+      const nx = Math.max(-15.9 + planRoom.w / 2, Math.min(15.9 - planRoom.w / 2, x + planDrag.offX));
       const nz = Math.max(-11.5 + planRoom.d / 2, Math.min(11.5 - planRoom.d / 2, z + planDrag.offZ));
       if (nx !== planRoom.x || nz !== planRoom.z) { planRoom.x = nx; planRoom.z = nz; planDrag.moved = true; drawPlan(); }
     });
