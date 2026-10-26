@@ -18,14 +18,17 @@
   <div id="labels"></div>
   <nav id="rail" aria-label="Navigasi utama">
     <div id="railBrand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><circle cx="8" cy="8" r="3.2"/><circle cx="16.5" cy="8.5" r="2.7"/><path d="M2 19c0-3.6 2.7-6 6-6s6 2.4 6 6v1H2z"/><path d="M15 20v-1c0-2-.6-3.7-1.7-5 0.9-.6 2-1 3.2-1 3 0 5.5 2.2 5.5 5.5V20z"/></svg></span><span class="brand-name"><strong>Kantor Kita</strong><span class="brand-meta">13 orang · 4 lantai</span></span></div>
-    <button id="navOffice" class="btn" type="button">Kantor</button>
-    <button id="bTasks" class="btn primary" type="button" data-drawer="taskDialog">Tugas <span id="taskCount">0</span></button>
-    <button id="bCommunications" class="btn" type="button" data-drawer="communicationDialog">Komunikasi <span class="badge"></span><span class="decision-dot" hidden title="Keputusan menunggu"></span></button>
-    <button id="bOrg" class="btn" type="button" data-drawer="orgDialog">Organisasi</button>
-    <button id="bTeam" class="btn" type="button">Tim</button>
-    <button id="bCustom" class="btn" type="button" aria-pressed="false">Tata ruang</button>
-    <details id="railMore"><summary class="btn">Lainnya</summary><div><button id="bSettings" class="btn" type="button" data-drawer="settingsDialog">Pengaturan</button><button id="bRooms" class="btn" type="button" hidden>Ruang</button><button id="bLock" class="btn" type="button" disabled title="Menghubungkan ke server lokal…">Kunci</button></div></details>
-    <button id="decisions" class="btn" type="button" data-drawer="taskDialog" hidden>Keputusan <span class="badge"></span></button>
+    <button id="navOffice" class="btn" type="button" aria-label="Kembali ke kantor"><span class="rail-label">Kantor</span></button>
+    <p class="rail-title" aria-hidden="true">Pekerjaan</p>
+    <button id="bTasks" class="btn" type="button" data-drawer="taskDialog" aria-label="Tugas"><span class="rail-label">Tugas</span> <span id="taskCount">0</span></button>
+    <button id="bCommunications" class="btn" type="button" data-drawer="communicationDialog" aria-label="Komunikasi"><span class="rail-label">Komunikasi</span> <span class="badge"></span><span class="decision-dot" hidden title="Keputusan menunggu"></span></button>
+    <button id="bOrg" class="btn" type="button" data-drawer="orgDialog" aria-label="Organisasi"><span class="rail-label">Organisasi</span></button>
+    <button id="bRooms" class="btn" type="button" hidden aria-label="Ruang"><span class="rail-label">Ruang</span></button>
+    <button id="decisions" class="btn" type="button" data-drawer="taskDialog" hidden aria-label="Keputusan menunggu"><span class="rail-label">Keputusan</span> <span class="badge"></span></button>
+    <p class="rail-title" aria-hidden="true">Panggung</p>
+    <button id="bTeam" class="btn" type="button" aria-label="Tim"><span class="rail-label">Tim</span></button>
+    <button id="bCustom" class="btn" type="button" aria-pressed="false" aria-label="Tata ruang"><span class="rail-label">Tata ruang</span></button>
+    <details id="railMore"><summary class="btn" aria-label="Lainnya"><span class="rail-label">Lainnya</span></summary><div><button id="bSettings" class="btn" type="button" data-drawer="settingsDialog" aria-label="Pengaturan"><span class="rail-label">Pengaturan</span></button><button id="bLock" class="btn" type="button" disabled title="Menghubungkan ke server lokal…" aria-label="Kunci"><span class="rail-label">Kunci</span></button></div></details>
     <div id="teamPopover" hidden><input id="teamSearch" type="search" placeholder="Cari nama atau peran"><ul id="teamList"></ul></div>
   </nav>
   <dialog id="communicationDialog" class="drawer drawer-wide" aria-labelledby="communicationHeading">

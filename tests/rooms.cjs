@@ -43,7 +43,6 @@ const api=async(p,opts={},extra={})=>fetch(origin+p,{...opts,headers:{'content-t
     assert.equal(await page.evaluate(id=>officeScene.roomOccupancy()[id]||0,sky.body.id),0,'empty at first');
     // The rooms surface is wired once the server connection is live.
     await page.waitForFunction(()=>!document.getElementById('bRooms').hidden);
-    await page.click('#railMore summary');
     await page.click('#bRooms');
     assert.match(await page.locator('#roomsList').innerText(),/Sky Lounge/);
     assert.match(await page.locator('#roomsList').innerText(),/bawaan/);

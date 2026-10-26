@@ -164,13 +164,16 @@ body{--i-list:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' 
  --i-team:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Ccircle cx='9' cy='8' r='3'/%3E%3Cpath d='M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6'/%3E%3Ccircle cx='17' cy='9' r='2.5'/%3E%3Cpath d='M15.5 14.2A5 5 0 0 1 21 19'/%3E%3C/svg%3E");
  --i-layout:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cpath d='M3 10h18M10 10v11'/%3E%3C/svg%3E");
  --i-decision:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5V14M12 17h.01'/%3E%3C/svg%3E");
- --i-more:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Ccircle cx='5' cy='12' r='2'/%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3Ccircle cx='19' cy='12' r='2'/%3E%3C/svg%3E")}
+ --i-more:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='black'%3E%3Ccircle cx='5' cy='12' r='2'/%3E%3Ccircle cx='12' cy='12' r='2'/%3E%3Ccircle cx='19' cy='12' r='2'/%3E%3C/svg%3E");
+ --i-chat:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'%3E%3Cpath d='M21 12a8 8 0 0 1-8 8H4l2.2-2.6A8 8 0 1 1 21 12z'/%3E%3Cpath d='M8.5 11h.01M12 11h.01M15.5 11h.01'/%3E%3C/svg%3E");
+ --i-gear:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3Cpath d='M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h0a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55h0a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v0a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z'/%3E%3C/svg%3E");
+ --i-lock:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'%3E%3Crect x='5' y='11' width='14' height='9' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 1 1 8 0v4'/%3E%3C/svg%3E")}
 @media(max-width:1000px){
  .ui #floors{top:8px;left:calc(var(--rail-w) + 8px);right:8px;width:auto;padding:5px;gap:4px}
  .ui #floors .section-stack button{display:flex;min-height:50px;padding:3px;gap:2px;margin:0;border:0;border-radius:6px;font-size:11px}
  .ui .floor-thumb{display:none}.ui .floor-count{font-size:10px;margin:0;padding:0 4px}
  .ui #floors .building-button{padding:4px;justify-content:center;min-height:52px}.ui #floors .building-button::before,.ui #floors .building-button::after{display:none}
- .ui #log{top:auto;bottom:150px;left:calc(var(--rail-w) + 8px);right:8px;width:auto}
+ .ui #log{top:auto;bottom:150px;left:calc(var(--rail-w) + 8px);right:60px;width:auto}
  .ui .simulation-controls>.btn::before,.ui #moments>summary::before{display:none}
  .ui #info{max-height:calc(100dvh - 390px)}
 }
@@ -229,14 +232,15 @@ body.customizing #c{cursor:move}
 .ui #rail>.btn,.ui #railMore>summary,.ui #railMore .btn{display:flex;align-items:center;gap:10px;width:100%;min-height:42px;padding:0 10px;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:14px;font-weight:500;text-align:left;cursor:pointer}
 .ui #rail>.btn:hover,.ui #railMore>summary:hover,.ui #railMore .btn:hover{background:var(--hover)}
 .ui #rail>.btn::before,.ui #railMore>summary::before,.ui #railMore .btn::before{content:'';width:18px;height:18px;flex:none;background:currentColor;opacity:.75;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}
-.ui #navOffice{--icon:var(--i-home)}.ui #bTasks{--icon:var(--i-list)}.ui #bOrg{--icon:var(--i-org)}.ui #bTeam{--icon:var(--i-team)}.ui #bCustom{--icon:var(--i-layout)}.ui #decisions{--icon:var(--i-decision)}.ui #railMore>summary{--icon:var(--i-more)}.ui #bSettings{--icon:var(--i-calendar)}.ui #bLock{--icon:var(--i-target)}
+.ui #navOffice{--icon:var(--i-home)}.ui #bTasks{--icon:var(--i-list)}.ui #bCommunications{--icon:var(--i-chat)}.ui #bOrg{--icon:var(--i-org)}.ui #bRooms{--icon:var(--i-layout)}.ui #bTeam{--icon:var(--i-team)}.ui #bCustom{--icon:var(--i-target)}.ui #decisions{--icon:var(--i-decision)}.ui #railMore>summary{--icon:var(--i-more)}.ui #bSettings{--icon:var(--i-gear)}.ui #bLock{--icon:var(--i-lock)}
 .ui #rail [aria-current=page],.ui #rail #bCustom[aria-pressed=true]{background:#fdeee9;color:var(--accent)}
 .ui #rail [aria-current=page]::before,.ui #rail #bCustom[aria-pressed=true]::before{opacity:1}
-.ui #bTasks.primary{background:transparent;color:var(--ink)}
-.ui #bTasks.primary[aria-current=page]{background:#fdeee9;color:var(--accent)}
-.ui #taskCount,.ui #decisions .badge{margin-left:auto;min-width:22px;padding:1px 7px;border-radius:999px;background:#f0ece5;color:var(--ink);font:700 11px var(--mono);text-align:center}
+/* Section captions group the rail: workspace drawers, stage tools, then account items. */
+.ui .rail-title{margin:16px 10px 4px;font:600 10px var(--sans);letter-spacing:.7px;text-transform:uppercase;color:var(--ink-2)}
+.ui #rail>.btn:first-of-type~.rail-title:first-of-type{margin-top:6px}
+.ui #taskCount,.ui #decisions .badge,.ui #bCommunications .badge{margin-left:auto;min-width:22px;padding:1px 7px;border-radius:999px;background:#f0ece5;color:var(--ink);font:700 11px var(--mono);text-align:center}
 .ui #decisions .badge{background:#fff1d6;color:#7a4d0e}
-.ui #decisions .badge:empty{display:none}
+.ui #decisions .badge:empty,.ui #bCommunications .badge:empty{display:none}
 .ui #railMore{margin-top:auto;border-top:1px solid var(--line);padding-top:8px;position:relative}
 .ui #railMore>summary{list-style:none}.ui #railMore>summary::-webkit-details-marker{display:none}
 .ui #railMore>div{display:grid;gap:2px;padding-top:2px}
@@ -244,14 +248,14 @@ body.customizing #c{cursor:move}
 .ui #teamPopover{position:fixed;left:calc(var(--rail-w) + 4px);top:180px;width:280px;max-height:60vh;overflow:auto;padding:12px;background:#fff;border:1px solid rgba(30,34,48,.06);border-radius:14px;box-shadow:0 10px 28px rgba(60,48,30,.16)}
 .ui #teamSearch{width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;font:inherit}
 #teamList{list-style:none;margin:8px 0 0;padding:0}#teamList li{margin:2px 0}#teamList button{width:100%;min-height:40px;padding:8px 10px;text-align:left;border:0;background:transparent;border-radius:8px;font-size:13px}#teamList button:hover{background:var(--hover)}
-.drawer{position:fixed;z-index:20;inset:0 auto 0 var(--rail-w);width:min(760px,calc(100vw - var(--rail-w)));max-width:none;height:100%;margin:0;padding:24px;overflow:auto;background:var(--sheet);color:var(--ink);border:0;border-left:1px solid var(--line);border-radius:0}.drawer::backdrop{background:transparent}.drawer-header{display:flex;justify-content:space-between;align-items:center}.drawer-header h1{margin:0}
+.drawer{position:fixed;z-index:20;inset:0 auto 0 var(--rail-w);width:min(760px,calc(100vw - var(--rail-w)));max-width:none;height:100%;margin:0;padding:24px;overflow:auto;background:var(--sheet);color:var(--ink);border:0;border-left:1px solid var(--line);border-radius:0}.drawer::backdrop{background:transparent}.drawer-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding-bottom:14px;margin-bottom:16px;border-bottom:1px solid var(--line)}.drawer-header h1{margin:0;font-size:24px}
 .ui #floors{left:var(--rail-w)}
 .ui #sceneStatus{z-index:3;left:calc(var(--rail-w) + (100vw - var(--rail-w))/2);right:auto;transform:translateX(-50%);top:24px}
 .ui #followBar{z-index:5;left:calc(var(--rail-w) + (100vw - var(--rail-w))/2);top:22px}
 .ui #controls{z-index:4;left:calc(var(--rail-w) + (100vw - var(--rail-w))/2)}
 .ui #info{z-index:5}
-@media(max-width:1000px){:root{--rail-w:80px}.ui #rail{left:8px;top:8px;bottom:8px;width:64px;padding:8px 6px;align-items:center}.ui #railBrand{justify-content:center;border:0;padding:0 0 8px}.ui #railBrand .brand-name{display:none}.ui #rail>.btn,.ui #railMore>summary,.ui #railMore .btn{flex-direction:column;justify-content:center;gap:2px;padding:6px 2px;font-size:10px;text-align:center;min-height:52px}.ui #taskCount,.ui #decisions .badge{margin:0;font-size:9px;padding:0 5px}.ui #railMore>div{position:absolute;left:calc(100% + 8px);bottom:0;width:180px;padding:8px;background:#fff;border-radius:12px;box-shadow:0 10px 28px rgba(60,48,30,.16)}.ui #railMore .btn{flex-direction:row;font-size:13px;justify-content:flex-start}.drawer{left:var(--rail-w);width:calc(100vw - var(--rail-w));padding:16px}.ui #teamPopover{left:var(--rail-w)}}
-@media(max-width:640px){:root{--rail-w:0px}.ui #rail{left:0;right:0;top:auto;bottom:0;width:100%;height:64px;padding:4px 4px max(4px,env(safe-area-inset-bottom));flex-direction:row;align-items:center;justify-content:space-around;border-radius:0}.ui #railBrand{display:none}.ui #rail>.btn,.ui #railMore>summary{width:auto;min-width:44px;min-height:52px;padding:4px}.ui #railMore{margin:0;border:0;padding:0}.ui #railMore>div{left:auto;right:0;bottom:64px}.drawer{left:0;bottom:64px;width:100%;height:calc(100% - 64px)}.ui #floors{left:8px}.ui #sceneStatus,.ui #followBar,.ui #controls{left:50%}.ui #controls{bottom:76px;max-width:calc(100% - 16px)}.ui #cameraControls{right:8px;bottom:190px;z-index:6}.ui #teamPopover{left:8px;right:8px;top:auto;bottom:72px;width:auto}}
+@media(max-width:1000px){:root{--rail-w:80px}.ui #rail{left:8px;top:8px;bottom:8px;width:64px;padding:8px 6px;align-items:center}.ui .rail-title{display:none}.ui #railBrand{justify-content:center;border:0;padding:0 0 8px}.ui #railBrand .brand-name{display:none}.ui #rail>.btn,.ui #railMore>summary,.ui #railMore .btn{flex-direction:column;justify-content:center;gap:2px;padding:6px 2px;font-size:10px;text-align:center;min-height:52px}.ui #taskCount,.ui #decisions .badge{margin:0;font-size:9px;padding:0 5px}.ui #railMore>div{position:absolute;left:calc(100% + 8px);bottom:0;width:180px;padding:8px;background:#fff;border-radius:12px;box-shadow:0 10px 28px rgba(60,48,30,.16)}.ui #railMore .btn{flex-direction:row;font-size:13px;justify-content:flex-start}.drawer{left:var(--rail-w);width:calc(100vw - var(--rail-w));padding:16px}.ui #teamPopover{left:var(--rail-w)}}
+@media(max-width:640px){:root{--rail-w:0px}.ui #rail{left:0;right:0;top:auto;bottom:0;width:100%;height:64px;padding:4px 4px max(4px,env(safe-area-inset-bottom));flex-direction:row;align-items:center;justify-content:space-around;border-radius:0}.ui #railBrand{display:none}.ui #rail>.btn,.ui #railMore>summary{width:auto;min-width:44px;min-height:52px;padding:4px}.ui #railMore{margin:0;border:0;padding:0}.ui #railMore>div{left:auto;right:0;bottom:64px}.ui .rail-label{display:none}.drawer{left:0;bottom:64px;width:100%;height:calc(100% - 64px)}.ui #floors{left:8px}.ui #sceneStatus,.ui #followBar,.ui #controls{left:50%}.ui #controls{bottom:76px;max-width:calc(100% - 16px)}.ui #cameraControls{right:8px;z-index:6}.ui #teamPopover{left:8px;right:8px;top:auto;bottom:72px;width:auto}}
 
 /* Responsive fixes for the rail layout. */
 @media(max-width:1000px){.ui #floors{top:8px}.ui #sceneStatus{top:96px;max-width:calc(100vw - var(--rail-w) - 24px);text-align:center}.ui #log{bottom:96px}.ui #log #logList{max-height:30vh}.ui #cameraControls{bottom:260px}}
@@ -268,6 +272,13 @@ body:has(dialog.drawer[open]) #sceneStatus{left:calc(var(--rail-w) + min(760px,1
 .ui .log-stats strong{line-height:1.1}.ui .log-stats span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Status pill sits under the log when a drawer is open, so it never collides with the log card. */
 body:has(dialog.drawer[open]) .ui #sceneStatus,body.ui:has(dialog.drawer[open]) #sceneStatus{top:auto;bottom:110px}
+/* The follow bar takes the top-centre slot; the status pill steps aside instead of stacking under it. */
+body:not(:has(dialog.drawer[open])):has(#followBar:not([hidden])) .ui #sceneStatus{top:82px}
+/* Scene controls only make sense on the scene: any open drawer takes them out of the way
+   (the 760px settings drawer would otherwise slice the centred controls bar in half). */
+body:has(dialog.drawer[open]) .ui #controls,body:has(dialog.drawer[open]) .ui #cameraControls{display:none}
+/* The team search popover replaces the floor picker while it is open. */
+body:has(#teamPopover:not([hidden])) .ui #floors{visibility:hidden}
 /* Profile and customize panels: no stray backdrop strip below the card. */
 .ui #info,.ui #customPanel{box-shadow:0 10px 28px rgba(60,48,30,.12)}
 @media(min-width:1001px){body.ui:has(#info:not([hidden])) #log,body.ui:has(#customPanel:not([hidden])) #log{display:none}}

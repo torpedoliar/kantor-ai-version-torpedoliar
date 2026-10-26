@@ -1,6 +1,6 @@
 /* Komunikasi: inbox | thread | task context on desktop, inbox ↔ thread on phones. */
 #communicationDialog[open]{display:flex;flex-direction:column;gap:8px;font:14px/1.5 var(--sans);color:var(--ink);background:var(--sheet)}
-#communicationDialog .drawer-header{display:flex;justify-content:space-between;align-items:center;gap:12px}#communicationDialog h1{margin:0;font-size:26px}
+#communicationDialog .drawer-header{display:flex;justify-content:space-between;align-items:center;gap:12px}.drawer-header h1{margin:0;font-size:24px}
 #communicationDialog button{min-height:40px;padding:8px 12px;background:var(--sheet);color:var(--ink);border:1px solid var(--line);border-radius:2px;font:inherit;cursor:pointer}
 #communicationDialog .task-primary{background:var(--accent);border-color:var(--accent);color:#fff}
 #messengerStatus:empty{display:none}#messengerStatus{margin:0;padding:8px 12px;background:var(--paper);border:1px solid var(--line)}
@@ -26,12 +26,11 @@
 #messageComposer{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;align-items:end;padding:8px 12px;border-top:1px solid var(--line)}#messageComposer[hidden]{display:none}#messageComposer label{grid-column:1/-1;font-size:13px;font-weight:600}
 .messenger-context{border-left:1px solid var(--line);padding:12px;overflow:auto;background:var(--paper)}.messenger-context h4{margin:8px 0 4px}.messenger-context:empty{display:none}
 #bCommunications .decision-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#d9822b;margin-left:4px}#bCommunications .decision-dot[hidden]{display:none}
-#notificationCenter{position:fixed;right:16px;bottom:16px;z-index:40;display:flex;flex-direction:column;gap:8px;max-width:min(360px,calc(100vw - 32px))}
+#notificationCenter{position:fixed;left:50%;transform:translateX(-50%);bottom:104px;z-index:40;display:flex;flex-direction:column;gap:8px;max-width:min(420px,calc(100vw - 32px))}
 #notificationCenter .toast{all:unset;box-sizing:border-box;cursor:pointer;padding:12px 14px;background:var(--ink);color:var(--sheet);border-left:4px solid #f0b54a;box-shadow:0 8px 24px rgba(0,0,0,.2);font:500 14px/1.4 var(--sans);overflow-wrap:anywhere}
 #notificationCenter .toast:focus-visible{outline:3px solid var(--accent)}
 @media(max-width:1000px){.messenger{grid-template-columns:minmax(220px,280px) minmax(0,1fr)}.messenger-context{display:none}}
-@media(max-width:640px){.messenger{grid-template-columns:minmax(0,1fr)}.messenger-thread{display:none}#communicationDialog.thread-open .messenger-thread{display:flex}#communicationDialog.thread-open .messenger-inbox{display:none}#threadBack{display:inline-block!important}#notificationCenter{bottom:76px;right:8px}.bubble{max-width:92%}}
-.ui #bCommunications{--icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linejoin='round'%3E%3Cpath d='M4 5h16v11H9l-5 4z'/%3E%3C/svg%3E")}
+@media(max-width:640px){.messenger{grid-template-columns:minmax(0,1fr)}.messenger-thread{display:none}#communicationDialog.thread-open .messenger-thread{display:flex}#communicationDialog.thread-open .messenger-inbox{display:none}#threadBack{display:inline-block!important}#notificationCenter{bottom:150px}.bubble{max-width:92%}}
 /* While Komunikasi is open the toasts move above the composer instead of covering Send. */
 body:has(#communicationDialog[open]) #notificationCenter{bottom:16px;top:auto}
 #notificationCenter .toast.toast-here{display:none}
