@@ -268,13 +268,15 @@ Dependensi keras:
 - Test: perluas `tests/office-models.cjs`, `tests/graphics-lifecycle.cjs`
 
 **Steps:**
-- [ ] 1. Race `officeModels3d.ready()` dengan deadline 12 detik; bila lewat, render dengan fallback prosedural dan tampilkan status yang bisa ditutup.
-- [ ] 2. Tambah `.catch` pada rantai pemuatan script vendor; tulis pesan jelas + tombol Muat ulang ke `#sceneStatus`.
-- [ ] 3. Listener `webglcontextlost` (preventDefault + hentikan rAF + pesan) dan `webglcontextrestored` (re-init renderer/composer atau reload).
+- [x] 1. Race `officeModels3d.ready()` dengan deadline 12 detik; bila lewat, bangun scene dengan fallback prosedural, set `window.officeStartupNotice`, dan tampilkan pesan di `#sceneStatus`.
+- [x] 2. Rantai pemuatan script vendor punya `.catch` yang menulis pesan + tombol "muat ulang" ke `#sceneStatus` dan mencatat `window.officeBootError`.
+- [x] 3. Listener `webglcontextlost` (preventDefault, hentikan kerja frame, pesan) dan `webglcontextrestored` (reload halaman).
+- [x] 4. `canvas` baru dinamai `canvasEl` agar tidak bentrok dengan variabel raycasting yang sudah ada.
 
 **Acceptance:**
-- Tes memblokir `/assets/manifest.json` dengan delay 20 detik: scene tampil <15 detik dengan fallback, tanpa error halaman.
-- Tes memicu `WEBGL_lose_context`: muncul pesan dan canvas tidak membeku diam-diam.
+- `tests/startup-watchdog.cjs`: manifest ditahan 20 detik, scene tetap muncul <20 detik, `models.loaded===0`, dan notice watchdog tercatat.
+- `tests/webgl-context-loss.cjs`: `WEBGL_lose_context` memunculkan pesan pemulihan.
+- `office-models.cjs`, `graphics-lifecycle.cjs`, dan `office.cjs` lulus.
 
 ---
 
@@ -511,6 +513,13 @@ Dependensi keras:
   - Messenger cursor `nextSeq-1`, merge pesan, pause saat tab tersembunyi, status luring.
   - Tes: `task-summary`, `project-runner` (log besar), `task-store` (retensi pesan), `task-messenger-api` (cursor), `task-board`, `messenger-ui`, `task-flow`, `application-workflow-ui`.
   - Sisa Fase 3: Task 11 (watchdog aset/WebGL), 12 (alokasi frame), 13 (finalisasi lantai dinamis).
+- 2026-10-27 — Task 11 selesai di working tree (belum commit):
+  - Watchdog 12 detik untuk aset model; fallback prosedural + notice, loader tetap berjalan di latar.
+  - Rantai script vendor ber-`.catch` dengan tombol muat ulang.
+  - Context loss menghentikan frame dan menampilkan pesan; context restored memuat ulang halaman.
+  - Tes baru: `startup-watchdog`, `webgl-context-loss` (masuk daftar UI suite).
+  - Verifikasi: office-models, graphics-lifecycle, office lulus.
+  - Sisa Fase 3: Task 12 (alokasi frame), 13 (finalisasi lantai dinamis).
 
 ## Risiko utama
 

@@ -48,6 +48,7 @@ body:has(#info:not([hidden])) #log #logList{display:none}.log-head .btn{min-heig
 #info .check{display:flex;align-items:center;gap:10px;min-height:44px;font-size:13px;cursor:pointer}
 #info .check input{width:20px;height:20px;margin:0;accent-color:var(--accent)}
 #sceneStatus{position:fixed;right:28px;top:100px;color:var(--ink);font-size:12px;text-align:right;max-width:260px;background:var(--sheet);border:1px solid var(--line);padding:7px 10px;border-radius:2px}
+#sceneStatus .scene-reload{margin-left:6px;border:1px solid var(--line);background:var(--sheet);color:var(--ink);border-radius:2px;font:inherit;font-size:11px;padding:2px 6px;cursor:pointer}
 #controls{position:fixed;bottom:36px;left:50%;transform:translateX(-50%);display:flex;gap:16px;padding:8px;max-width:calc(100% - 32px)}
 .simulation-controls,.camera-controls{display:flex;gap:6px}
 @media(max-width:1250px){#controls{bottom:16px}}

@@ -4,10 +4,27 @@
   const status = message => { $('sceneStatus').textContent = message; };
   if (!window.THREE) { status('Kantor 3D gagal dimuat. Periksa koneksi internet, lalu muat ulang.'); return; }
   let renderer;
-  try { renderer = new THREE.WebGLRenderer({canvas: $('c'), antialias: true}); }
+  const canvasEl = $('c');
+  try { renderer = new THREE.WebGLRenderer({canvas: canvasEl, antialias: true}); }
   catch { status('Browser ini belum bisa menampilkan WebGL. Coba browser dengan akselerasi grafis.'); return; }
-  // Initials and floor signage are drawn into canvases, so the web fonts must be ready first.
-  await window.officeModels3d?.ready();
+  // A lost GPU context freezes the canvas silently; stop drawing and say what happened. Restoring reloads
+  // the page because every texture, composer target and environment map belongs to the old context.
+  let contextLost = false;
+  canvasEl.addEventListener('webglcontextlost', event => {
+    event.preventDefault(); contextLost = true;
+    status('Konteks grafis terputus. Muat ulang halaman untuk memulihkan kantor 3D.');
+  });
+  canvasEl.addEventListener('webglcontextrestored', () => { contextLost = false; status('Konteks grafis pulih. Memuat ulang…'); location.reload(); });
+  // A stalled GLTF download must not keep the office blank forever: after 12 s build with the
+  // procedural fallbacks, and leave the model loader running in the background.
+  const modelsInTime = await Promise.race([
+    Promise.resolve(window.officeModels3d?.ready?.()).then(() => true, () => false),
+    new Promise(resolve => setTimeout(() => resolve(false), 12000))
+  ]);
+  if (!modelsInTime) {
+    const notice = 'Aset 3D lambat dimuat; kantor dimulai dengan bentuk sederhana. Muat ulang nanti untuk detail penuh.';
+    window.officeStartupNotice = notice; status(notice);
+  }
   // A stalled people download must not block the office; without both templates it uses the legacy figures.
   await Promise.race([window.officePeople?.ready(),new Promise(resolve=>setTimeout(resolve,20000))]);
   // Textured humans only when both templates loaded; otherwise the whole office (desk layout included) uses the legacy figures.
@@ -2857,6 +2874,7 @@
   setMood(MOODS[savedMood]?savedMood:'siang',{instant:true});
   const projected=new THREE.Vector3(),world=new THREE.Vector3();let last=performance.now();
   function frame(now) {
+    if (contextLost) { requestAnimationFrame(frame); return; }
     // Allow slower renderers to keep pace, while limiting jumps after a background-tab pause.
     requestAnimationFrame(frame);const realDt=Math.min(.15,(now-last)/1000);last=now;const dt=paused?0:realDt;simTime+=dt;
     if(moodBlend<1)moodStep(realDt);

@@ -17,4 +17,12 @@ window.THREE=Object.assign({},core,{addons:{EffectComposer,RenderPass,SAOPass,Un
 const load=src=>new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=reject;document.body.append(script);});
 // Textured CC0 humans are the default; ?people=legacy keeps the old procedural figures (also the automatic fallback
 // when the people assets fail to load).
-load('office-surfaces.js').then(()=>load('office-models.js')).then(()=>new URLSearchParams(location.search).get('people')==='legacy'?undefined:load('office-people.js')).then(()=>load('mobility.js')).then(()=>load('environment-layout.js')).then(()=>load('office-environment.js')).then(()=>load('office.js'));
+load('office-surfaces.js').then(()=>load('office-models.js')).then(()=>new URLSearchParams(location.search).get('people')==='legacy'?undefined:load('office-people.js')).then(()=>load('mobility.js')).then(()=>load('environment-layout.js')).then(()=>load('office-environment.js')).then(()=>load('office.js')).catch(error=>{
+  window.officeBootError=String(error?.message||error);
+  console.error('Kantor 3D gagal dimuat:',error);
+  const status=document.getElementById('sceneStatus');
+  if(!status)return;
+  status.textContent='Kantor 3D gagal dimuat. Periksa koneksi, lalu ';
+  const button=document.createElement('button');button.type='button';button.className='scene-reload';button.textContent='muat ulang';
+  button.addEventListener('click',()=>location.reload());status.append(button);
+});
