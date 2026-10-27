@@ -374,13 +374,14 @@ Dependensi keras:
 - Test: perluas `tests/rooms.cjs`, `tests/rooms-nav.cjs`, `tests/nav-hardening.cjs`
 
 **Steps:**
-- [ ] 1. Simpan peta nama built-in dari `/api/rooms` dan perbarui texture label saat applyRooms (bukan menyaring built-in dari semua logika).
-- [ ] 2. Tambah input angka X/Z (dan lebar/kedalaman) di form ruangan; samakan dengan panel furnitur.
-- [ ] 3. `tabindex="0"` pada `#roomPlan`, panah untuk menggeser 0,1 m (Shift 0,5 m), `aria-live` mengumumkan posisi.
+- [x] 1. Peta label bawaan (meeting, pantry, musholla) menyimpan mesh/posisi/text asli; `applyRooms` memperbarui label dari daftar `/api/rooms` dan kembali ke label asli saat nama dikembalikan.
+- [x] 2. Form ruangan mendapat input X/Z; ukuran tetap mengikuti template tipe (tidak ada input lebar/kedalaman).
+- [x] 3. `#roomPlan` memiliki `tabindex="0"`; panah menggeser 0,1 m, Shift 0,5 m; input X/Z tersinkron dan pesan posisi diumumkan lewat `#roomsMessage`.
+- [x] 4. `officeScene.roomLabelText(id)` mengekspos label 3D untuk tes.
 
 **Acceptance:**
-- Rename "Meeting Room" → label 3D berubah setelah simpan/reload.
-- Ruangan dapat dipindah tanpa mouse; posisi akhir sama dengan drag.
+- `tests/rooms.cjs`: rename seed-meeting menjadi "Board Room" membuat label 3D `BOARD ROOM`; panah menggeser X 0,1 m dan Shift 0,5 m tanpa mouse.
+- `rooms-nav`, `rooms-merge`, `nav` lulus.
 
 ---
 
@@ -544,6 +545,9 @@ Dependensi keras:
   - Preferensi rutinitas dibaca saat init dan diterapkan saat disimpan.
   - Poll org setiap 2,5 detik; jeda saat tab tersembunyi dan lanjut saat terlihat.
   - Tes `sync-routine`; settings-ui/office lulus.
+- 2026-10-27 — Task 16 selesai di working tree (belum commit):
+  - Label 3D ruangan bawaan mengikuti rename dari drawer; input X/Z dan panah/Shift pada denah.
+  - Tes rooms diperluas; rooms-nav/rooms-merge/nav lulus.
 - 2026-10-27 — Task 17 selesai di working tree (belum commit):
   - Fokus kartu task dan thread messenger bertahan setelah render/poll; scroll board dipertahankan.
   - Bahasa UI diseragamkan (kolom, aria-label, inventaris, jenis furnitur, pesan custom).
