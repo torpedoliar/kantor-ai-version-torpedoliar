@@ -18,6 +18,7 @@ const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
     assert.ok(o.size[1]<=2.2,`${o.kind} must stay within one storey, height ${o.size[1]}`);
     assert.ok(o.min[0]>=-16.1&&o.max[0]<=16.1&&o.min[2]>=-12.1&&o.max[2]<=12.1,`${o.kind} must stay inside room bounds: ${o.min} → ${o.max}`);
   }
+  const geometryBefore=await page.evaluate(()=>officeScene.snapshot().graphics.geometryCount);
   const org=await page.evaluate(()=>officeTasks.state());
   const divisions=Array.from({length:6},(_,i)=>({id:'audit'+i,name:'Audit '+i,color:'#507060',lead:'Lead '+i,collaboratesWith:[]}));
   const members=divisions.map((d,i)=>({name:'Lead '+i,initials:'L'+i,role:'Lead',division:d.id,manager:null,active:true}));
@@ -25,6 +26,7 @@ const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
   let snap=await page.evaluate(()=>officeScene.snapshot());
   assert.equal(snap.floor,3);assert.deepEqual(snap.visibleFloors,[3],'new work floors must stay hidden while floor 3 is selected');
   const extra=await page.evaluate(()=>officeScene.floorRoles().find(x=>x.level>4));assert.ok(extra);
+  assert.ok(await page.evaluate(l=>officeScene.mergedMeshes(l),extra.level)>0,'a dynamically created floor is merged after finalization');
   const expandedAudit=await page.evaluate(()=>officeScene.geometryAudit());
   const floorHeights=await page.evaluate(()=>Object.fromEntries(officeScene.floorRoles().map(f=>[f.level,officeScene.floorHeight(f.level)])));
   for(const facade of expandedAudit.facades)assert.ok(Math.abs(facade.minY-(floorHeights[facade.level]-.54))<.05,`facade ${facade.level} aligned to its own storey: ${facade.minY} vs ${floorHeights[facade.level]-.54}`);
@@ -38,6 +40,8 @@ const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
   const restoredAudit=await page.evaluate(()=>officeScene.geometryAudit());
   const restoredHeights=await page.evaluate(()=>Object.fromEntries(officeScene.floorRoles().map(f=>[f.level,officeScene.floorHeight(f.level)])));
   for(const facade of restoredAudit.facades)assert.ok(Math.abs(facade.minY-(restoredHeights[facade.level]-.54))<.05,`facade ${facade.level} remains aligned after removing a storey`);
+  const geometryAfter=await page.evaluate(()=>officeScene.snapshot().graphics.geometryCount);
+  assert.ok(geometryAfter<=geometryBefore+80,`removed floors release geometry (${geometryBefore} → ${geometryAfter})`);
   assert.deepEqual(errors,[]);
   console.log('PASS: dynamic work floors preserve floor visibility and receive realistic room dressing');
  }finally{await browser.close();}

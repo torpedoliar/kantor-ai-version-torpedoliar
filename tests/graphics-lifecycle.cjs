@@ -8,10 +8,17 @@ const URL=process.env.OFFICE_URL||'http://127.0.0.1:4173';
  await p.goto(URL);await p.waitForFunction(()=>window.officeScene?.snapshot().graphics&&!officeScene.snapshot().graphics.pending,null,{timeout:90000});
  const org=await p.evaluate(()=>officeTasks.state());
  await p.evaluate(o=>officeScene.applyOrg(o),org);
- const before=await p.evaluate(()=>officeSurfaces.stats());
+ const before=await p.evaluate(()=>officeSurfaces.stats()),geometryBefore=await p.evaluate(()=>officeScene.snapshot().graphics.geometryCount);
  for(let i=0;i<5;i++)await p.evaluate(o=>officeScene.applyOrg(o),org);
  const after=await p.evaluate(()=>officeSurfaces.stats());
  assert.ok(after.materials<=before.materials+5,`old fade clones retained: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+ const geometryAfter=await p.evaluate(()=>officeScene.snapshot().graphics.geometryCount);
+ assert.ok(geometryAfter<=geometryBefore+60,`desk-area rebuilds release geometry (${geometryBefore} → ${geometryAfter})`);
+ // Room add/remove cycles must not leave geometry behind.
+ const room={id:'audit-room',name:'Audit Room',floor:2,type:'focus',x:0,z:0,w:3,d:3,capacity:1,furniture:[]};
+ for(let i=0;i<10;i++){await p.evaluate(r=>officeScene.applyRooms([r]),room);await p.evaluate(()=>officeScene.applyRooms([]));}
+ const roomGeometry=await p.evaluate(()=>officeScene.snapshot().graphics.geometryCount);
+ assert.ok(roomGeometry<=geometryAfter+40,`room rebuilds release geometry (${geometryAfter} → ${roomGeometry})`);
  await p.evaluate(()=>officeGraphics.set('ultra'));await p.waitForFunction(()=>!officeScene.snapshot().graphics.pending);
  let g=await p.evaluate(()=>officeScene.snapshot().graphics);assert.deepEqual(g.aoSize,[600,400],'AO render targets at half resolution');
  await p.setViewportSize({width:1000,height:700});

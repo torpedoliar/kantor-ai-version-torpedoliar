@@ -199,7 +199,8 @@
     const c=document.createElement('canvas'); c.width=1024;c.height=128;
     const ctx=c.getContext('2d');ctx.font='600 60px Archivo, system-ui, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillStyle=color;ctx.fillText(text,512,64,980);
     const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;
-    const m=new THREE.Mesh(new THREE.PlaneGeometry(width,width/8),new THREE.MeshBasicMaterial({map:texture,transparent:true,depthWrite:false}));
+    const signMaterial=new THREE.MeshBasicMaterial({map:texture,transparent:true,depthWrite:false});signMaterial.userData.ownMaterial=true;
+    const m=new THREE.Mesh(new THREE.PlaneGeometry(width,width/8),signMaterial);
     m.rotation.x=-Math.PI/2;m.position.set(x,.08,z);parent.add(m);return m;
   }
   function oval(w,h,d,color,x,y,z,parent=root){
@@ -285,7 +286,7 @@
         const panel=new THREE.Mesh(new THREE.PlaneGeometry(.345,.215),screenContent[(Math.abs(Math.round(x*7+offset*3))%screenContent.length)]);
         panel.rotation.x=-Math.atan2(.0325193,.2313867);
         panel.position.set(0,.171279+.0006*Math.sin(-panel.rotation.x),-.000069+.0006*Math.cos(panel.rotation.x));
-        panel.userData.decor='screen';panel.userData.walkable=true;mon.add(panel);
+        panel.userData.decor='screen';panel.userData.walkable=true;panel.userData.ownGeometry=true;mon.add(panel);
       }
       model('keyboard',{w:.55},{x,y:.99,z:keyboardZ,rotY:f>0?Math.PI:0});return;
     }
@@ -544,7 +545,7 @@
   }
   let deskAreas=[];
   function seatAreas(plan){
-    for(const area of deskAreas){area.group.parent?.remove(area.group);for(const item of area.items){const i=customItems.indexOf(item);if(i>=0)customItems.splice(i,1);customById.delete(item.id);}}
+    for(const area of deskAreas){disposeGroup(area.group);for(const item of area.items){const i=customItems.indexOf(item);if(i>=0)customItems.splice(i,1);customById.delete(item.id);}}
     deskAreas=[];for(const key of Object.keys(desks))delete desks[key];
     plan.floors.forEach((floor,k)=>{for(const area of floor.areas){
       const built=buildDeskArea(workId(k+1),area);built.label=area.label;deskAreas.push(built);
@@ -1509,6 +1510,24 @@
       for(const m of [o.material].flat())if(m?.userData?.roomOwned)m.dispose();
     });
   }
+  // Dispose only resources owned by this rebuild: unique geometry, canvas-material signs, and
+  // never shared softBox shells, cached materials or GLTF clones. Desk areas are optionally kept
+  // for seatAreas, which disposes them on its own pass.
+  function disposeGroup(group,{keepDeskAreas=false}={}){
+    if(!group)return;
+    const shared=new Set(softShapes.values());
+    group.traverse(o=>{
+      if(keepDeskAreas){for(let a=o;a;a=a.parent)if(a.userData.deskArea)return;}
+      let model=false;for(let a=o;a;a=a.parent)if(a.userData.model){model=true;break;}
+      // A screen panel is a unique plane attached under a shared GLTF clone; dispose it too.
+      const ownGeometry=o.userData.ownGeometry===true;
+      if(o.isMesh&&(!model||ownGeometry)){
+        if(o.geometry&&!shared.has(o.geometry))o.geometry.dispose();
+        for(const m of [o.material].flat())if(m?.userData?.ownMaterial){m.map?.dispose();m.dispose();}
+      }
+    });
+    group.parent?.remove(group);
+  }
   function removeRoomBuilt(roomId){
     const built=roomBuilt.get(roomId);if(!built)return;
     built.group.parent?.remove(built.group);disposeRoomGroup(built.group);
@@ -1642,7 +1661,16 @@
     rootF.userData.staticGrid=rasterize(rootF,o=>o.userData.walkable||o.isMesh&&!collisionObjects.has(o));
     for(const o of collisionObjects){o.parent.remove(o);o.geometry.dispose();}
   }
-  for(const rootF of Object.values(floors))mergeStatic(rootF);
+  // Every floor is merged once, after its static geometry exists and before runtime furniture is
+  // added. Dynamic floors use the same finalize path in setFloorCount.
+  function finalizeFloor(level){
+    const group=floors[level];if(!group||group.userData.finalized)return;
+    group.updateMatrixWorld(true);
+    mergeStatic(group);
+    navGrids[level]=rasterize(group,a=>a.userData.walkable||a.userData.agent||a.visible===false);
+    group.userData.finalized=true;
+  }
+  for(const level of Object.keys(floors).map(Number))finalizeFloor(level);
   // Rooms are built after the one-time merge: they change at runtime and must stay removable.
   applyRooms(customRooms);
   const cellOf=(x,z)=>[Math.floor((x-NAV.x0)/NAV.cell),Math.floor((z-NAV.z0)/NAV.cell)];
@@ -2477,7 +2505,7 @@
     placeCustom(item);return item;
   }
   const freeSpawn=(type,floor)=>{const probe={floor,radius:type==='chair'?.5:type==='sofa'?1.4:type==='table'?1.3:type==='shelf'||type==='whiteboard'?1.3:type==='coffee'?1:type==='plant'?.65:.5};for(let z=-10;z<=10;z+=2)for(let x=-14;x<=14;x+=2)if(!customItems.some(o=>o.floor===floor&&Math.hypot(o.x-x,o.z-z)<o.radius+probe.radius+.15))return [x,z];return null;};
-  const removeCustomItem=item=>{item.seatRefs.forEach(spot=>{for(const a of agents){if(a.activity?.spot===spot){clearActivity(a);setPath(a,a.desk);}if(a.destination===spot){a.destination=a.desk;a.path=[];}}const index=hangouts.indexOf(spot);if(index>=0)hangouts.splice(index,1);});item.group.parent?.remove(item.group);const index=customItems.indexOf(item);if(index>=0)customItems.splice(index,1);customById.delete(item.id);if(customSel===item){customSel=null;customDraft=null;customRing.visible=false;}rebuildNavFloor(item.floor);syncCustomPanel();};
+  const removeCustomItem=item=>{item.seatRefs.forEach(spot=>{for(const a of agents){if(a.activity?.spot===spot){clearActivity(a);setPath(a,a.desk);}if(a.destination===spot){a.destination=a.desk;a.path=[];}}const index=hangouts.indexOf(spot);if(index>=0)hangouts.splice(index,1);});disposeGroup(item.group);const index=customItems.indexOf(item);if(index>=0)customItems.splice(index,1);customById.delete(item.id);if(customSel===item){customSel=null;customDraft=null;customRing.visible=false;}rebuildNavFloor(item.floor);syncCustomPanel();};
   const renderInventory=()=>{const list=$('inventoryList');if(!list)return;list.replaceChildren(...Object.entries(INVENTORY_CATALOG).map(([type,data])=>{const row=document.createElement('div');row.className='inventory-row';const name=document.createElement('span');name.textContent=data.label;const count=document.createElement('strong');count.textContent=inventoryStore.stock[type];const minus=document.createElement('button');minus.className='btn';minus.type='button';minus.textContent='−';minus.disabled=inventoryStore.stock[type]===0;minus.onclick=()=>adjustStock(type,-1);const plus=document.createElement('button');plus.className='btn';plus.type='button';plus.textContent='+';plus.onclick=()=>adjustStock(type,1);const add=document.createElement('button');add.className='btn';add.type='button';add.textContent='Add';add.disabled=inventoryStore.stock[type]===0;add.onclick=()=>addInventory(type);row.append(name,count,minus,plus,add);return row;}));};
   function adjustStock(type,delta){if(!INVENTORY_CATALOG[type]||!Number.isFinite(delta))return inventoryStore.stock[type]??0;inventoryStore.stock[type]=Math.max(0,inventoryStore.stock[type]+Math.trunc(delta));saveInventory();renderInventory();return inventoryStore.stock[type];}
   function addInventory(type){if(!INVENTORY_CATALOG[type]||inventoryStore.stock[type]<1)return false;const floor=INVENTORY_CATALOG[type].floor,spawn=freeSpawn(type,floor);if(!spawn){customMsg('No free location on this floor.',true);return false;}if(activeFloor!==floor)setFloor(floor,false);const item=runtimeFurniture(type,floor,...spawn);if(!item)return false;selectCustom(item);renderInventory();customMsg(`Preview ${INVENTORY_CATALOG[type].label}; Apply to add it.`);return {id:item.id,preview:true};}
@@ -3062,7 +3090,7 @@
       for(let i=roomDoors.length-1;i>=0;i--)if(roomDoors[i].floor===level)roomDoors.splice(i,1);
       for(let i=animatedScreens.length-1;i>=0;i--)if(animatedScreens[i].floor===level)animatedScreens.splice(i,1);
       for(let i=roomSpots.length-1;i>=0;i--)if(roomSpots[i].floor===level){const pool=roomPool(roomSpots[i].floor);const k=pool.indexOf(roomSpots[i]);if(k>=0)pool.splice(k,1);roomSpots.splice(i,1);}
-      scene.remove(floors[level]);delete floors[level];delete navGrids[level];
+      disposeGroup(floors[level],{keepDeskAreas:true});delete floors[level];delete navGrids[level];
       disposeFade(facadeLevels[level]);facadeLevels[level]?.parent?.remove(facadeLevels[level]);delete facadeLevels[level];
       levelLights[level]?.parent?.remove(levelLights[level]);delete levelLights[level];
       for(let i=customItems.length-1;i>=0;i--)if(customItems[i].floor===level){customById.delete(customItems[i].id);customItems.splice(i,1);}
@@ -3076,6 +3104,7 @@
     for(const lower of ORDER.slice(0,-1))prepareFade(buildStair(lower));
     buildStairCore();stairCore.traverse(o=>{o.castShadow=false;});prepareFade(stairCore);
     for(const level of ORDER){floors[level].position.y=floorY(level);for(const pad of doorPads)if(pad.parent===floors[level])pad.position.y=-.06;}
+    for(const level of want)finalizeFloor(level);
     for(const level of want)if(!thumbs[level]&&level!==3)thumbs[level]=thumbs[3];
     // Rooms on a new storey are built now; rooms whose storey disappeared stay in the list and
     // return when that storey exists again.
@@ -3159,7 +3188,7 @@
       team:agents.map(a=>({name:a.n,initials:a.initials,gender:a.gender,role:a.role,group:a.group,floor:a.floor,state:a.state,visible:a.g.visible,position:a.g.getWorldPosition(new THREE.Vector3()).toArray(),heading:new THREE.Euler().setFromQuaternion(a.g.getWorldQuaternion(new THREE.Quaternion()),'YXZ').y,spotFacing:a.spot?facing(a.spot):null,path:a.path.slice(0,4).map(q=>q.map(v=>+v.toFixed(2))),pathLeft:a.path.length,blocked:+(a.blocked||0).toFixed(2),pass:a.passUntil>simTime,dest:a.destination&&[a.destination.x,a.destination.z],sitting:SIT.has(a.state)&&!a.spot?.standing,destination:a.destination.floor,activity:a.activity?.spot.state||null,atDesk:a.spot===a.desk,talkingWith:companions(a)[0]?.n||null,roomName:a.spot?.roomName||null})),
       visibleFloors:Object.keys(floors).filter(k=>floors[k].visible).map(Number),
       models:window.officeModels3d?.status()||{loaded:0,failed:[]},
-      graphics:(()=>{const L=GFX.LEVELS[gfxLevel]||{};return {environmentSource:scene.environment?envSource:null,level:gfxLevel,pending:gfxPending,shadows:renderer.shadowMap.enabled,environment:!!scene.environment,post:[...(L.ao&&composer?['sao']:[]),...(L.bloom&&composer?['bloom']:[])],aoSize:(()=>{const a=composer?.passes.find(p=>p instanceof ADD.SAOPass);return a?[a.saoRenderTarget.width,a.saoRenderTarget.height]:null;})(),textures:window.officeSurfaces?.tier?.()??L.textures??null,drawCalls:renderer.info.render.calls,textureCount:renderer.info.memory.textures};})()}),
+      graphics:(()=>{const L=GFX.LEVELS[gfxLevel]||{};return {environmentSource:scene.environment?envSource:null,level:gfxLevel,pending:gfxPending,shadows:renderer.shadowMap.enabled,environment:!!scene.environment,post:[...(L.ao&&composer?['sao']:[]),...(L.bloom&&composer?['bloom']:[])],aoSize:(()=>{const a=composer?.passes.find(p=>p instanceof ADD.SAOPass);return a?[a.saoRenderTarget.width,a.saoRenderTarget.height]:null;})(),textures:window.officeSurfaces?.tier?.()??L.textures??null,drawCalls:renderer.info.render.calls,textureCount:renderer.info.memory.textures,geometryCount:renderer.info.memory.geometries};})()}),
     showFps:on=>{showFps=!!on;fpsLabel.hidden=!showFps;},
     // Time-of-day state for the mood picker and its browser test.
     mood:()=>({id:moodId,blend:+moodBlend.toFixed(2),sun:+sun.intensity.toFixed(2),ambient:+ambient.intensity.toFixed(2),background:'#'+scene.background.getHexString(),fog:!!scene.fog,stars:nightSky.visible,lamps:eveningLights.visible,city:+(cityFacadeMats[0]?.emissiveIntensity||0).toFixed(2),street:+(streetBulbMaterial.emissiveIntensity||0).toFixed(2)}),
@@ -3171,6 +3200,7 @@
     setRoutine:on=>{routineOn=!!on;syncRoutine();},
     everyoneToDesk:()=>commandMembers(agents,'work'),
     modelCount:level=>{let n=0;floors[level]?.traverse(o=>{if(o.userData.model)n++;});return n;},
+    mergedMeshes:level=>{let n=0;floors[level]?.traverse(o=>{if(o.userData.merged)n++;});return n;},
     // Human measurements and looks, for tests and the character panel.
     people:()=>agents.map(a=>{const L=a.rig.look||{};const box=new THREE.Box3().setFromObject(a.rig.figure);const height=box.max.y-box.min.y;const floorY=a.g.parent?.position.y??0;const standing=(box.max.y-floorY);const rest=a.rig.body.position.y; a.rig.body.position.y=0; a.rig.figure.updateMatrixWorld(true); const upright=new THREE.Box3().setFromObject(a.rig.figure); const uprightHeight=upright.max.y-floorY; a.rig.body.position.y=rest; a.rig.figure.updateMatrixWorld(true);
       const headBox=headBounds(a);return {name:a.n,height:+uprightHeight.toFixed(3),seatedHeight:+standing.toFixed(3),headHeight:+(headBox.max.y-headBox.min.y).toFixed(3),

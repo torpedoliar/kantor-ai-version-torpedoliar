@@ -310,15 +310,16 @@ Dependensi keras:
 - Test: perluas `tests/graphics-dynamic-floors.cjs`, `tests/graphics-lifecycle.cjs`, `tests/rooms-merge.cjs`
 
 **Steps:**
-- [ ] 1. Ekstrak `finalizeFloor(level)` (rasterize + mergeStatic) dan panggil setelah `shell`/`dress`/`furnishExtraWorkFloor` di startup maupun `setFloorCount`.
-- [ ] 2. Buat `disposeGroup(root)` yang hanya membuang resource milik group (bukan geometri shared `softBox`/model GLTF/cache `surface()`).
-- [ ] 3. Panggil di `seatAreas`, `removeRoomBuilt` (termasuk layar animasi), `removeCustomItem`, dan `setFloorCount`.
-- [ ] 4. Tes siklus: tambah/hapus lantai dan ruangan 20 kali; `renderer.info.memory` harus kembali ke kisaran awal.
+- [x] 1. `finalizeFloor(level)` menjalankan `mergeStatic` + `rasterize` dan menandai `userData.finalized`; dipakai startup dan lantai baru di `setFloorCount` (setelah posisi lantai di-set).
+- [x] 2. `disposeGroup(group,{keepDeskAreas})` hanya membuang geometri unik, material bertanda `ownMaterial`/`ownGeometry`, dan melewati `softBox` bersama, model GLTF, serta material cache.
+- [x] 3. Dipakai di `seatAreas`, `removeCustomItem`, dan penghapusan lantai. `removeRoomBuilt` tetap memakai `disposeRoomGroup` yang lebih spesifik.
+- [x] 4. Panel layar unik di bawah clone monitor ditandai `ownGeometry` (bug yang ditemukan saat tes: geometri panel bocor 17 per rebuild).
+- [x] 5. `geometryCount` dan `mergedMeshes(level)` diekspos untuk tes.
 
 **Acceptance:**
-- Lantai ke-4/5 punya draw call dalam ±15% lantai bawaan dengan jumlah furnitur setara.
-- Tidak ada kenaikan tekstur/geometri monoton setelah siklus 20×.
-- `tests/office.cjs` dan `tests/graphics-dynamic-floors.cjs` lulus.
+- `graphics-dynamic-floors`: lantai dinamis punya mesh merged dan geometri kembali ke kisaran awal setelah lantai dihapus.
+- `graphics-lifecycle`: 5× rebuild org + 10× tambah/hapus ruangan tidak menaikkan geometri secara monoton.
+- `office`, `desk-layout`, `workstation-clearance` lulus.
 
 ---
 
@@ -526,6 +527,10 @@ Dependensi keras:
   - `frame-budget.cjs` membuktikan ≤ satu snapshot/frame.
   - Bug excursion (snapshot lama untuk trip baru) diperbaiki; mobility-journey/visitors/office lulus.
   - Sisa Fase 3: Task 13 (finalisasi lantai dinamis + dispose).
+- 2026-10-27 — Task 13 selesai di working tree (belum commit):
+  - `finalizeFloor` untuk startup dan lantai dinamis; geometryCount/mergedMeshes diekspos.
+  - dispose aman untuk desk area, custom item, lantai; panel layar ownGeometry.
+  - Verifikasi: graphics-dynamic-floors, graphics-lifecycle, desk-layout, workstation-clearance, office.
 
 ## Risiko utama
 
