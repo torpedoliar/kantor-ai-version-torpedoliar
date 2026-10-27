@@ -35,8 +35,27 @@ try{
   assert.throws(()=>broken.transaction(before.version,d=>{d.tasks=[];}),/disk full/);assert.deepEqual(broken.snapshot(),before);
   // Migration cannot run twice or consume a subsequently changed legacy file.
   fs.writeFileSync(path.join(dir,'tasks.json'),'[]');assert.equal(createTaskStore({dataDir:dir}).snapshot().tasks.length,1);
+  // A corrupt legacy file is archived and the store starts empty instead of bricking the server.
   const bad=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-task-bad-'));
-  try{fs.writeFileSync(path.join(bad,'tasks.json'),'broken');assert.throws(()=>createTaskStore({dataDir:bad}),/Cannot read/);assert.equal(fs.existsSync(path.join(bad,'workspace.json')),false);}finally{fs.rmSync(bad,{recursive:true,force:true});}
+  try{
+    fs.writeFileSync(path.join(bad,'tasks.json'),'broken');
+    let recovered;assert.doesNotThrow(()=>{recovered=createTaskStore({dataDir:bad});});
+    assert.equal(recovered.snapshot().tasks.length,0);assert.equal(recovered.recovery().degraded,true);
+    assert.ok(fs.readdirSync(bad).some(name=>name.startsWith('tasks.json.corrupt-')),'the corrupt legacy file is archived');
+    assert.ok(fs.existsSync(path.join(bad,'workspace.json')),'an empty workspace is written');
+  }finally{fs.rmSync(bad,{recursive:true,force:true});}
+  // A corrupt workspace recovers from the last-good snapshot taken at the previous boot.
+  const lastGood=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-task-lastgood-'));
+  try{
+    const first=createTaskStore({dataDir:lastGood});
+    first.transaction(first.snapshot().version,draft=>{draft.tasks.push({id:'keep',title:'Keep me',assignee:'A',status:'queued',version:0,createdAt:new Date().toISOString()});});
+    createTaskStore({dataDir:lastGood}); // a clean boot snapshots the valid workspace
+    fs.writeFileSync(path.join(lastGood,'workspace.json'),'{broken');
+    const third=createTaskStore({dataDir:lastGood});
+    assert.equal(third.snapshot().tasks[0].id,'keep','last-good restored the task');
+    assert.equal(third.recovery().recovered,true);
+    assert.ok(fs.readdirSync(lastGood).some(name=>name.startsWith('workspace.json.corrupt-')),'the corrupt workspace is archived');
+  }finally{fs.rmSync(lastGood,{recursive:true,force:true});}
   // Retention: expired events and request keys are pruned, and the retained sequence starts at firstSeq.
   const stamp=Date.parse('2026-10-27T00:00:00Z'),old=new Date(stamp-200*24*60*60*1000).toISOString(),recent=new Date(stamp-1000).toISOString();
   const retention={events:[{seq:1,at:old},{seq:2,at:recent}],nextSeq:3,requests:{old:{result:'x',at:old},fresh:{result:'y',at:recent},legacy:{result:'z'}}};

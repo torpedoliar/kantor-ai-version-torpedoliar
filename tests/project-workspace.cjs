@@ -46,6 +46,16 @@ const bad=(files,pattern,label)=>assert.throws(()=>validateBundle({...base,files
   const again=ws.writeRevision(project.id,{...base,files:[{path:'deep/a/b/c.js',content:'1'},...[...base.files].reverse()]});
   assert.equal(ws.manifest(project.id,again.id).sourceHash,manifest.sourceHash,'source hash ignores file order');
   assert.notEqual(again.id,rev.id,'every revision gets its own id');
+  // Retention keeps the newest revisions and removes only job folders past their age.
+  const kept=ws.createProject({taskId:'retention',environment:'docker'}),keptRoot=path.join(dir,'projects',kept.id,'revisions');
+  for(let i=0;i<25;i++){const id=crypto.randomUUID(),target=path.join(keptRoot,id);fs.mkdirSync(target,{recursive:true});fs.writeFileSync(path.join(target,'manifest.json'),JSON.stringify({id,createdAt:new Date(Date.now()-(25-i)*60000).toISOString()}));}
+  const jobRoot=path.join(dir,'projects',kept.id,'jobs'),oldJob=path.join(jobRoot,crypto.randomUUID()),newJob=path.join(jobRoot,crypto.randomUUID());
+  fs.mkdirSync(jobRoot,{recursive:true});fs.mkdirSync(oldJob);fs.mkdirSync(newJob);
+  const oldTime=new Date(Date.now()-40*24*60*60*1000);fs.utimesSync(oldJob,oldTime,oldTime);
+  const pruned=ws.prune({keepRevisions:20,jobMaxAgeDays:30});
+  assert.equal(pruned.revisions,5);assert.equal(pruned.jobs,1);
+  assert.equal(fs.readdirSync(keptRoot).filter(name=>/^[0-9a-f-]{36}$/.test(name)).length,20,'the newest twenty revisions stay');
+  assert.ok(fs.existsSync(newJob));assert.ok(!fs.existsSync(oldJob),'only the old job folder is removed');
   assert.equal(ws.readFile(project.id,rev.id,'src/app.js'),'export const add=(a,b)=>a+b;');
   assert.throws(()=>ws.readFile(project.id,rev.id,'../manifest.json'),/path/i);
   const root=path.join(dir,'projects',project.id,'revisions',rev.id,'src');

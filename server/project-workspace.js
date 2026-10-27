@@ -127,6 +127,36 @@ function createProjectWorkspace({dataDir,writeFile=(file,data)=>fs.writeFileSync
     }
     return {target:dest,files:m.files.map(f=>f.path),revisionId,sourceHash:m.sourceHash};
   }
-  return {createProject,writeRevision,manifest,readFile,exportSource,sourceDir,verifyRevision,exportRevision};
+  // Retention: keep the newest revisions and drop job folders past their age. Never touches
+  // project.json, staging folders or anything outside a UUID project directory.
+  function prune({keepRevisions=20,jobMaxAgeDays=30}={}){
+    const removed={revisions:0,jobs:0};if(!fs.existsSync(root))return removed;
+    const now=Date.now();
+    for(const projectId of fs.readdirSync(root)){
+      if(!UUID.test(projectId))continue;
+      const dir=path.join(root,projectId);let stat;try{stat=fs.statSync(dir);}catch{continue;}
+      if(!stat.isDirectory())continue;
+      const revisionRoot=path.join(dir,'revisions');
+      if(fs.existsSync(revisionRoot)){
+        const revisions=[];
+        for(const revisionId of fs.readdirSync(revisionRoot)){
+          if(!UUID.test(revisionId))continue;
+          const target=path.join(revisionRoot,revisionId);let at=0;
+          try{at=Date.parse(JSON.parse(fs.readFileSync(path.join(target,'manifest.json'),'utf8')).createdAt)||0;}catch{}
+          if(!at)try{at=fs.statSync(target).mtimeMs;}catch{/* unreadable: keep it */}
+          revisions.push({revisionId,at});
+        }
+        revisions.sort((a,b)=>b.at-a.at);
+        for(const entry of revisions.slice(Math.max(0,keepRevisions))){fs.rmSync(path.join(revisionRoot,entry.revisionId),{recursive:true,force:true});removed.revisions++;}
+      }
+      const jobRoot=path.join(dir,'jobs');
+      if(fs.existsSync(jobRoot))for(const jobId of fs.readdirSync(jobRoot)){
+        const target=path.join(jobRoot,jobId);let age=0;try{age=now-fs.statSync(target).mtimeMs;}catch{continue;}
+        if(age>jobMaxAgeDays*24*60*60*1000){fs.rmSync(target,{recursive:true,force:true});removed.jobs++;}
+      }
+    }
+    return removed;
+  }
+  return {createProject,writeRevision,manifest,readFile,exportSource,sourceDir,verifyRevision,exportRevision,prune};
 }
 module.exports={createProjectWorkspace,validateBundle,LIMITS};

@@ -8,6 +8,28 @@ const GENERATE_TIMEOUT=()=>Math.max(5000,Number(process.env.PROVIDER_TIMEOUT_MS)
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function classify(error){return error?.category||'connection';}
 function safeError(message,category='connection',status=0){const error=new Error(message);error.category=category;error.status=status;return error;}
+const MAX_COOLDOWN=300000;
+// Retry-After may be seconds or an HTTP date; clamp it so a bad header cannot park a provider forever.
+function retryAfterMs(response){
+  const raw=response?.headers?.get?.('retry-after');if(!raw)return undefined;
+  const seconds=Number(raw);if(Number.isFinite(seconds)&&seconds>=0)return Math.min(MAX_COOLDOWN,Math.round(seconds*1000));
+  const at=Date.parse(raw);if(Number.isFinite(at))return Math.max(0,Math.min(MAX_COOLDOWN,at-Date.now()));
+  return undefined;
+}
+// A short, sanitized copy of the provider's error body, so "Provider request failed (400)" says why.
+function errorSnippet(raw){
+  if(typeof raw!=='string'||!raw.trim())return '';
+  let text=raw;
+  try{const data=JSON.parse(raw),value=data?.error?.message??data?.message??data?.error;if(typeof value==='string')text=value;}catch{}
+  return text.replace(/\s+/g,' ').replace(/\b(sk-[A-Za-z0-9_-]{8,}|Bearer\s+[A-Za-z0-9._-]{8,})/gi,'[redacted]').trim().slice(0,200);
+}
+function providerFailure(response,raw,category){
+  const snippet=errorSnippet(raw),wait=retryAfterMs(response);
+  const error=safeError(`Provider request failed (${response.status}).${snippet?` ${snippet}`:''}`,category,response.status);
+  if(Number.isFinite(wait))error.retryAfterMs=wait;
+  if(snippet)error.snippet=snippet;
+  return error;
+}
 function normalizeBase(value){
   let url;try{url=new URL(value);}catch{throw safeError('Provider URL is invalid.','invalid');}
   if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw safeError('Provider URL must use clean HTTP(S) without credentials or query parameters.','invalid');
@@ -38,7 +60,7 @@ async function request(url,options={}){
   try{
     const response=await fetch(url,{...options,signal:controller.signal,redirect:'error'});
     const raw=await bodyLimit(response);let data={};try{data=parseBody(raw);}catch{throw safeError('Provider returned invalid JSON.','invalid',response.status);}
-    if(!response.ok){const category=[401,403].includes(response.status)?'auth':[408,429].includes(response.status)?'quota':[502,503,504].includes(response.status)?'unavailable':response.status>=500?'connection':'request';throw safeError(`Provider request failed (${response.status}).`,category,response.status);}
+    if(!response.ok){const category=[401,403].includes(response.status)?'auth':[408,429].includes(response.status)?'quota':[502,503,504].includes(response.status)?'unavailable':response.status>=500?'connection':'request';throw providerFailure(response,raw,category);}
     return data;
   }catch(error){if(error.name==='AbortError')throw safeError('Provider request timed out.','timeout');if(error.category)throw error;throw safeError('Could not reach provider.','connection');}
   finally{clearTimeout(timer);}
@@ -68,7 +90,7 @@ async function streamChat(provider,credential,body,onDelta){
         const data=await request(endpoint(provider,'/chat/completions'),{method:'POST',headers:headers(provider,credential),timeout:GENERATE_TIMEOUT(),body:JSON.stringify({...body,stream:false})});
         const answer=(data.choices||[]).map(c=>c.message?.content||'').join('\n').trim();if(answer)onDelta(answer);return answer;
       }
-      const category=[401,403].includes(response.status)?'auth':[408,429].includes(response.status)?'quota':[502,503,504].includes(response.status)?'unavailable':response.status>=500?'connection':'request';throw safeError(`Provider request failed (${response.status}).`,category,response.status);
+      const category=[401,403].includes(response.status)?'auth':[408,429].includes(response.status)?'quota':[502,503,504].includes(response.status)?'unavailable':response.status>=500?'connection':'request';throw providerFailure(response,raw,category);
     }
     if(!/event-stream/.test(response.headers.get('content-type')||'')){
       const raw=await bodyLimit(response);let data;try{data=parseBody(raw);}catch{throw safeError('Provider returned invalid JSON.','invalid',response.status);}

@@ -1,6 +1,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
+const {recoverState}=require('./state-recovery');
 
 const SCHEMA_VERSION=2;
 const PIN_PATTERN=/^\d{4,6}$/;
@@ -57,8 +58,14 @@ function graphFor(name,state){const member=state.members.find(m=>m.name===name);
 function routeBetween(state,from,to){const a=graphFor(from,state),b=graphFor(to,state);if(!a||!b)return {allowed:false,reason:'Unknown member',path:[]};if(a.ancestors.includes(to)||a.children.includes(to))return {allowed:true,reason:'manager-chain',path:[from,to]};const fromDivision=state.divisions.find(d=>d.id===a.division);if(a.lead===from&&b.lead===to&&fromDivision?.collaboratesWith.includes(b.division))return {allowed:true,reason:'cross-division-collaboration',path:[from,to]};return {allowed:false,reason:'Task route is not allowed.',path:[from,...a.ancestors]};}
 function createOrg({dataDir}){
   const file=path.join(dataDir,'org.json');let state=seed(),tokens=new Set();
-  try{if(fs.existsSync(file)){const parsed=JSON.parse(fs.readFileSync(file,'utf8'));state=normalize(parsed);state.pinHash=parsed.pinHash||null;}}catch(error){fail(`Cannot read ${file}: ${error.message}`,500);}
+  // A corrupt org is archived and replaced from last-good; with no snapshot the office starts
+  // empty (never seeded over the owner's members) so the restore path stays the source of truth.
+  const emptyOrg=()=>normalize({version:0,company:{name:'',type:'Lainnya',description:''},divisions:[],members:[]});
+  const recovery=recoverState({file,dataDir,label:'org',validate:value=>{normalize(value);},fresh:seed,corruptFresh:emptyOrg});
+  state=normalize(recovery.value);state.pinHash=recovery.value.pinHash||null;
   function persist(){atomicWrite(file,JSON.stringify(state,null,2));}
+  if(recovery.recovered||recovery.degraded){try{persist();}catch{}}
+  if(recovery.degraded)console.error(`org.json tidak bisa dibaca; file disimpan di ${recovery.corruptPath}. Mulai dengan organisasi kosong.`);
   function publicState(){return {schemaVersion:state.schemaVersion,version:state.version,hasPin:!!state.pinHash,configured:!!state.pinHash&&!!state.company?.name&&state.members.length>0,company:clone(state.company),divisions:clone(state.divisions),members:clone(state.members)};}
   function verifyToken(token){return typeof token==='string'&&tokens.has(token);}
   function unlock(pin){if(!PIN_PATTERN.test(pin||''))fail('PIN must contain 4 to 6 digits.',400);if(!state.pinHash){state.pinHash={salt:crypto.randomBytes(16).toString('hex'),hash:crypto.scryptSync(pin,state.pinHash?.salt||'',32).toString('hex')};const salt=state.pinHash.salt;state.pinHash.hash=crypto.scryptSync(pin,salt,32).toString('hex');persist();}else{const actual=crypto.scryptSync(pin,state.pinHash.salt,32);if(!crypto.timingSafeEqual(actual,Buffer.from(state.pinHash.hash,'hex')))fail('Invalid owner PIN.',403);}const token=crypto.randomBytes(32).toString('hex');tokens.add(token);return token;}
@@ -68,6 +75,6 @@ function createOrg({dataDir}){
   function communicationPath(from,to){return routeBetween(state,from,to);}
   function escalationTarget(name){const graph=graphFor(name,state);return graph?.manager?{type:'member',name:graph.manager,path:[name,graph.manager]}:{type:'owner',name:'owner',path:[name,'owner']};}
   function seedFromMembers(){if(!fs.existsSync(file))persist();return publicState();}
-  return {publicState,save,reset,unlock,verifyToken,roster,divisionOf,divisionsOf,isLead,seedFromMembers,validateGraph:()=>validateGraph(state),divisionGraph:name=>graphFor(name,state),communicationPath,escalationTarget,get state(){return clone(state)}};
+  return {publicState,save,reset,unlock,verifyToken,roster,divisionOf,divisionsOf,isLead,seedFromMembers,validateGraph:()=>validateGraph(state),divisionGraph:name=>graphFor(name,state),communicationPath,escalationTarget,recovery:()=>structuredClone(recovery),get state(){return clone(state)}};
 }
 module.exports={createOrg,seed,normalize,validateGraph,routeBetween,SCHEMA_VERSION,PALETTE};

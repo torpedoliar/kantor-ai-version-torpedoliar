@@ -10,9 +10,16 @@ const start=dir=>{const child=spawn(process.execPath,[path.join(__dirname,'../se
   return new Promise((r,j)=>{child.stdout.on('data',d=>String(d).includes('Kantor Kita:')&&r(child));child.on('exit',c=>j(Error(`exit ${c}: ${err}`)));});};
 const stop=child=>new Promise(r=>{child.once('exit',r);child.kill();});
 (async()=>{await new Promise(r=>mock.listen(0,'127.0.0.1',r));
- // 1. A bad legacy roster stops startup instead of silently seeding over it.
+ // 1. A bad legacy roster is archived; startup continues with an empty org (no silent seed over it).
  const bad=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-team-bad-'));fs.writeFileSync(path.join(bad,'team.json'),'{broken');
- await assert.rejects(start(bad),/exit 1/);assert.ok(!fs.existsSync(path.join(bad,'org.json')));fs.rmSync(bad,{recursive:true,force:true});
+ const badChild=await start(bad);
+ try{
+   const session=await (await fetch(origin+'/api/session')).json();
+   const org=await (await fetch(origin+'/api/org',{headers:{'content-type':'application/json',origin,'x-kantor-csrf':session.csrf}})).json();
+   assert.deepEqual(org.members,[],'the empty organization replaces no one silently');
+   assert.ok(fs.readdirSync(bad).some(name=>name.startsWith('team.json.corrupt-')),'the corrupt roster is archived');
+   assert.ok(fs.existsSync(path.join(bad,'org.json')),'an empty org file is written');
+ }finally{await stop(badChild);fs.rmSync(bad,{recursive:true,force:true});}
  // 2. A saved team.json (custom member, AI picks, manager links) becomes org.json; team.json itself is untouched.
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-team-'));
  const legacy=require('../server/team').SEED.map(m=>m.n==='Koh Arman'?{...m,ai:{on:true,model:'HomeSonet',system:'Owner prompt'}}:m).concat({manager:'Gilang',n:'Budi',initials:'BD',gender:'male',role:'Support',group:'service',ai:{on:true,model:'m',system:'Budi prompt'}});
@@ -57,6 +64,6 @@ const stop=child=>new Promise(r=>{child.once('exit',r);child.kill();});
   // 8. After restart the migrated org stays (no second migration over edits).
   await stop(child);child=await start(dir);csrf=(await(await fetch(origin+'/api/session')).json()).csrf;token='';
   assert.equal((await call('GET','/api/org')).body.members.find(m=>m.name==='Budi').manager,'Gilang S');
-  console.log('PASS: team.json migration, bad roster guard, one-gate manager review with owner unlock, reject, top-to-owner, org cycle/rename, restart keeps org');
+  console.log('PASS: team.json migration, corrupt roster recovery, one-gate manager review with owner unlock, reject, top-to-owner, org cycle/rename, restart keeps org');
  }finally{await stop(child);await new Promise(r=>mock.close(r));fs.rmSync(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -24,6 +24,7 @@ function createPreviewService({projects}){
     const url=`http://127.0.0.1:${server.address().port}/${token}/`;
     active.set(task.id,{server,url,revisionId:task.revisionId});return {url};
   }
-  return {open,stop};
+  async function stopAll(){for(const taskId of [...active.keys()])await stop(taskId);}
+  return {open,stop,stopAll};
 }
 module.exports={createPreviewService};

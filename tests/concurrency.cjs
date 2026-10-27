@@ -20,6 +20,16 @@ const assert=require('node:assert/strict'),{createGate}=require('../server/concu
  await new Promise(r=>setImmediate(r));assert.deepEqual(s3,['x']);limits={office:3,providers:{}};g3.poke();await new Promise(r=>setImmediate(r));assert.deepEqual(s3,['x','y','z']);
  // null limit = unlimited.
  const g4=createGate(()=>({office:null,providers:{}}));const s4=[];for(let i=0;i<10;i++)g4.run({provider:'p'},()=>new Promise(()=>{s4.push(i);}));await new Promise(r=>setImmediate(r));assert.equal(s4.length,10);
+ // A provider cooldown holds every queued call for that provider, then releases them once.
+ const g5=createGate(()=>({office:null,providers:{}}));let cooled=0;
+ g5.cooldown('p',150);
+ g5.run({provider:'p',label:'cooled'},()=>{cooled++;});
+ await new Promise(r=>setTimeout(r,50));
+ assert.equal(cooled,0,'cooldown holds the call');assert.ok(g5.snapshot().cooldowns.p>0,'snapshot reports the cooldown');
+ await new Promise(r=>setTimeout(r,180));
+ assert.equal(cooled,1,'the call runs when the cooldown ends');assert.equal(g5.snapshot().cooldowns.p,undefined,'expired cooldown is cleared');
+ // A huge Retry-After cannot park a provider for more than five minutes.
+ g5.cooldown('q',24*60*60*1000);assert.ok(g5.snapshot().cooldowns.q<=300000,'cooldown is clamped');
  // Settings: office limit defaults to 3, per-provider limit optional, both validated and persisted.
  const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{createSettings}=require('../server/settings.js');
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-conc-'));
@@ -35,5 +45,5 @@ const assert=require('node:assert/strict'),{createGate}=require('../server/concu
  const again=createSettings({dataDir:dir,env:{KANTOR_SETTINGS_KEY:Buffer.alloc(32,1).toString('base64')},agents:{}});
  assert.equal(again.publicState().concurrency,null);assert.equal(again.publicState().providers[0].maxConcurrent,2);
  fs.rmSync(dir,{recursive:true,force:true});
- console.log('PASS: office and per-provider concurrency limits, priority ordering, release on failure, live limit changes, validated settings');
+ console.log('PASS: office and per-provider concurrency limits, priority ordering, release on failure, provider cooldown, live limit changes, validated settings');
 })().catch(e=>{console.error(e);process.exitCode=1;});

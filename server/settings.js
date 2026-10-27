@@ -1,6 +1,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
+const {recoverState,snapshotLastGood}=require('./state-recovery');
 
 const SCHEMA_VERSION=1;
 const LIMITS={providers:20,models:500,name:80,url:2048,key:512,model:200};
@@ -85,17 +86,22 @@ function createSettings({dataDir,env=process.env,agents={}}){
   fs.mkdirSync(dataDir,{recursive:true});
   const file=path.join(dataDir,'settings.json'),credentialFile=path.join(dataDir,'credentials.json');
   const encryptionKey=resolveSettingsKey(env.KANTOR_SETTINGS_KEY,dataDir);
-  let state=empty(),credentials=new Map(),explicit=false,broken=null;
+  let state=empty(),credentials=new Map(),explicit=false,broken=null,recovery={settings:null,credentials:null};
+  const object=value=>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('harus berupa objek');return value;};
   function read(){
     explicit=fs.existsSync(file);
-    if(explicit){
-      try{const parsed=JSON.parse(fs.readFileSync(file,'utf8'));state=validate({...parsed,version:parsed.version||0});}
-      catch(error){broken=error;state=empty();}
-    }else state=empty();
-    if(fs.existsSync(credentialFile)){
-      try{const parsed=JSON.parse(fs.readFileSync(credentialFile,'utf8'));credentials=new Map(Object.entries(parsed));}
-      catch(error){broken=broken||error;credentials=new Map();}
-    }
+    // Settings and stored credentials recover from last-good like every other state file.
+    // A degraded file still blocks saving until the owner restores it, so nothing is guessed.
+    const settingsResult=recoverState({file,dataDir,label:'settings',validate:value=>validate({...object(value),version:value.version||0}),fresh:empty,corruptFresh:empty});
+    recovery.settings=settingsResult;
+    state=explicit?validate({...object(settingsResult.value),version:settingsResult.value.version||0}):empty();
+    broken=settingsResult.degraded?new Error(settingsResult.error||'settings.json rusak'):null;
+    if(settingsResult.recovered)try{atomicWrite(file,JSON.stringify(state,null,2));}catch{}
+    const credentialsResult=recoverState({file:credentialFile,dataDir,label:'credentials',validate:value=>{object(value);},fresh:()=>({}),corruptFresh:()=>({})});
+    recovery.credentials=credentialsResult;
+    credentials=new Map(Object.entries(credentialsResult.value));
+    if(credentialsResult.degraded)broken=broken||new Error(credentialsResult.error||'credentials.json rusak');
+    if(credentialsResult.recovered)try{atomicWrite(credentialFile,JSON.stringify(Object.fromEntries(credentials),null,2));}catch{}
   }
   function encrypt(value,id){
     if(!encryptionKey){const error=new Error('Set KANTOR_SETTINGS_KEY before saving credentials.');error.status=503;throw error;}
@@ -138,6 +144,8 @@ function createSettings({dataDir,env=process.env,agents={}}){
     for(const id of [...nextCredentials.keys()])if(!candidate.providers.some(provider=>provider.id===id))nextCredentials.delete(id);
     checkRoutes(candidate);
     const metadata=JSON.stringify(candidate,null,2),secret=JSON.stringify(Object.fromEntries(nextCredentials),null,2);
+    // Keep the previous valid settings/credentials as last-good before replacing them.
+    try{snapshotLastGood(file,dataDir,'settings');snapshotLastGood(credentialFile,dataDir,'credentials');}catch{}
     atomicWrite(file,metadata);if(encryptionKey||fs.existsSync(credentialFile))atomicWrite(credentialFile,secret);
     state=candidate;credentials=nextCredentials;explicit=true;return publicState();
   }
@@ -166,6 +174,6 @@ function createSettings({dataDir,env=process.env,agents={}}){
   // Limits for the model-call gate: office-wide plus each provider's own cap.
   function limits(){const providers={};for(const p of state.providers)if(p.maxConcurrent)providers[p.id]=p.maxConcurrent;return {office:state.concurrency??null,providers};}
   read();
-  return {publicState,save,resolve,credential,callLimits:limits,get state(){return clone(state)},get broken(){return broken},normalizeBase:normalBase,limits:LIMITS};
+  return {publicState,save,resolve,credential,callLimits:limits,get state(){return clone(state)},get broken(){return broken},recovery:()=>structuredClone(recovery),normalizeBase:normalBase,limits:LIMITS};
 }
 module.exports={createSettings,validate,keyBytes,normalBase};

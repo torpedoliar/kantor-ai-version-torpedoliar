@@ -8,7 +8,7 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const PORT=Number(process.env.TEST_PORT||43543),dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-retry-')),origin=`http://127.0.0.1:${PORT}`;
 let failWith=0; // 0 = healthy; a status code makes the mock fail with it
 const mock=http.createServer((req,res)=>{req.resume();req.on('end',()=>{
-  if(failWith){res.writeHead(failWith,{'content-type':'application/json'});return res.end(JSON.stringify({error:{message:'mock outage '+failWith}}));}
+  if(failWith){res.writeHead(failWith,{'content-type':'application/json','retry-after':'0.3'});return res.end(JSON.stringify({error:{message:'mock outage '+failWith}}));}
   res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message:{content:'DRAF SIAP.'}}]}));
 });});
 const wait=async(fn,label,ms=20000)=>{const t=Date.now();for(;;){const v=await fn();if(v)return v;if(Date.now()-t>ms)throw Error('timeout: '+label);await new Promise(r=>setTimeout(r,100));}};

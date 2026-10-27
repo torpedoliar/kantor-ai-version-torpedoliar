@@ -7,7 +7,10 @@
     "test": "node tests/run-suite.cjs all",
     "test:unit": "node tests/run-suite.cjs unit",
     "test:ui": "node tests/run-suite.cjs ui",
-    "test:docker": "node tests/run-suite.cjs docker"
+    "test:docker": "node tests/run-suite.cjs docker",
+    "backup": "node scripts/backup-data.mjs",
+    "restore": "node scripts/restore-data.mjs",
+    "doctor": "node scripts/doctor.mjs"
   },
   "engines": {
     "node": ">=22"

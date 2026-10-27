@@ -1,6 +1,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const crypto=require('node:crypto');
+const {recoverState,snapshotLastGood,archiveCorrupt}=require('./state-recovery');
 
 const clone=value=>structuredClone(value);
 const collections=['tasks','threads','messages','decisions','events','projects','jobs'];
@@ -30,6 +31,8 @@ function prune(draft,now=Date.now()){
 }
 function conflict(code,message){return Object.assign(new Error(message),{status:409,code});}
 function empty(){return {schemaVersion:1,version:0,nextSeq:1,firstSeq:1,tasks:[],threads:[],messages:[],decisions:[],events:[],projects:[],jobs:[],reads:{owner:{}},requests:{},memories:{}};}
+// Only schema 1 exists today. An unknown version is kept as a corrupt copy instead of being guessed at.
+function migrateWorkspace(state){if(state?.schemaVersion===1)return state;throw new Error(`Unsupported workspace schema ${state?.schemaVersion}.`);}
 // Agent memory: at most 20 short notes per agent, newest last. Notes are summaries, never whole drafts.
 const MEMORY_LIMIT=20,MEMORY_TEXT=300;
 function remember(draft,agent,notes){draft.memories=draft.memories||{};const list=[...(draft.memories[agent]||[]),...notes.map(text=>({text:String(text).replace(/\s+/g,' ').trim().slice(0,MEMORY_TEXT),at:new Date().toISOString()})).filter(n=>n.text)];draft.memories[agent]=list.slice(-MEMORY_LIMIT);return draft.memories[agent];}
@@ -102,11 +105,27 @@ function repairLegacyDecisions(draft,emit){
   return changed;
 }
 function createTaskStore({dataDir,write=atomicWrite}){
-  fs.mkdirSync(dataDir,{recursive:true});const file=path.join(dataDir,'workspace.json'),legacy=path.join(dataDir,'tasks.json');let state;
-  try{
-    if(fs.existsSync(file)){state=JSON.parse(fs.readFileSync(file,'utf8'));state.firstSeq=Number.isInteger(state.firstSeq)?state.firstSeq:(Array.isArray(state.events)?state.events[0]?.seq??state.nextSeq:state.nextSeq);state.memories=state.memories||{};validate(state);}
-    else{state=fs.existsSync(legacy)?migrate(JSON.parse(fs.readFileSync(legacy,'utf8'))):empty();validate(state);write(file,JSON.stringify(state,null,2));}
-  }catch(error){throw new Error(`Cannot read task workspace: ${error.message}`);}
+  fs.mkdirSync(dataDir,{recursive:true});const file=path.join(dataDir,'workspace.json'),legacy=path.join(dataDir,'tasks.json');let state,recovery;
+  const normalizeState=value=>{value.firstSeq=Number.isInteger(value.firstSeq)?value.firstSeq:(Array.isArray(value.events)?value.events[0]?.seq??value.nextSeq:value.nextSeq);value.memories=value.memories||{};migrateWorkspace(value);validate(value);};
+  if(fs.existsSync(file)){
+    const result=recoverState({file,dataDir,label:'workspace',validate:normalizeState,fresh:empty,corruptFresh:empty});
+    state=result.value;recovery=result;
+    if(result.recovered||result.degraded)write(file,JSON.stringify(state,null,2));
+  }else if(fs.existsSync(legacy)){
+    // Keep a copy of the legacy file before a one-time migration touches it.
+    snapshotLastGood(legacy,dataDir,'tasks');
+    try{
+      const parsed=JSON.parse(fs.readFileSync(legacy,'utf8'));if(!Array.isArray(parsed))throw new Error('Legacy tasks must be a list.');
+      state=migrate(parsed);validate(state);write(file,JSON.stringify(state,null,2));
+      recovery={label:'workspace',file,missing:false,migrated:true,recovered:false,degraded:false};
+    }catch(error){
+      const corruptPath=archiveCorrupt(legacy,dataDir);state=empty();write(file,JSON.stringify(state,null,2));
+      recovery={label:'workspace',file,missing:false,migrated:false,recovered:false,degraded:true,corruptPath,error:error.message};
+    }
+  }else{
+    state=empty();validate(state);write(file,JSON.stringify(state,null,2));
+    recovery={label:'workspace',file,missing:true,recovered:false,degraded:false};
+  }
   {const draft=clone(state);const repaired=repairLegacyDecisions(draft,event=>emitEvent(draft,event)),trimmed=prune(draft);if(repaired||trimmed){draft.version=state.version+1;validate(draft);write(file,JSON.stringify(draft,null,2));state=draft;}}
   const listeners=new Set();
   function transaction(expectedVersion,mutate,{requestKey}={}){
@@ -130,6 +149,6 @@ function createTaskStore({dataDir,write=atomicWrite}){
       draft.tasks=clone(tasks);
     });
   }
-  return {snapshot:()=>clone(state),saveTasks,transaction,firstSeq:()=>state.firstSeq,eventsAfter:(after=0,limit=200)=>clone(state.events.filter(e=>e.seq>after).slice(0,Math.max(1,Math.min(500,limit)))),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);}};
+  return {snapshot:()=>clone(state),saveTasks,transaction,firstSeq:()=>state.firstSeq,eventsAfter:(after=0,limit=200)=>clone(state.events.filter(e=>e.seq>after).slice(0,Math.max(1,Math.min(500,limit)))),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},recovery:()=>structuredClone(recovery)};
 }
-module.exports={remember,MEMORY_LIMIT,MEMORY_TEXT,acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries,prune,EVENT_LIMIT,EVENT_MAX_AGE,REQUEST_LIMIT,REQUEST_TTL};
+module.exports={remember,MEMORY_LIMIT,MEMORY_TEXT,acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries,prune,migrateWorkspace,EVENT_LIMIT,EVENT_MAX_AGE,REQUEST_LIMIT,REQUEST_TTL};

@@ -17,6 +17,8 @@ const runner=require('./project-runner');
 const {createApplicationWorkflow}=require('./application-workflow');
 const {createPreviewService}=require('./project-preview');
 const {activityFor}=require('./task-activity');
+const backupTools=require('./backup');
+const {recoverState,archiveCorrupt}=require('./state-recovery');
 
 const ROOT = path.resolve(__dirname, '..');
 try { process.loadEnvFile(process.env.ENV_FILE || path.join(ROOT, '.env')); } catch { /* no .env file: dry run */ }
@@ -36,7 +38,7 @@ const ORG_TEMPLATES={
 };
 const PUBLIC = path.join(ROOT, 'public');
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(ROOT, 'data'));
-const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
+const TASKS_FILE = path.join(DATA_DIR, 'tasks.json'),LOCK_FILE = path.join(DATA_DIR, '.lock');
 const HOST = '127.0.0.1', PORT = Number(process.env.PORT) || 3000;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 // manager-review: a staff draft waits for its manager's approval before it reaches the owner (one gate).
@@ -69,7 +71,13 @@ function orgFromTeam(team){
   const orgFile=path.join(DATA_DIR,'org.json'),teamFile=path.join(DATA_DIR,'team.json');
   if(!fs.existsSync(orgFile)&&fs.existsSync(teamFile)){
     try{fs.mkdirSync(DATA_DIR,{recursive:true});fs.writeFileSync(orgFile,JSON.stringify(orgFromTeam(JSON.parse(fs.readFileSync(teamFile,'utf8'))),null,2),{mode:0o600});}
-    catch(error){console.error(`Cannot migrate ${teamFile}: ${error.message}. Fix or move the file, then restart.`);process.exit(1);}
+    catch(error){
+      // A corrupt legacy roster is archived, and the office starts empty instead of silently
+      // seeding the owner's people over it. Restore the file or use the backup scripts.
+      let archived=null;try{archived=archiveCorrupt(teamFile,DATA_DIR);}catch{}
+      console.error(`Cannot migrate ${teamFile}: ${error.message}.${archived?` Archived to ${archived}.`:''} Starting with an empty organization.`);
+      try{fs.writeFileSync(orgFile,JSON.stringify(normalizeOrg({version:0,company:{name:'',type:'Lainnya',description:''},divisions:[],members:[]}),null,2),{mode:0o600});}catch{}
+    }
   }
 }
 const org=createOrg({dataDir:DATA_DIR});
@@ -89,13 +97,21 @@ const taskStore=createTaskStore({dataDir:DATA_DIR});
 // ---- custom rooms (port dari orchestrator-patterns): template rooms on a floor plan, built into the 3D office ----
 const roomsApi=require('./rooms');
 const ROOMS_FILE=path.join(DATA_DIR,'rooms.json');
-let roomList;
-try{roomList=JSON.parse(fs.readFileSync(ROOMS_FILE,'utf8'));if(!Array.isArray(roomList))throw new Error('not a list');}
-catch(error){if(error.code==='ENOENT')roomList=structuredClone(roomsApi.SEED);else{console.error(`Cannot read ${ROOMS_FILE}: ${error.message}. Fix or move the file, then restart.`);process.exit(1);}}
+// Custom rooms recover from last-good; without a snapshot the built-in seeds remain and the
+// corrupt file is archived, so the floor plan still loads and the owner can restore a backup.
+const roomsRecovery=recoverState({file:ROOMS_FILE,dataDir:DATA_DIR,label:'rooms',validate:value=>{if(!Array.isArray(value))throw new Error('not a list');},fresh:()=>structuredClone(roomsApi.SEED),corruptFresh:()=>[]});
+let roomList=roomsRecovery.value;
 function saveRooms(){const tmp=`${ROOMS_FILE}.${process.pid}.tmp`;fs.writeFileSync(tmp,JSON.stringify(roomList,null,2));fs.renameSync(tmp,ROOMS_FILE);}
-if(!fs.existsSync(ROOMS_FILE))saveRooms();
+if(!fs.existsSync(ROOMS_FILE)||roomsRecovery.recovered||roomsRecovery.degraded)saveRooms();
+if(roomsRecovery.degraded)console.error(`rooms.json tidak bisa dibaca; file disimpan di ${roomsRecovery.corruptPath}. Daftar ruangan kosong sampai backup dipulihkan.`);
+const startupRecovery=[taskStore.recovery(),org.recovery(),roomsRecovery,settings.recovery().settings,settings.recovery().credentials].filter(result=>result&&(result.recovered||result.degraded)).map(result=>({file:result.label||path.basename(result.file||''),recovered:!!result.recovered,degraded:!!result.degraded,corruptPath:result.corruptPath||null,lastGood:result.lastGood||null,error:result.error||null}));
 const projects=createProjectWorkspace({dataDir:DATA_DIR});
 const previews=createPreviewService({projects});
+// Retention keeps the newest revisions and clears job output past its age (env-tunable).
+const KEEP_REVISIONS=Math.max(1,Number(process.env.KANTOR_KEEP_REVISIONS)||20);
+const JOB_MAX_AGE_DAYS=Math.max(1,Number(process.env.KANTOR_JOB_MAX_AGE_DAYS)||30);
+function pruneProjects(){try{return projects.prune({keepRevisions:KEEP_REVISIONS,jobMaxAgeDays:JOB_MAX_AGE_DAYS});}catch(error){console.error(`Project retention failed: ${error.message}`);return {revisions:0,jobs:0};}}
+setInterval(pruneProjects,24*60*60*1000).unref();
 let tasks=taskStore.snapshot().tasks;
 function save(){
   try{taskStore.saveTasks(tasks);}
@@ -208,19 +224,28 @@ tasks = normalizeStoredTasks(tasks);
 
 // ---- agent worker: one task at a time per connected member, oldest first ----
 const busy = new Set(),liveTyping=new Map();
+// Provider trouble is shared state: one 429/outage rests that provider for the whole office,
+// so queued agents do not immediately pile onto the same rate limit. Config errors are per-agent.
+function restProvider(provider,error){
+  const category=providers.classify(error);
+  if(!['quota','unavailable','timeout'].includes(category))return;
+  const wait=Number.isFinite(error.retryAfterMs)?error.retryAfterMs:(category==='quota'?30000:15000);
+  modelGate.cooldown(provider?.id||'default',wait);
+}
 async function askConfigured(snapshot, agent, task,options={}) {
   let primaryError;
   // Settings → Maks token (null = unlimited); one empty-answer retry is announced in the thread.
   options={maxTokens:settings.publicState().maxTokens,onEmpty:()=>commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);if(t)addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'text',text:'Model hanya berpikir tanpa menulis jawaban; diminta menjawab langsung sekali lagi.'});}),...options};
   const gated=(provider,fn)=>modelGate.run({provider:provider.id,priority:task.priority||'normal',label:task.title||''},fn);
   try { return {answer:await gated(snapshot.provider,()=>providers.generate(snapshot.provider,snapshot.provider.credential,snapshot.modelId,agent,task,options)),route:snapshot.route,fallback:false}; }
-  catch(error){ primaryError=error; }
+  catch(error){ primaryError=error;restProvider(snapshot.provider,error); }
   // Auth/invalid-request errors are configuration problems the owner must see; a backup model would hide them.
   // A reasoning-only empty answer ('empty') also falls back: another model may actually answer.
   if(snapshot.fallback&&!['auth','request','invalid'].includes(providers.classify(primaryError))){
     commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);if(t)addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'text',text:`Model ${snapshot.modelId} ${primaryError.category==='timeout'?'timeout':'gagal'} (${sanitizeText(primaryError.message||'').slice(0,160)}), dicoba dengan model ${snapshot.fallback.modelId} (cadangan).`});});
     options.onDelta?.('');
-    return {answer:await gated(snapshot.fallback.provider,()=>providers.generate(snapshot.fallback.provider,snapshot.fallback.provider.credential,snapshot.fallback.modelId,agent,task,options)),route:snapshot.fallback.route,fallback:true,primaryError};
+    try{return {answer:await gated(snapshot.fallback.provider,()=>providers.generate(snapshot.fallback.provider,snapshot.fallback.credential,snapshot.fallback.modelId,agent,task,options)),route:snapshot.fallback.route,fallback:true,primaryError};}
+    catch(error){restProvider(snapshot.fallback,error);throw error;}
   }
   throw primaryError;
 }
@@ -418,6 +443,16 @@ function openEventStream(req,res,after){
 // ---- application jobs: an owner approval binds revision + manifest hash + environment; one job per project, two overall ----
 const JOB_LIMIT=2,RUN_TIMEOUT=Number(process.env.RUNNER_TIMEOUT_MS||120000),running=new Map();
 function workspaceExport(state){const copy=structuredClone(state);delete copy.requests;for(const p of copy.projects||[])delete p.approvals;return copy;}
+// Import accepts an owner export only: one schema, a coherent event sequence, no partial state.
+function validateWorkspaceImport(state){
+  if(!state||typeof state!=='object'||Array.isArray(state))return 'Workspace harus berupa objek.';
+  if(state.schemaVersion!==1)return 'Versi workspace tidak didukung.';
+  for(const key of ['tasks','threads','messages','decisions','events','projects','jobs'])if(!Array.isArray(state[key]))return `Workspace ${key} harus berupa daftar.`;
+  if(!Number.isInteger(state.nextSeq)||state.nextSeq<1)return 'Workspace nextSeq tidak valid.';
+  let seq=0;for(const event of state.events){if(!Number.isInteger(event.seq)||event.seq<=seq||event.seq>=state.nextSeq)return `Urutan event workspace tidak valid di ${event.seq}.`;seq=event.seq;}
+  if(state.reads!==undefined&&(!state.reads||typeof state.reads!=='object'||Array.isArray(state.reads)))return 'Workspace reads tidak valid.';
+  return null;
+}
 function projectRecord(state,id){return state.projects.find(p=>p.id===id);}
 async function approveRun(projectId,input){
   const manifest=projects.verifyRevision(projectId,input.revisionId);
@@ -445,7 +480,7 @@ function startJob(projectId,input,requestKey){
   runner.run({job,sourceDir:projects.sourceDir(projectId,input.revisionId),manifest,jobDir,signal:controller.signal,timeoutMs:RUN_TIMEOUT,environment:approval.environment,networkAllowed:approval.networkAllowed,imageDigest:approval.imageDigest,
     onEvent:(type,data)=>commit((draft,emit)=>{emit({type,taskId:record.taskId,data:{jobId:job.id,...data}});})})
     .catch(error=>({status:error.code==='ENVIRONMENT_UNAVAILABLE'?'environment_unavailable':'failed',evidence:[{phase:'runner',exitCode:null,stderr:sanitizeText(error.message),argv:[]}]}))
-    .then(result=>{running.delete(job.id);commit((draft,emit)=>{const j=draft.jobs.find(x=>x.id===job.id);if(!j||j.status!=='running')return;Object.assign(j,{status:result.status,evidence:result.evidence,finishedAt:now()});emit({type:`job.${result.status}`,taskId:record.taskId,data:{jobId:job.id}});});applications.completed(taskStore.snapshot().jobs.find(j=>j.id===job.id)).catch(error=>console.error(`Application completion failed: ${error.message}`));});
+    .then(result=>{running.delete(job.id);commit((draft,emit)=>{const j=draft.jobs.find(x=>x.id===job.id);if(!j||j.status!=='running')return;Object.assign(j,{status:result.status,evidence:result.evidence,finishedAt:now()});emit({type:`job.${result.status}`,taskId:record.taskId,data:{jobId:job.id}});});applications.completed(taskStore.snapshot().jobs.find(j=>j.id===job.id)).catch(error=>console.error(`Application completion failed: ${error.message}`));pruneProjects();});
   return job;
 }
 // A restart cannot know how far a command got: running jobs become interrupted and are never rerun automatically.
@@ -527,6 +562,14 @@ function newTask(input) {
 async function api(req, res, url) {
   guardRequest(req);
   if (url.pathname === '/api/session' && req.method === 'GET') return send(res,200,{csrf:CSRF});
+  // Health/readiness stay token-free so start.bat and a supervisor can poll them; no secrets here.
+  if (url.pathname === '/api/health' && req.method === 'GET') {
+    const state=taskStore.snapshot(),tasksByStatus={};
+    for(const task of state.tasks)tasksByStatus[task.status]=(tasksByStatus[task.status]||0)+1;
+    let dataDirWritable=true;try{fs.accessSync(DATA_DIR,fs.constants.W_OK);}catch{dataDirWritable=false;}
+    return send(res,200,{ok:true,closing,uptimeSeconds:Math.round(process.uptime()),port:PORT,dataDir:DATA_DIR,dataDirWritable,workspaceVersion:state.version,tasks:tasksByStatus,streams:streams.size,runningJobs:running.size,retryTimers:retryTimers.size,models:modelGate.snapshot(),recovery:startupRecovery});
+  }
+  if (url.pathname === '/api/ready' && req.method === 'GET') return send(res,closing?503:200,{ready:!closing,uptimeSeconds:Math.round(process.uptime())});
   if (url.pathname === '/api/settings' && req.method === 'GET') return send(res,200,settings.publicState());
   if (url.pathname === '/api/org/templates' && req.method === 'GET') return send(res,200,ORG_TEMPLATES);
   if (url.pathname === '/api/org' && req.method === 'GET') {
@@ -581,13 +624,68 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     if(input.version!==org.state.version)return send(res,409,{error:'Organisasi berubah. Muat ulang sebelum reset.'});
     const stamp=Date.now(),archiveFile=archiveTasks(stamp),workspaceArchiveName=`workspace-${stamp}.json`;
     fs.writeFileSync(path.join(DATA_DIR,'archive',workspaceArchiveName),JSON.stringify(workspaceExport(state),null,2),{mode:0o600});
-    const result=org.reset(input.version);for(const task of tasks)await previews.stop(task.id);
+    // Generated sources move with the archived workspace; a locked folder aborts the reset before
+    // anything else is cleared, with the archive file removed again.
+    for(const task of tasks)await previews.stop(task.id);
+    let projectsArchive=null,projectsFrom=null;
+    const projectRoot=path.join(DATA_DIR,'projects');
+    if(fs.existsSync(projectRoot)){
+      const target=path.join(DATA_DIR,'archive',`projects-${stamp}`);
+      try{fs.renameSync(projectRoot,target);projectsArchive=path.relative(DATA_DIR,target);projectsFrom=projectRoot;}
+      catch(error){
+        try{fs.unlinkSync(archiveFile);}catch{}
+        try{fs.unlinkSync(path.join(DATA_DIR,'archive',workspaceArchiveName));}catch{}
+        return send(res,409,{error:`Reset dibatalkan: folder proyek tidak bisa diarsipkan (${error.message}). Tutup file yang memakainya lalu coba lagi.`,code:'PROJECTS_BUSY'});
+      }
+    }
+    let result;
+    try{result=org.reset(input.version);}
+    catch(error){
+      if(projectsFrom)try{fs.renameSync(path.join(DATA_DIR,projectsArchive),projectsFrom);}catch{}
+      try{fs.unlinkSync(archiveFile);}catch{}
+      try{fs.unlinkSync(path.join(DATA_DIR,'archive',workspaceArchiveName));}catch{}
+      throw error;
+    }
     commit(draft=>{for(const key of ['tasks','threads','messages','decisions','events','projects','jobs'])draft[key]=[];draft.reads={owner:{}};draft.requests={};draft.memories={};});
-    return send(res,200,{archiveFile,archiveName:path.basename(archiveFile),workspaceArchiveName,org:result});
+    return send(res,200,{archiveFile,archiveName:path.basename(archiveFile),workspaceArchiveName,projectsArchive,org:result});
   }
   if(url.pathname==='/api/workspace/export'&&req.method==='GET'){
     if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
     return send(res,200,workspaceExport(taskStore.snapshot()));
+  }
+  // Owner-only data diagnostics: parse every state file and list backups without exposing secrets.
+  if(url.pathname==='/api/workspace/info'&&req.method==='GET'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    try{return send(res,200,{...backupTools.inspectData({dataDir:DATA_DIR}),recovery:startupRecovery});}
+    catch(error){return send(res,500,{error:`Data tidak bisa diperiksa: ${error.message}`});}
+  }
+  // Replace the durable workspace from an export. The current state is archived first, so an
+  // accidental import is recoverable; project source files stay a backup/restore concern.
+  if(url.pathname==='/api/workspace/import'&&req.method==='POST'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const input=await readJson(req),workspace=input?.workspace,replace=input?.replace===true;
+    const invalid=validateWorkspaceImport(workspace);if(invalid)return send(res,400,{error:invalid,code:'WORKSPACE_INVALID'});
+    const current=taskStore.snapshot();
+    if(running.size||busy.size||adviceBusy.size||current.tasks.some(task=>task.status==='active'))return send(res,409,{error:'Tunggu tugas dan job yang sedang berjalan selesai sebelum import.',code:'WORKSPACE_BUSY'});
+    if(!replace&&(current.tasks.length||current.events.length||current.projects.length))return send(res,409,{error:'Workspace sudah berisi data. Kirim replace:true untuk menggantinya.',code:'WORKSPACE_NOT_EMPTY'});
+    const stamp=Date.now(),archiveFile=archiveTasks(stamp),workspaceArchiveName=`workspace-${stamp}.json`;
+    fs.writeFileSync(path.join(DATA_DIR,'archive',workspaceArchiveName),JSON.stringify(workspaceExport(current),null,2),{mode:0o600});
+    for(const timer of retryTimers.values())clearTimeout(timer);retryTimers.clear();
+    taskStore.transaction(current.version,(draft,emit)=>{
+      for(const key of ['tasks','threads','messages','decisions','events','projects','jobs'])draft[key]=structuredClone(workspace[key]);
+      draft.tasks=normalizeStoredTasks(draft.tasks);
+      draft.reads=structuredClone(workspace.reads?.owner?workspace.reads:{owner:{}});
+      draft.requests={};draft.memories=structuredClone(workspace.memories||{});
+      const lastImported=workspace.events.at(-1)?.seq??0;
+      draft.nextSeq=Math.max(Number(workspace.nextSeq)||1,lastImported+1,current.nextSeq);
+      let interrupted=0;
+      for(const task of draft.tasks)if(task.status==='active'){Object.assign(task,{status:'queued',runId:null,version:(task.version||0)+1,updatedAt:now()});interrupted++;}
+      for(const job of draft.jobs)if(['queued','running'].includes(job.status))Object.assign(job,{status:'interrupted',finishedAt:now()});
+      emit({type:'workspace.imported',data:{tasks:draft.tasks.length,projects:draft.projects.length,interrupted}});
+    });
+    tasks=taskStore.snapshot().tasks;
+    setImmediate(kick);
+    return send(res,200,{imported:tasks.length,archiveName:path.basename(archiveFile),workspaceArchiveName});
   }
   const workspaceArchive=url.pathname.match(/^\/api\/workspace\/archive\/(workspace-\d+\.json)$/);
   if(workspaceArchive&&req.method==='GET'){
@@ -912,6 +1010,43 @@ function serveFile(res, url) {
     res.writeHead(200, {'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache'}); res.end(data);
   });
 }
+// One server per DATA_DIR: a second process would overwrite the first process's workspace.
+// A lock left by a crashed process is detected by PID and replaced.
+function lockHolder(){try{const info=JSON.parse(fs.readFileSync(LOCK_FILE,'utf8'));return Number.isInteger(info?.pid)?info:null;}catch{return null;}}
+function acquireLock(){
+  fs.mkdirSync(DATA_DIR,{recursive:true});
+  for(let attempt=0;attempt<2;attempt++){
+    try{const fd=fs.openSync(LOCK_FILE,'wx');fs.writeSync(fd,JSON.stringify({pid:process.pid,port:PORT,startedAt:now()}));fs.closeSync(fd);return true;}
+    catch(error){
+      if(error.code!=='EEXIST')throw error;
+      const holder=lockHolder();let alive=false;
+      if(holder&&holder.pid!==process.pid){try{process.kill(holder.pid,0);alive=true;}catch(probe){alive=probe.code==='EPERM';}}
+      if(alive)return false;
+      try{fs.unlinkSync(LOCK_FILE);}catch{}
+    }
+  }
+  return false;
+}
+function releaseLock(){
+  const holder=lockHolder();
+  if(holder&&holder.pid!==process.pid)return;
+  try{fs.unlinkSync(LOCK_FILE);}catch{}
+}
+let closing=false;
+async function shutdown(signal){
+  if(closing)return;closing=true;
+  console.log(`${signal}: menghentikan Kantor Kita...`);
+  const force=setTimeout(()=>process.exit(0),8000);force.unref();
+  try{server.close();}catch{}
+  for(const client of streams)client.close();
+  for(const controller of running.values())try{controller.abort();}catch{}
+  try{await previews.stopAll();}catch(error){console.error(`Preview stop failed: ${error.message}`);}
+  try{recoverJobs();}catch(error){console.error(`Job recovery failed: ${error.message}`);}
+  releaseLock();clearTimeout(force);process.exit(0);
+}
+process.on('SIGINT',()=>shutdown('SIGINT'));
+process.on('SIGTERM',()=>shutdown('SIGTERM'));
+process.on('exit',releaseLock);
 const server = http.createServer(async (req, res) => {
   const host=req.headers.host||'';
   if(host!==`${HOST}:${PORT}`&&host!==HOST){return send(res,400,{error:'Invalid host.'});}
@@ -921,11 +1056,14 @@ const server = http.createServer(async (req, res) => {
   try { await api(req, res, url); }
   catch (error) { send(res, error.status || 500, {error: error.status ? error.message : 'Server error.',...(error.code?{code:error.code}:{})}); if (!error.status) console.error(error); }
 });
+server.headersTimeout=20000;server.requestTimeout=120000;
+server.on('error',error=>{console.error(`Server tidak bisa listen di ${HOST}:${PORT}: ${error.message}`);releaseLock();process.exit(1);});
+if(!acquireLock()){console.error(`Folder data ${DATA_DIR} sedang dipakai proses Kantor Kita lain. Hentikan proses itu atau pakai DATA_DIR berbeda.`);process.exit(1);}
 server.listen(PORT, HOST, () => {
   console.log(`Kantor Kita: http://${HOST}:${PORT}`);
   console.log(legacyDryRun() ? 'AI agents: dry run (set ANTHROPIC_API_KEY in .env to use Claude)' : `AI agents: ${Object.entries(agentMembers()).map(([name, a]) => `${name} → ${modelOf(a)}`).join(', ')}`);
   // Tasks left active by a previous run go back to the queue and are picked up again.
-  orchestrator.recover();recoverJobs();tasks=taskStore.snapshot().tasks;
+  orchestrator.recover();recoverJobs();pruneProjects();tasks=taskStore.snapshot().tasks;
   let reset = false; tasks.forEach(task => { if(task.outputType==='application'&&task.status==='active'){Object.assign(task,{status:'blocked',phase:'interrupted',blockedReason:'interrupted',runId:null,error:'Server dimulai ulang. Periksa revisi dan pilih lanjut secara eksplisit.'});reset=true;}else if (task.status === 'active' && agentFor(task.assignee)) { task.status = 'queued'; reset = true; } }); if (reset) save();
   kick();
   // Drafts already waiting at the manager gate get their AI manager's recommendation again after a restart.

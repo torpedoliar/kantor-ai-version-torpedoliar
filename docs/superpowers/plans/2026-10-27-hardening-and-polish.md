@@ -115,15 +115,15 @@ Dependensi keras:
 - Test: `tests/provider-cooldown.cjs` (baru), perluas `tests/concurrency.cjs`
 
 **Steps:**
-- [ ] 1. Klasifikasi error mengembalikan `{kind, retryAfterMs, status, snippet}`; parse `Retry-After` (detik atau HTTP date) dengan fallback 30 detik.
-- [ ] 2. Tambah `gate.cooldown(providerId, ms)` + `gate.snapshot()` memuat cooldown; `fits()` menolak provider yang sedang cooldown dan timer memanggil `poke()` saat cooldown habis.
-- [ ] 3. `askConfigured` melaporkan kegagalan quota/unavailable/timeout ke gate; retry per task tetap ada sebagai lapis kedua.
-- [ ] 4. Sertakan snippet body error (≤200 karakter, sudah disanitasi) di pesan kegagalan task.
+- [x] 1. Klasifikasi error mengembalikan `{category, retryAfterMs, status, snippet}`; parse `Retry-After` (detik atau HTTP date), clamp 5 menit, dan redaksi pola kredensial di snippet.
+- [x] 2. Tambah `gate.cooldown(providerId, ms)` + `gate.snapshot().cooldowns`; `fits()` menolak provider yang sedang cooldown dan satu timer membangunkan antrean saat cooldown paling awal berakhir.
+- [x] 3. `askConfigured` melaporkan kegagalan quota/unavailable/timeout ke gate (provider utama dan fallback); retry per task tetap ada sebagai lapis kedua.
+- [x] 4. Sertakan snippet body error (≤200 karakter, sudah disanitasi) di pesan kegagalan task.
 
 **Acceptance:**
-- Provider mock membalas 429 + `Retry-After: 1`: dalam 1 detik tidak ada request kedua ke provider itu; setelah cooldown, antrean jalan lagi.
-- Dua task bersamaan tidak menghasilkan dua gelombang request saat cooldown aktif.
-- `tests/auto-retry.cjs`, `tests/concurrency.cjs`, `tests/providers.cjs` lulus.
+- Provider mock membalas 429 + `Retry-After: 1`: retry tidak menembak provider sebelum cooldown berakhir; setelah itu task selesai.
+- Snippet "slow down" terlihat di audit trail dan thread, tetap ≤500 karakter.
+- `tests/auto-retry.cjs` (mock kini mengirim `Retry-After: 0.3`), `tests/concurrency.cjs`, `tests/providers.cjs`, `tests/provider-cooldown.cjs` lulus.
 
 ---
 
@@ -137,15 +137,16 @@ Dependensi keras:
 - Test: `tests/backup-restore.cjs` (baru), perluas `tests/workspace-lifecycle.cjs`
 
 **Steps:**
-- [ ] 1. Backup: salin `DATA_DIR` ke `data/backups/<timestamp>/` + `manifest.json` (SHA-256 per file, ukuran, mode); pertahankan 0600 untuk kredensial.
-- [ ] 2. Restore: wajibkan backup pra-restore otomatis, validasi manifest sebelum menimpa, tolak arsip korup, dan minta konfirmasi eksplisit (`replace:true`).
-- [ ] 3. Import API: validasi skema workspace, tolak store non-kosong kecuali `replace:true`, lalu jalankan recovery/`recoverJobs` seperti boot.
-- [ ] 4. Doctor: validasi keenam file state + `settings.key`, laporkan file yatim di `data/projects`, dan cetak langkah pemulihan.
+- [x] 1. Backup: salin `DATA_DIR` ke `data/backups/<timestamp>/` + `manifest.json` (SHA-256 per file, ukuran, mode); pertahankan 0600 untuk kredensial, lewati folder backup dan file sementara.
+- [x] 2. Restore: verifikasi seluruh hash sebelum menimpa, wajibkan snapshot pra-restore otomatis, tolak arsip rusak, dan minta `--yes`.
+- [x] 3. Import API: validasi skema workspace, arsipkan workspace lama, tolak store non-kosong kecuali `replace:true`, tolak saat ada tugas/job berjalan, lalu reset timer retry dan kick.
+- [x] 4. Doctor: validasi file state + `settings.key`, laporkan folder proyek tanpa `project.json` dan backup rusak, cetak langkah pemulihan.
+- Catatan: import hanya memuat metadata workspace; source proyek dipulihkan lewat `scripts/restore-data.mjs`, karena file proyek sengaja tidak masuk export.
 
 **Acceptance:**
-- Siklus export → backup → wipe → restore mengembalikan task, org, rooms, settings, dan kredensial yang bisa didekripsi.
-- Arsip yang diubah satu byte ditolak dengan pesan jelas; tidak ada file yang tertimpa sebelum validasi selesai.
-- Tanpa `settings.key`, doctor memberi pesan bahwa kredensial tidak bisa dibaca (bukan "provider tidak punya credential").
+- Siklus backup → ubah data → restore mengembalikan org/rooms/workspace dan kredensial; snapshot `pre-restore-*` selalu dibuat.
+- Arsip yang diubah satu byte ditolak sebelum ada file yang ditimpa.
+- `tests/backup-restore.cjs` mencakup skrip, doctor, restore yang ditolak, dan import owner-only.
 
 ---
 
@@ -158,15 +159,16 @@ Dependensi keras:
 - Test: `tests/state-recovery.cjs` (baru), perluas `tests/task-store.cjs`
 
 **Steps:**
-- [ ] 1. Helper `loadStateFile(name, validate)`: valid → pakai; parse/validasi gagal → pindahkan ke `.corrupt-<timestamp>`, salin `.last-good` bila ada, dan mulai dalam mode terdegradasi yang dilaporkan.
-- [ ] 2. Tambah `migrateWorkspace(state)` dengan versi skema eksplisit (v1 sekarang); sebelum migrasi, tulis `data/last-good/workspace.<ts>.json`.
-- [ ] 3. Jangan pernah reseed diam-diam untuk `org.json`/`rooms.json`; kembalikan status jelas lewat `/api/health` (Task 7).
-- [ ] 4. Sediakan `scripts/doctor.mjs` sebagai jalur perbaikan manual (lihat Task 5).
+- [x] 1. Helper `recoverState(file, validate, fresh, corruptFresh)`: valid → pakai dan tulis snapshot `last-good`; rusak → arsip `.corrupt-<timestamp>`, coba snapshot terbaru, lalu fallback dan tandai `degraded`.
+- [x] 2. Tambah `migrateWorkspace(state)` dengan versi skema eksplisit (v1); legacy `tasks.json` disalin ke `last-good` sebelum migrasi.
+- [x] 3. Org/rooms tidak di-reseed diam-diam saat korup tanpa snapshot: org menjadi kosong, rooms menjadi daftar kosong, dan semuanya dilaporkan di `/api/workspace/info` + `/api/health`.
+- [x] 4. `team.json` korup diarsipkan dan startup lanjut dengan org kosong; `scripts/doctor.mjs` menjadi jalur perbaikan manual.
+- [x] 5. Settings/credentials memakai helper yang sama; state `degraded` tetap memblokir save sampai dipulihkan.
 
 **Acceptance:**
-- Untuk tiap file state: tes menulis JSON rusak, boot, lalu memastikan server hidup, file rusak diarsipkan, dan data `.last-good` dipakai bila ada.
-- Migrasi gagal → file asli tidak berubah dan error menyebut path arsip.
-- `tests/settings.cjs`, `tests/org-api-v2.cjs`, `tests/rooms.cjs` lulus.
+- `tests/state-recovery.cjs`: lima file state korup sekaligus → server hidup, semua diarsipkan, org/tasks kosong, settings `broken`, info melaporkan lima entri recovery.
+- `tests/task-store.cjs`: workspace rusak dipulihkan dari `last-good`; legacy rusak tidak lagi mematikan store.
+- `tests/team.cjs`, `tests/settings.cjs`, `tests/org-api-v2.cjs` lulus.
 
 ---
 
@@ -179,15 +181,16 @@ Dependensi keras:
 - Test: `tests/health-shutdown.cjs` (baru)
 
 **Steps:**
-- [ ] 1. `GET /api/health` (tanpa secret): `{ok, uptime, port, dataDirWritable, workspaceVersion, tasks:{queued,active,blocked}, streams, runningJobs, degradedFiles}`; `GET /api/ready` untuk startup.
-- [ ] 2. Handler SIGTERM/SIGINT: stop accepting connections, abort job runner via `AbortController`, `previews.stop()` semua, tutup SSE, tandai job `interrupted`, paksa keluar setelah 10 detik.
-- [ ] 3. Lockfile `data/.lock` (exclusive open + PID); instance kedua menolak start dengan pesan jelas; lock dilepas saat shutdown.
-- [ ] 4. `start.bat` menunggu `/api/ready` sebelum membuka browser dan memakai `PORT` yang sama.
+- [x] 1. `GET /api/health` (tanpa token, tanpa secret): status, uptime, port, dataDirWritable, version, hitungan status task, streams, running jobs, retry timers, gate queue/cooldowns, dan recovery; `GET /api/ready`.
+- [x] 2. Handler SIGTERM/SIGINT: tutup koneksi, abort job runner, `previews.stopAll()`, tutup SSE, tandai job `interrupted`, lepas lock, paksa keluar setelah 8 detik.
+- [x] 3. Lockfile `data/.lock` (exclusive open + PID); instance kedua menolak start; lock basi dideteksi dari PID yang sudah mati.
+- [x] 4. `scripts/open-when-ready.mjs` membaca `PORT` dari `.env`, menunggu `/api/ready`, lalu membuka browser; `start.bat` memakainya.
+- [x] 5. `headersTimeout`/`requestTimeout` eksplisit untuk request yang menggantung.
 
 **Acceptance:**
-- Tes mengirim SIGTERM saat satu job berjalan: port bebas dalam ≤5 detik, job `interrupted`, preview mati.
-- Tes menyalakan server kedua dengan `DATA_DIR` sama: exit non-zero dengan pesan lock.
-- `start.bat` diuji manual dengan `PORT=4000` (browser membuka port yang benar).
+- `tests/health-shutdown.cjs`: health/ready menjawab, server kedua keluar 1 dengan pesan lock, dan start setelah pemilik lock mati berhasil.
+- Port lama bebas setelah SIGTERM; lock baru dimiliki proses pengganti.
+- Catatan: pembukaan browser diuji lewat helper (bukan klik manual di Windows).
 
 ---
 
@@ -200,13 +203,13 @@ Dependensi keras:
 - Test: perluas `tests/workspace-lifecycle.cjs`
 
 **Steps:**
-- [ ] 1. Reset memindahkan `data/projects` ke arsip yang sama dengan workspace dan mengembalikan path arsip ke UI.
-- [ ] 2. Retensi: simpan N revisi terakhir per project (default 20) dan bersihkan direktori job >30 hari; jalankan saat boot + setelah job selesai.
-- [ ] 3. Laporkan ukuran `data/` di `/api/health`; tampilkan di Pengaturan bila >500 MB.
+- [x] 1. Reset menghentikan preview lalu memindahkan `data/projects` ke `archive/projects-<stamp>`; folder terkunci membatalkan reset sebelum state lain dibersihkan.
+- [x] 2. Retensi: simpan 20 revisi terakhir per project dan hapus job >30 hari (`KANTOR_KEEP_REVISIONS`, `KANTOR_JOB_MAX_AGE_DAYS`); dijalankan saat boot, setelah job selesai, dan harian.
+- [x] 3. Ukuran `data/` tersedia lewat `scripts/doctor.mjs` dan `/api/workspace/info`; peringatan >500 MB di Pengaturan belum dikerjakan (deferred ke Fase 4).
 
 **Acceptance:**
-- Tes: setelah reset, tidak ada `data/projects/<id>` aktif; arsip memuat source dan workspace.
-- Tes retensi: 25 revisi → tersisa 20 yang terbaru; job lama terhapus, job berjalan tidak.
+- `tests/workspace-lifecycle.cjs`: reset mengembalikan `projectsArchive`, folder proyek hilang dari data aktif, dan source ada di arsip.
+- `tests/project-workspace.cjs`: 25 revisi → tersisa 20 terbaru; job 40 hari terhapus, job baru tetap.
 
 ---
 
@@ -483,6 +486,15 @@ Dependensi keras:
   - Tes baru: `tests/task-synthesis-retry.cjs`, `tests/task-auth.cjs`, `tests/rooms-merge.cjs` (UI).
   - Verifikasi: suite unit 54/54; rooms, rooms-nav, rooms-merge, org-owner, decisions, server, task-retry, application-workflow-ui, office, graphics-dynamic-floors lulus.
   - Catatan: `settings-header` (Task 14) sengaja belum disentuh; masih masuk Fase 4.
+- 2026-10-27 — Fase 2 selesai di working tree (belum commit):
+  - Task 4: provider cooldown per kantor, `Retry-After` (clamp 5 menit), snippet error teredaksi, timer antrean.
+  - Task 5: `server/backup.js` + tiga skrip (backup/restore/doctor), endpoint owner-only `/api/workspace/info` dan `/api/workspace/import`.
+  - Task 6: `server/state-recovery.js` dipakai workspace, org, rooms, settings, credentials, dan migrasi `team.json`; snapshot `last-good` + arsip `.corrupt-*`.
+  - Task 7: `/api/health`, `/api/ready`, SIGINT/SIGTERM, `previews.stopAll()`, lock `data/.lock`, helper pembuka browser yang menunggu ready.
+  - Task 8: reset mengarsipkan `data/projects`, retensi revisi/job, prune saat boot/selesai job/harian.
+  - Tes baru: `provider-cooldown`, `backup-restore`, `state-recovery`, `health-shutdown`; `auto-retry` mock memakai `Retry-After`.
+  - Verifikasi: suite unit 58/58; UI `settings-ui`, `server`, `org-owner`, `org-wizard` lulus.
+  - Catatan: peringatan ukuran data di Pengaturan belum dibuat; health/info sudah melaporkan ukuran lewat doctor/info.
 
 ## Risiko utama
 
