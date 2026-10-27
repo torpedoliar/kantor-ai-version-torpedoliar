@@ -294,3 +294,6 @@ body:has(#teamPopover:not([hidden])) .ui #floors{visibility:hidden}
 
 /* Live FPS counter (Settings → Tampilkan FPS). */
 .fps-label{position:fixed;top:12px;right:12px;z-index:30;padding:4px 8px;border-radius:6px;background:rgba(20,18,16,.72);color:#bff5c4;font:600 12px/1.2 "IBM Plex Mono",monospace;pointer-events:none}
+
+/* iOS zooms the page when a form control under 16 px gets focus, which also fires a resize. */
+@media(pointer:coarse){input:not([type="checkbox"]):not([type="radio"]),select,textarea{font-size:16px!important}}

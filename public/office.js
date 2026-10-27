@@ -2787,7 +2787,19 @@
     else cam.radius*=Math.exp(Math.sign(event.deltaY)*Math.min(Math.abs(event.deltaY),60)*.0015);
   };
   canvas.addEventListener('wheel',onWheel,{passive:false});$('labels').addEventListener('wheel',onWheel,{passive:false});
-  addEventListener('resize',()=>{if(transition)stepTransition(Infinity);if(innerWidth<=1000&&!$('log').hidden)syncLog(false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);resizeComposer();resetCamera();});
+  // Resize only updates the backbuffer; the owner's camera target stays put. Mobile URL bars and
+  // the on-screen keyboard fire resize constantly, so coalesce them into one rAF.
+  let resizeFrame=null;
+  addEventListener('resize',()=>{
+    if(resizeFrame)cancelAnimationFrame(resizeFrame);
+    resizeFrame=requestAnimationFrame(()=>{
+      resizeFrame=null;
+      if(transition)stepTransition(Infinity);
+      if(innerWidth<=1000&&!$('log').hidden)syncLog(false);
+      camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth,innerHeight);resizeComposer();
+    });
+  });
   const TASK_LOG={active:'mulai tugas',done:'menyelesaikan tugas',blocked:'butuh keputusan sebelum lanjut',review:'mengirim draf untuk review','manager-review':'mengirim draf ke atasan',queued:'mengembalikan tugas ke antrean'};
   document.addEventListener('officetasks:server',()=>{
     for(const a of agents)a.label.classList.toggle('ai',!!window.officeTasks.agentFor(a.n));
@@ -3014,6 +3026,20 @@
   }
   for(const level of ORDER)captureThumb(level);
   renderFloorButtons();
+  // On phones the bottom rail cannot hold nine buttons; Ruang and Tata ruang move into Lainnya.
+  {
+    const compact=matchMedia('(max-width:640px)'),menu=document.querySelector('#railMore>div');
+    const origins=new Map(['bRooms','bCustom'].map(id=>{const button=$(id);return [id,{button,parent:button?.parentElement,next:button?.nextSibling}];}));
+    const syncRail=()=>{
+      if(!menu)return;
+      for(const {button,parent,next} of origins.values()){
+        if(!button||!parent)continue;
+        if(compact.matches){if(button.parentElement!==menu)menu.append(button);}
+        else if(button.parentElement===menu)parent.insertBefore(button,next);
+      }
+    };
+    compact.addEventListener?.('change',syncRail);syncRail();
+  }
   renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
   applyGraphics(GFX.level());GFX.onChange(level=>applyGraphics(level));
   const modelStatus=window.officeModels3d?.status()||{loaded:0,failed:[]};

@@ -334,15 +334,15 @@ Dependensi keras:
 - Test: perluas `tests/office.cjs`, `tests/nav.cjs`, `tests/settings-ui.cjs`
 
 **Steps:**
-- [ ] 1. Resize: perbarui aspect/renderer/composer saja; pertahankan `cam.target/theta/phi/radius`. Debounce rAF; abaikan perubahan tinggi saat input fokus/`visualViewport` menunjukkan keyboard.
-- [ ] 2. `@media (pointer:coarse)`: `input/select/textarea { font-size:16px }`.
-- [ ] 3. Perbaiki selektor `settings-header` → `.settings-header` dan tambahkan assertion layout (tombol Tutup rata kanan).
-- [ ] 4. Rail <640px: lipat item sekunder ke Lainnya atau satukan `#decisions` ke Tugas; uji 360px dengan keputusan terbuka.
+- [x] 1. Resize hanya memperbarui aspect/renderer/composer di dalam rAF; `resetCamera()` dihapus sehingga target/theta/phi/radius bertahan.
+- [x] 2. `@media (pointer:coarse)` menaikkan `input/select/textarea` menjadi 16 px (!important) agar iOS tidak zoom saat fokus.
+- [x] 3. Selektor `settings-header` diperbaiki menjadi `.settings-header`; tes memeriksa `display:flex` dan tombol Tutup rata kanan.
+- [x] 4. Rail <640px memindahkan Ruang dan Tata ruang ke menu Lainnya lewat `matchMedia`; kembali ke tempat asal saat desktop.
+- Catatan: perubahan tinggi karena keyboard dilakukan dalam rAF yang sama; tidak ada pengecualian tinggi khusus, karena kamera tidak lagi di-reset.
 
 **Acceptance:**
-- Rotasi/resize tidak mengubah posisi kamera; menggeser URL bar di emulasi ponsel tidak me-reset view.
-- Tes 360px dengan `#decisions` terlihat: tidak ada tombol terpotong (`scrollWidth <= clientWidth`).
-- Screenshot header Pengaturan/Ruang menunjukkan judul kiri, Tutup kanan.
+- `mobile-layout.cjs`: camera target/orbit bertahan setelah resize; input 16px pada `pointer:coarse`; header flex; 360px tanpa scroll horizontal dan semua tombol rail di layar.
+- `nav`, `nav-hardening`, `settings-ui`, `office` tetap lulus.
 
 ---
 
@@ -531,6 +531,10 @@ Dependensi keras:
   - `finalizeFloor` untuk startup dan lantai dinamis; geometryCount/mergedMeshes diekspos.
   - dispose aman untuk desk area, custom item, lantai; panel layar ownGeometry.
   - Verifikasi: graphics-dynamic-floors, graphics-lifecycle, desk-layout, workstation-clearance, office.
+- 2026-10-27 — Task 14 selesai di working tree (belum commit):
+  - Resize tanpa reset kamera, input 16px untuk pointer kasar, `.settings-header` diperbaiki.
+  - Rail mobile memindahkan Ruang/Tata ruang ke Lainnya; tes 360px dengan keputusan terbuka.
+  - Verifikasi: mobile-layout, nav, nav-hardening, settings-ui, office.
 
 ## Risiko utama
 
