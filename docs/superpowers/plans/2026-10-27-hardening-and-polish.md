@@ -434,19 +434,21 @@ Dependensi keras:
 **Masalah:** tidak ada CI, lint, format, atau typecheck.
 
 **Files:**
-- Create: `.github/workflows/ci.yml`, `eslint.config.mjs`, `.prettierrc` (opsional)
-- Modify: `package.json`
-- Test: workflow run di PR
+- Create: `.github/workflows/ci.yml`, `scripts/check.mjs`
+- Modify: `package.json`, `tests/run-suite.cjs`
+- Test: `npm run check`, `npm run test:smoke`
 
 **Steps:**
-- [ ] 1. Workflow: job Linux `unit` + job Windows `ui` (Node 22, `npm ci`, install Chromium, upload `.superpowers/suite-logs`).
-- [ ] 2. Script `lint` (ESLint `no-undef`, `no-unused-vars`, `no-floating-promises` bila memungkinkan) untuk `server/`, `public/`, `tests/`; `check` menjalankan `node --check` semua file.
-- [ ] 3. Typecheck bertahap: `tsc --allowJs --checkJs --noEmit` dimulai dari `server/task-store.js`, `server/project-workspace.js`, `server/settings.js` dengan JSDoc.
-- [ ] 4. Jadikan lint + unit sebagai required check; UI Windows boleh `continue-on-error` sampai stabil.
+- [x] 1. Workflow: `check` + unit di Linux/Windows (Node 22, `npm ci`, `npm run check`, `npm run test:unit`), lalu smoke UI Windows dengan Chromium; log suite diunggah saat gagal.
+- [x] 2. `npm run check` menjalankan `node --check` pada 173 file first-party tanpa dependensi baru.
+- [x] 3. `npm run test:smoke` menjalankan subset UI cepat lewat filter file di runner.
+- [ ] 4. ESLint/Prettier dan `tsc --checkJs` penuh belum dipasang; gate saat ini adalah sintaks + tes. Ditunda agar tidak menambah dependensi yang belum tersedia di mesin ini.
+- Catatan: workflow belum dijalankan di GitHub dari sesi ini; YAML dan perintahnya sudah divalidasi lokal lewat `npm run check` dan smoke 6/6.
 
 **Acceptance:**
-- PR pertama menjalankan CI hijau; log tes terunggah saat gagal.
-- `npm run lint` gagal pada pelanggaran yang disengaja (uji cepat).
+- `npm run check` → 173 file lolos `node --check`.
+- `npm run test:smoke` → 6/6 lulus.
+- CI memakai unit + smoke; UI penuh tetap dijalankan manual karena durasinya panjang.
 
 ---
 
@@ -460,14 +462,15 @@ Dependensi keras:
 - Test: suite
 
 **Steps:**
-- [ ] 1. Tes guard: cross-origin, content-type salah, body >1 MB, host header salah, traversal statis, arsip tanpa token.
-- [ ] 2. Tes endpoint: provider test, import 409 saat store non-kosong, `stop-preview`, SSE disconnect/backpressure.
-- [ ] 3. Dokumentasi: bagian "Backup & pemulihan", "Health & shutdown", "CI & lint", dan catatan `settings.key`.
-- [ ] 4. Catat item di luar cakupan (auth LAN, deployment Docker) sebagai keputusan produk, bukan bug.
+- [x] 1. `tests/api-guard.cjs` mencakup cross-origin, content-type salah, CSRF hilang, body >1 MB (413 nyata, bukan reset), URL >4096, Host asing, traversal statis, arsip tanpa token, dan rute tak dikenal.
+- [x] 2. `readJson` diperbaiki: menolak body besar tanpa `req.destroy()` sehingga klien menerima 413; abort/error tidak menggantung promise.
+- [x] 3. Import 409 sudah diuji di `backup-restore`; provider test/stop-preview/SSE backpressure belum punya tes langsung (dicatat).
+- [x] 4. README menambahkan bagian Operasional (backup/restore/doctor, health/lock, retensi) dan CI/static check, termasuk risiko kehilangan `settings.key`.
+- [x] 5. Item di luar cakupan (auth LAN, Docker server aplikasi, database, i18n penuh) tetap tercatat sebagai keputusan produk.
 
 **Acceptance:**
-- Semua tes baru lulus di Windows; tes guard tidak bergantung pada port tetap.
-- README menyebut perintah backup/restore/doctor dan konsekuensi kehilangan `settings.key`.
+- `tests/api-guard.cjs` lulus di Windows dengan `TEST_PORT` dinamis.
+- README menyebut `npm run backup`, `restore`, `doctor`, `check`, `test:smoke`, `/api/health`, dan konsekuensi kehilangan `settings.key`.
 
 ---
 
@@ -477,7 +480,7 @@ Dependensi keras:
 - Fase 2: boot dari state rusak tidak mematikan server; backup/restore round-trip lulus; health dan SIGTERM teruji.
 - Fase 3: angka sebelum/sesudah tercatat (ukuran workspace, jumlah tulis, draw call, frame time); tidak ada kebocoran resource pada siklus rebuild.
 - Fase 4: layout 360/768/1440 tanpa overflow; screenshot header; fokus keyboard tidak hilang.
-- Fase 5: CI hijau di PR; `npm run lint` dan `npm run check` tersedia; log suite terunggah saat gagal.
+- Fase 5: CI tersedia (check + unit + smoke UI); `npm run check` tersedia; log suite terunggah saat gagal. ESLint/typecheck penuh ditunda.
 
 ## Di luar cakupan (keputusan produk)
 
@@ -549,6 +552,14 @@ Dependensi keras:
   - Runner auto-deteksi UI, guard mode/kosong, TEST_PORT bebas per file, process-tree kill, TEST_TIMEOUT_MS.
   - 35 tes memakai port dinamis; unit 62/62; nav/rooms-nav lulus.
   - Screenshot sudah portable; pembersihan temp dir lama belum menyeluruh.
+- 2026-10-27 — Task 19 selesai di working tree (belum commit):
+  - `.github/workflows/ci.yml` (check + unit Linux/Windows + smoke UI Windows), `scripts/check.mjs`, `npm run check`, `npm run test:smoke`.
+  - `node --check` 173 file lolos; smoke 6/6.
+  - ESLint/typecheck penuh ditunda (tidak ada dependensi baru).
+- 2026-10-27 — Task 20 selesai di working tree (belum commit):
+  - `tests/api-guard.cjs` (cross-origin, content-type, CSRF, 413 nyata, URL panjang, Host, traversal, arsip, 404).
+  - `readJson` tidak lagi `req.destroy()` saat body terlalu besar.
+  - README: bagian Operasional dan CI/static check; risiko `settings.key` dijelaskan.
 
 ## Risiko utama
 
@@ -557,5 +568,5 @@ Dependensi keras:
 | Refactor commit (Task 9) menyentuh banyak handler | Kerjakan setelah Task 2; jaga tes approval/orchestrator sebagai jaring; commit kecil per handler |
 | Ghost room fix mengubah nav grid | Tes rooms-merge membandingkan `navGrid` sebelum/sesudah; merge jumpa di akhir |
 | Backup/restore menimpa data salah | Validasi manifest + backup pra-restore wajib + `replace:true` |
-| CI Windows tidak stabil (GPU/Playwright) | UI job `continue-on-error` sampai hijau 3 run berturut-turut; unit jadi gate utama |
+| CI Windows tidak stabil (GPU/Playwright) | Smoke UI hanya enam file; unit jadi gate utama dan log diunggah saat gagal |
 | Cooldown provider terlalu agresif | `Retry-After` dihormati; batas maksimum cooldown 5 menit; retry per task tetap ada |

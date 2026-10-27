@@ -7,7 +7,8 @@ const EXCLUDED=new Set(['run-suite.cjs','playwright-install.cjs','browser.cjs'])
 const all=fs.readdirSync(__dirname).filter(file=>file.endsWith('.cjs')&&!EXCLUDED.has(file));
 // Browser tests are detected from their import, not from a hand-maintained list that drifts.
 const ui=new Set(all.filter(file=>fs.readFileSync(path.join(__dirname,file),'utf8').includes('browser.cjs')).map(file=>file.slice(0,-4)));
-const files=all.filter(file=>mode==='docker'?file.startsWith('project-docker'):mode==='unit'?!ui.has(file.slice(0,-4))&&!file.startsWith('project-docker-live'):mode==='ui'?ui.has(file.slice(0,-4)):file!=='project-docker-live.cjs').sort();
+const only=process.argv[3]?new Set(process.argv[3].split(',').map(name=>name.endsWith('.cjs')?name:name+'.cjs')):null;
+const files=all.filter(file=>mode==='docker'?file.startsWith('project-docker'):mode==='unit'?!ui.has(file.slice(0,-4))&&!file.startsWith('project-docker-live'):mode==='ui'?ui.has(file.slice(0,-4)):file!=='project-docker-live.cjs').filter(file=>!only||only.has(file)).sort();
 if(!files.length){console.error(`No test files matched mode "${mode}".`);process.exit(1);}
 if(mode==='ui'||mode==='all'){
   try{require.resolve(process.env.PLAYWRIGHT_MODULE||'playwright');}

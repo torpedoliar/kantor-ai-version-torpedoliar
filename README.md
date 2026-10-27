@@ -246,16 +246,35 @@ Worker memakai identitas eksekusi: hasil atau error terlambat tidak mengubah tug
 - Jawaban biasa pada provider OpenAI-compatible ditampilkan bertahap sebagai **sedang menulis…**. Teks sementara disimpan hanya di memori server, lalu diganti pesan final. JSON rencana/bundle aplikasi tidak ditampilkan mentah. Provider yang tidak mendukung streaming menggunakan respons biasa; format JSON/SSE campuran 9Router tetap diterima. Anthropic-compatible saat ini memakai respons biasa.
 - Teks streaming adalah draf yang belum selesai, bukan bukti pekerjaan atau hasil pengujian. Tidak ada proses berpikir tersembunyi yang ditampilkan.
 
+## Operasional: backup, pemulihan, dan kesehatan
+
+- `npm run backup` menyalin seluruh `data/` (workspace, org, rooms, settings, kredensial, `settings.key`, proyek) ke `data/backups/<waktu>/` dengan `manifest.json` berisi SHA-256 tiap file. Simpan folder itu dan **jangan bagikan** `settings.key`; tanpa kunci tersebut kredensial provider tidak bisa dibuka.
+- `npm run doctor` memeriksa semua file state, `settings.key`, folder proyek, dan manifest backup tanpa menjalankan server. Ini jalur pertama saat ada file rusak.
+- `npm run restore -- --backup data/backups/<waktu> --yes` memverifikasi semua checksum sebelum menimpa apa pun, lalu membuat snapshot `pre-restore-*` otomatis. File di `data/` yang tidak ada di backup dibiarkan; source proyek hanya kembali lewat restore ini karena export workspace tidak memuat file proyek.
+- Saat boot, file JSON yang rusak diarsipkan sebagai `<nama>.corrupt-<waktu>`. Workspace/org/rooms/settings/credentials mencoba snapshot `data/last-good` terbaru; bila tidak ada, server tetap hidup dalam mode terdegradasi dan melaporkannya lewat `/api/health` (`recovery`) serta `/api/workspace/info`. Org/rooms tidak di-seed ulang diam-diam.
+- `GET /api/health` dan `GET /api/ready` bebas token untuk supervisor/`start.bat`. Health memuat uptime, hitungan status tugas, antrean model, job berjalan, jumlah tulisan workspace, dan file yang dipulihkan; tidak ada secret di dalamnya.
+- `data/.lock` mencegah dua server memakai folder data yang sama. SIGINT/SIGTERM menutup SSE, preview, dan job lalu menandai job berjalan `interrupted`; lock basi dari proses yang mati dideteksi lewat PID.
+- Retensi proyek: 20 revisi terbaru per proyek dan output job maksimal 30 hari (`KANTOR_KEEP_REVISIONS`, `KANTOR_JOB_MAX_AGE_DAYS`). Reset mengarsipkan `data/projects` bersama workspace, bukan hanya menghapus catatannya.
+- Export workspace tetap tersedia untuk memindahkan tugas/pesan/keputusan; import owner-only (`POST /api/workspace/import`, `replace:true`) mengarsipkan workspace lama lebih dulu dan menolak saat ada tugas/job berjalan.
+
+## CI dan pemeriksaan statis
+
+- `npm run check` menjalankan `node --check` pada seluruh file JS/CJS/MJS first-party (vendor, browser ESM `three-global.js`, dan folder data dilewati). Ini gerbang sintaks tanpa dependensi tambahan; ESLint/typecheck penuh belum dipasang.
+- `.github/workflows/ci.yml` menjalankan `npm ci`, `npm run check`, dan `npm run test:unit` di Linux + Windows, lalu smoke UI Windows (`npm run test:smoke`) dengan Playwright Chromium. Log suite diunggah sebagai artifact saat gagal.
+- `npm run test:smoke` menjalankan subset UI cepat (navigasi, layout mobile, sinkron rutinitas/org, task board, messenger, settings) dan menerima daftar file: `node tests/run-suite.cjs ui nav,rooms-nav`.
+
 ## Pengujian
 
 ```sh
 npm test                 # seluruh file secara berurutan, log per file di .superpowers/suite-logs
 npm run test:unit
 npm run test:ui
+npm run test:smoke        # subset UI untuk CI
+npm run check             # node --check semua file first-party
 npm run test:docker       # fake CLI; live test menulis SKIP kecuali opt-in berikut
 RUN_DOCKER_TESTS=1 npm run test:docker
 ```
 
-Pada PowerShell gunakan `$env:RUN_DOCKER_TESTS='1'; npm run test:docker`. `npm run test:unit` menjalankan tes Node murni dan tidak memerlukan Playwright; `npm run test:ui` menjalankan seluruh tes browser dan memerlukan `npm install` sekali di checkout ini (atau `PLAYWRIGHT_MODULE` yang menunjuk instalasi lain). Suite memakai DATA_DIR temporer dan provider mock lokal, tidak memakai task live atau menghabiskan token provider. Batas waktu setiap file browser 900 detik; exit code gagal tidak disembunyikan. Tes Windows lokal dilewati di host selain Windows.
+Pada PowerShell gunakan `$env:RUN_DOCKER_TESTS='1'; npm run test:docker`. `npm run test:unit` menjalankan tes Node murni dan tidak memerlukan Playwright; `npm run test:ui` menjalankan seluruh tes browser dan memerlukan `npm install` sekali di checkout ini (atau `PLAYWRIGHT_MODULE` yang menunjuk instalasi lain). Runner mendeteksi tes browser dari `require('./browser.cjs')`, memberi setiap file `TEST_PORT` dari port kosong, membunuh seluruh process tree saat timeout, dan memakai `TEST_TIMEOUT_MS` (default 900000). Suite memakai DATA_DIR temporer dan provider mock lokal, tidak memakai task live atau menghabiskan token provider. Exit code gagal tidak disembunyikan; tes Windows lokal dilewati di host selain Windows.
 
 File browser memakai `tests/browser.cjs`, yang menyalakan Chromium dengan ANGLE diarahkan ke GPU asli (`--use-angle=d3d11` di Windows, `metal` di macOS, `gl` di Linux). Tanpa itu `chrome-headless-shell` tidak punya GPU dan WebGL jatuh ke rasterizer perangkat lunak SwiftShader: seluruh core CPU terpakai, tiap browser memakan ~450 MB, dan adegan kantor hanya berjalan beberapa frame per detik. Kalau tidak ada GPU yang bisa dipakai, Chrome otomatis kembali ke SwiftShader, jadi flag ini tidak pernah menggagalkan tes.

@@ -519,9 +519,22 @@ function send(res, status, body) {
 }
 function readJson(req) {
   return new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
-    req.on('data', chunk => { size += chunk.length; if (size > 1e6) { reject(Object.assign(new Error('Request too large'), {status: 413})); req.destroy(); } else chunks.push(chunk); });
-    req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString() || '{}')); } catch { reject(Object.assign(new Error('Invalid JSON'), {status: 400})); } });
+    let size = 0, done = false; const chunks = [];
+    const fail = error => { if (done) return; done = true; reject(error); };
+    req.on('data', chunk => {
+      if (done) return;
+      size += chunk.length;
+      // Stop collecting but keep draining, so the 413 response can reach the client.
+      if (size > 1e6) { fail(Object.assign(new Error('Request too large'), {status: 413})); req.resume(); return; }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (done) return;
+      try { const value = JSON.parse(Buffer.concat(chunks).toString() || '{}'); done = true; resolve(value); }
+      catch { done = true; reject(Object.assign(new Error('Invalid JSON'), {status: 400})); }
+    });
+    req.on('aborted', () => fail(Object.assign(new Error('Request aborted'), {status: 400})));
+    req.on('error', () => fail(Object.assign(new Error('Request failed'), {status: 400})));
   });
 }
 function validateTaskPlacement(task, input={}) {
