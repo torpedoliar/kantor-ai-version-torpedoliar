@@ -40,7 +40,7 @@ const api=async(p,opts={})=>{const headers={'content-type':'application/json','o
   const mr=(await api('/api/tasks')).body.find(t=>t.id===made.id);assert.equal(mr.status,'manager-review');
   const passed=await api(`/api/tasks/${made.id}`,{method:'PATCH',headers:{'x-kantor-org':ownerUnlock.body.token},body:JSON.stringify({action:'manager-approve',version:mr.version})});
   assert.equal(passed.status,200);assert.equal(passed.body.status,'review');
-  assert.equal((await api(`/api/tasks/${kn.id}`,{method:'PATCH',body:JSON.stringify({action:'answer',answer:'x',version:kn.version})})).status,409,'only blocked tasks take answers');
+  assert.equal((await api(`/api/tasks/${kn.id}`,{method:'PATCH',headers:{'x-kantor-org':ownerUnlock.body.token},body:JSON.stringify({action:'answer',answer:'x',version:kn.version})})).status,409,'only blocked tasks take answers');
   assert.deepEqual(errors,[]);
   console.log('PASS: per-member models, agent asks instead of guessing, Needs decision banner and filter, answer resumes the task, second AI member drafts');
  }finally{await browser.close();server.kill();fs.rmSync(dir,{recursive:true,force:true});}

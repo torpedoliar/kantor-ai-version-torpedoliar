@@ -8,6 +8,10 @@ const PLAN_INSTRUCTIONS='MODE: PLAN\nYou lead this task. Split it into subtasks 
 const SYNTH_INSTRUCTIONS='MODE: SYNTHESIZE\nYour team finished the subtasks below. Combine their results into one final deliverable for the owner. Note anything still missing.';
 const REVIEW_INSTRUCTIONS='MODE: REVIEW\nYou delegated this subtask. Check the result below against the brief. Reply with exactly APPROVE if it is good enough, or REVISE: followed by concrete changes the assignee must make.';
 const MAX_REVISIONS=1;
+// A failed synthesis must not re-enter wake() forever: bounded attempts with backoff, then the
+// task waits for an explicit owner retry (the Coba lagi button clears error and phase).
+const MAX_SYNTH_ATTEMPTS=Math.max(1,Number(process.env.KANTOR_SYNTH_ATTEMPTS)||3);
+const SYNTH_RETRY_DELAYS=(process.env.KANTOR_SYNTH_RETRY_DELAYS_MS||'30000,120000').split(',').map(v=>Math.max(0,Number(v)||0)).slice(0,10);
 
 function createOrchestrator({snapshot,commit,org,askModel,canRun,buildApplication,now=()=>new Date().toISOString(),log=()=>{}}){
   const planning=new Set();
@@ -64,7 +68,7 @@ function createOrchestrator({snapshot,commit,org,askModel,canRun,buildApplicatio
     if(planning.has(task.id))return;planning.add(task.id);const runId=crypto.randomUUID();
     try{
       const state=snapshot(),children=childrenOf(state,task.id).filter(c=>c.planRunId);
-      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);Object.assign(t,{status:'active',phase:'synthesizing',blockedReason:null,runId,version:(t.version||0)+1,updatedAt:now()});emit({type:'model.started',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{purpose:'synthesize'}});});
+      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);Object.assign(t,{status:'active',phase:'synthesizing',blockedReason:null,runId,error:undefined,synthRetryAt:undefined,synthAttempts:(t.synthAttempts||0)+1,version:(t.version||0)+1,updatedAt:now()});emit({type:'model.started',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{purpose:'synthesize'}});});
       const childResults=children.map(c=>`### ${c.title} (${c.assignee})\n${c.result||'(tanpa hasil)'}`).join('\n\n').slice(-12000);
       if(task.outputType==='application'&&buildApplication){await buildApplication(task.id,childResults);return;}
       const answer=await askModel(task.assignee,{...task,brief:`${SYNTH_INSTRUCTIONS}\n\n${task.brief||''}`,childResults});
@@ -72,12 +76,21 @@ function createOrchestrator({snapshot,commit,org,askModel,canRun,buildApplicatio
         emit({type:'model.completed',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{purpose:'synthesize'}});
         const result=answer.text.slice(0,10000),final=!t.parentId;
         // A sub-lead's synthesis is reviewed by its own lead (see review); only the root goes to the owner.
-        Object.assign(t,{status:'review',phase:'review',result,by:answer.by,runId:null,history:[...(t.history||[]),{result,by:answer.by,createdAt:now(),feedback:t.feedback||''}],version:(t.version||0)+1,updatedAt:now()});
+        Object.assign(t,{status:'review',phase:'review',result,by:answer.by,runId:null,error:undefined,synthAttempts:0,synthRetryAt:undefined,history:[...(t.history||[]),{result,by:answer.by,createdAt:now(),feedback:t.feedback||''}],version:(t.version||0)+1,updatedAt:now()});
         emit({type:'result.submitted',taskId:t.id,rootId:t.rootId||t.id,from:t.assignee,to:final?'owner':draft.tasks.find(p=>p.id===t.parentId)?.assignee,data:{final}});
         addMessage(draft,emit,{task:t,sender:{type:'agent',name:t.assignee},kind:'result',text:result});
       });
     }catch(error){
-      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);if(!t||t.runId!==runId)return;Object.assign(t,{status:'blocked',phase:'waiting_children',blockedReason:'children',runId:null,error:error.message,version:(t.version||0)+1,updatedAt:now()});emit({type:'model.failed',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{purpose:'synthesize',error:error.message}});});
+      commit((draft,emit)=>{const t=draft.tasks.find(x=>x.id===task.id);if(!t||t.runId!==runId)return;
+        const attempts=t.synthAttempts||0,exhausted=attempts>=MAX_SYNTH_ATTEMPTS,delay=SYNTH_RETRY_DELAYS[Math.min(Math.max(0,attempts-1),SYNTH_RETRY_DELAYS.length-1)]??30000;
+        // Keep the task in the queue (and therefore the Coba lagi button) but leave wake() alone until
+        // the backoff is due; after the last attempt the phase stops any further automatic synthesis.
+        Object.assign(t,{status:'queued',phase:exhausted?'failed':'waiting_children',blockedReason:null,runId:null,error:error.message,
+          ...(exhausted?{synthRetryAt:undefined}:{synthRetryAt:Date.now()+delay}),version:(t.version||0)+1,updatedAt:now()});
+        emit({type:'model.failed',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,runId,data:{purpose:'synthesize',error:error.message,attempts,exhausted}});
+        if(attempts===1)addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'error',text:`Penyusunan hasil oleh ${t.assignee} gagal: ${error.message}\nDicoba ulang otomatis (percobaan ${attempts} dari ${MAX_SYNTH_ATTEMPTS}) dalam ${Math.round(delay/1000)} detik.`});
+        else if(exhausted)addMessage(draft,emit,{task:t,sender:{type:'system',name:'Sistem'},kind:'error',text:`Percobaan otomatis penyusunan hasil dihentikan setelah ${attempts} kali. Klik Coba lagi setelah masalah provider diperbaiki.`});
+      });
     }finally{planning.delete(task.id);}
   }
   // Every delegated result is reviewed by the person who delegated it: approve, or one revision with concrete changes.
@@ -125,7 +138,9 @@ function createOrchestrator({snapshot,commit,org,askModel,canRun,buildApplicatio
     for(const t of state.tasks){
       if(t.planRunId&&t.status==='review')review(t);
       if(t.status==='queued'&&!t.error&&t.executionMode==='automatic'&&!childrenOf(state,t.id).length&&dependenciesMet(state,t)&&canRun(t.assignee))plan(t);
-      if(t.phase==='waiting_children'){const kids=childrenOf(state,t.id).filter(c=>c.planRunId);if(kids.length&&kids.every(c=>c.status==='done')&&canRun(t.assignee))synthesize(t);}
+      if(t.phase==='waiting_children'){const kids=childrenOf(state,t.id).filter(c=>c.planRunId);
+        const retryReady=!t.error||((t.synthAttempts||0)<MAX_SYNTH_ATTEMPTS&&(!t.synthRetryAt||Date.now()>=t.synthRetryAt));
+        if(kids.length&&kids.every(c=>c.status==='done')&&canRun(t.assignee)&&retryReady)synthesize(t);}
     }
   }
   // Worker eligibility for ordinary (direct) execution: dependencies done, not an automatic planner task.

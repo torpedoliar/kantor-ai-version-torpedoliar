@@ -15,7 +15,9 @@ const uiApprovalMessage='Owner unlock required. Open Organization and unlock wit
   const root=await api('/api/tasks',{method:'POST',headers,body:JSON.stringify({title:'Marketing root',assignee:'Kak Rani',division:'marketing',asLead:true,executionMode:'manual',brief:'Root work.'})});assert.equal(root.status,201);
   const unlockedForChild=await api('/api/org/unlock',{method:'POST',headers,body:JSON.stringify({pin:'2468'})});assert.equal(unlockedForChild.status,200);const ownerHeaders={...headers,'x-kantor-org':unlockedForChild.body.token};
   const child=await api('/api/tasks',{method:'POST',headers:ownerHeaders,body:JSON.stringify({title:'Marketing child',assignee:'Kak Dewi',division:'marketing',parentId:root.body.id,asLead:false,brief:'Child work.'})});assert.equal(child.status,201);
-  const finished=await api(`/api/tasks/${child.body.id}`,{method:'PATCH',headers,body:JSON.stringify({status:'done',result:'Child complete.',version:child.body.version})});assert.equal(finished.status,200);
+  // A child task is privileged: closing it needs the owner unlock just like creating it.
+  const finishedWithoutUnlock=await api(`/api/tasks/${child.body.id}`,{method:'PATCH',headers,body:JSON.stringify({status:'done',result:'Child complete.',version:child.body.version})});assert.equal(finishedWithoutUnlock.status,403,'closing a child needs the owner unlock');
+  const finished=await api(`/api/tasks/${child.body.id}`,{method:'PATCH',headers:ownerHeaders,body:JSON.stringify({status:'done',result:'Child complete.',version:child.body.version})});assert.equal(finished.status,200);
   const latest=(await api('/api/tasks')).body.find(task=>task.id===root.body.id);assert.equal(latest.status,'review');
   const denied=await api(`/api/tasks/${root.body.id}`,{method:'PATCH',headers,body:JSON.stringify({action:'approve',version:latest.version})});assert.equal(denied.status,403);
   const unlocked=await api('/api/org/unlock',{method:'POST',headers,body:JSON.stringify({pin:'2468'})});assert.equal(unlocked.status,200);

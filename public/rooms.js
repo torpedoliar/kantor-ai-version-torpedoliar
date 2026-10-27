@@ -13,7 +13,7 @@
   };
   const ROOM_KINDS = ['table', 'chair', 'sofa', 'board', 'plant'];
   const PLAN = {w: 360, h: 272, scale: 10}; // the 32x24 floor slab, 10px per metre
-  let roomsList = [], editingRoom = null, planRoom = null, planDrag = null, csrf = '', stamp = '', members = [];
+  let roomsList = [], editingRoom = null, planRoom = null, planDrag = null, csrf = '', stamp = '', members = [], refreshSeq = 0;
 
   const message = text => { el('roomsMessage').textContent = text || ''; };
   const memberNames = () => members.map(m => m.name);
@@ -30,9 +30,12 @@
   }
 
   async function refresh(quiet) {
+    const seq = ++refreshSeq;
     try {
       const list = await call('GET', '/api/rooms');
-      if (!Array.isArray(list)) return;
+      // A slow read that started before a newer refresh must not overwrite the newer list
+      // (for example the initial poll landing after a room was just created).
+      if (!Array.isArray(list) || seq !== refreshSeq) return;
       const next = JSON.stringify(list);
       if (next === stamp) return;
       stamp = next; roomsList = list;

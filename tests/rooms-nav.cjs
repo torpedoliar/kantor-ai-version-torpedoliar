@@ -19,6 +19,8 @@ const PORT=Number(process.env.TEST_PORT||43546),dir=fs.mkdtempSync(path.join(os.
     await page.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1');sessionStorage.setItem('kantor-ai.orgToken','')}catch{}});
     await page.goto(origin);
     await page.waitForFunction(()=>window.officeScene&&window.officeTasks&&!document.getElementById('bLock').disabled,null,{timeout:90000});
+    // Wait out the drawer's initial poll: a stale list landing after a room is created must not remove it.
+    await page.evaluate(()=>window.officeRooms?.refresh?.(true));
     // Cells around the chosen point must be clear before a room is placed there.
     const findOpen=(region,avoid=[])=>page.evaluate(({region,avoid})=>{
       const grid=officeScene.navGrid(2),step=.5;

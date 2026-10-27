@@ -467,6 +467,8 @@ const orchestrator=createOrchestrator({snapshot:()=>taskStore.snapshot(),commit,
 const kick = () => { orchestrator.wake(); Object.keys(agentMembers()).forEach(work); };
 // Any committed change (new children, an answered decision, a finished dependency) may unblock work.
 let kickQueued=false;taskStore.subscribe(()=>{if(kickQueued)return;kickQueued=true;setImmediate(()=>{kickQueued=false;kick();});});
+// A synthesis that failed waits for its backoff; this is the only thing that wakes it while waiting.
+setInterval(()=>{if(taskStore.snapshot().tasks.some(t=>t.phase==='waiting_children'&&t.error&&Number.isFinite(t.synthRetryAt)&&t.synthRetryAt<=Date.now()))orchestrator.wake();},1000).unref();
 
 // ---- HTTP ----
 function send(res, status, body) {
@@ -817,6 +819,9 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     const input = await readJson(req), change = {};
     const task = tasks.find(t => t.id === match[1]); if (!task) return send(res, 404, {error: 'Task not found.'});
     if(!input||typeof input!=='object')return send(res,400,{error:'Expected an object.'});
+    // A child, review or manager-review task is privileged: every write form (answer, message, progress,
+    // assignee, status) needs the owner unlock, not just the review actions.
+    const locked=requireOrgToken(req,task);if(locked)return send(res,locked.status,{error:locked.error,code:locked.code});
     if(input.action===undefined&&input.message===undefined&&input.progressPct===undefined&&input.version!==undefined&&input.version!==(task.version||0))return send(res,409,{error:'Tugas berubah. Muat ulang sebelum menyimpan.',code:'VERSION_CONFLICT'});
     // Answering an agent's questions adds the answers to the brief and puts the task back in its queue.
     if(input.action==='answer'){
@@ -828,7 +833,6 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
       save();send(res,200,task);setImmediate(kick);return;
     }
     if(input.action!==undefined){
-      const locked=requireOrgToken(req,task);if(locked)return send(res,locked.status,{error:locked.error,code:locked.code});
       if(input.action==='retry-advice'){
         // The manager agent failed or was interrupted: ask it again.
         if(task.status!=='manager-review')return send(res,409,{error:'Hanya draf di gerbang atasan yang bisa ditinjau ulang.'});
@@ -873,13 +877,15 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
       if(!Number.isInteger(input.progressPct))return send(res,400,{error:'Progress must be a whole number.'});
       Object.assign(task,{progressPct:Math.max(0,Math.min(100,input.progressPct)),version:(task.version||0)+1,updatedAt:now()});save();return send(res,200,task);
     }
+    // A draft at either review gate only moves through approve/revise/manager-*; a generic PATCH
+    // (including reassignment, which used to requeue it) must not launder the draft into done.
+    if((task.status==='review'||task.status==='manager-review')&&(input.assignee!==undefined||input.status!==undefined))return send(res,409,{error:'Setujui draf ini atau minta revisi dulu.',code:'REVIEW_REQUIRED'});
     if (input.assignee !== undefined) { change.assignee = text(input.assignee, 80); if (!memberOf(change.assignee)) return send(res, 400, {error: 'Pick an assignee.'}); if (task.status !== 'done') change.status = 'queued'; }
     if(input.assignee!==undefined||input.parentId!==undefined||input.division!==undefined||input.asLead!==undefined){const candidate=normalizeTask({...task,...input,assignee:change.assignee||task.assignee,parentId:input.parentId!==undefined?input.parentId:task.parentId,division:input.division!==undefined?input.division:task.division,asLead:input.asLead!==undefined?input.asLead:task.asLead});const placement=validateTaskPlacement(candidate,input);if(placement)return send(res,placement.status,{error:placement.error});change.parentId=candidate.parentId;change.division=candidate.division;change.asLead=candidate.asLead;}
     if(input.priority!==undefined){if(!PRIORITIES.has(input.priority))return send(res,400,{error:'Unknown priority.'});change.priority=input.priority;}
     if (input.status !== undefined) {
       if (!STATES.has(input.status)||input.status==='review'||input.status==='blocked'||input.status==='manager-review') return send(res, 400, {error: 'Unknown status.'});
       const assignee = change.assignee || task.assignee;
-      if((task.status==='review'||task.status==='manager-review')&&!change.assignee)return send(res,409,{error:'Approve this draft or request a revision.'});
       if (agentFor(assignee) && input.status !== 'queued') return send(res, 409, {error: 'This member is connected to an AI agent; it starts and finishes its own tasks.'});
       if (input.status === 'active' && tasks.some(t => t.id !== task.id && t.assignee === assignee && t.status === 'active')) return send(res, 409, {error: 'This member already has an active task.'});
       if (input.status === 'done' && !text(input.result, 10000)) return send(res, 400, {error: 'Write a result before finishing.'});
@@ -888,7 +894,11 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     }
     if(!Object.keys(change).length)return send(res,400,{error:'Provide an assignee, status, or review action.'});
     // Moving a task back to the queue clears a previous agent error so it is tried again.
-    Object.assign(task, change, {runId:null,version:(task.version||0)+1,error: undefined, retryAt: undefined, autoAttempts: 0, retryCategory: undefined, updatedAt: now()}); promoteParent(task.parentId); save(); kick(); return send(res, 200, task);
+    Object.assign(task, change, {runId:null,version:(task.version||0)+1,error: undefined, retryAt: undefined, autoAttempts: 0, retryCategory: undefined, updatedAt: now()});
+    // Coba lagi on a plan whose synthesis gave up re-opens the synthesis gate instead of leaving
+    // the task queued but stuck in phase 'failed'.
+    if(change.status==='queued'&&task.phase==='failed'&&tasks.some(item=>item.parentId===task.id&&item.planRunId)){task.phase='waiting_children';task.synthAttempts=0;task.synthRetryAt=undefined;}
+    promoteParent(task.parentId); save(); kick(); return send(res, 200, task);
   }
   send(res, 404, {error: 'Not found.'});
 }

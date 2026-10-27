@@ -1359,6 +1359,9 @@
   }
   function buildRoom(room){
     const group=new THREE.Group();group.position.set(room.x,0,room.z);floors[room.floor].add(group);
+    // Rooms are rebuilt and removed at runtime, so their meshes must never be baked into the
+    // floor's merged static geometry (see mergeStatic).
+    group.userData.customRoom=room.id;
     const P=passage(room.floor),cap=Math.min(room.capacity,8),seats=[];
     mesh(softBox(room.w-.1,.04,room.d-.1),ROOM_RUGS[room.type]??0xd8cfc0,0,.02,0,group,false);
     const addSeat=(lx,lz,angle,state,standing=false)=>seats.push({x:room.x+lx,z:room.z+lz,f:1,angle,floor:room.floor,
@@ -1396,6 +1399,7 @@
         box(.07,.2,.07,DARK,0,.02,0,mon);box(.95,.58,.06,DARK,0,.2,0,mon);
         const screen=executiveScreen();
         const panel=new THREE.Mesh(new THREE.PlaneGeometry(.86,.5),new THREE.MeshBasicMaterial({map:screen.texture}));
+        panel.material.userData.roomOwned=true;
         panel.position.set(0,.2,-.034);panel.rotation.y=Math.PI;mon.add(panel);
         animatedScreens.push({group,floor:room.floor,room:room.id,texture:screen.texture,draw:screen.draw,last:-1});
         box(.5,.02,.16,0x2a2b2f,0,.96,deskZ-.15,group); // keyboard within reach
@@ -1454,6 +1458,7 @@
       ctx.fillText(label,256,50);
       const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;roomTextureMaps.push({texture:tex,room:room.id});
       const sign=new THREE.Mesh(new THREE.PlaneGeometry(1.1,.21),new THREE.MeshBasicMaterial({map:tex}));
+      sign.material.userData.roomOwned=true;
       sign.position.set((gapLeft+gapRight)/2,H+.2,front+.03);group.add(sign);
     }
     for(const item of room.furniture??[])roomFurniture(group,item);
@@ -1474,9 +1479,19 @@
       roomSpots.splice(i,1);
     }
   }
+  // Room groups own fresh box/cylinder geometries; softBox shells and shared materials are reused
+  // elsewhere, so only unique geometry and explicitly room-owned materials are disposed.
+  function disposeRoomGroup(group){
+    const shared=new Set(softShapes.values());
+    group.traverse(o=>{
+      if(!o.isMesh)return;
+      if(o.geometry&&!shared.has(o.geometry))o.geometry.dispose();
+      for(const m of [o.material].flat())if(m?.userData?.roomOwned)m.dispose();
+    });
+  }
   function removeRoomBuilt(roomId){
     const built=roomBuilt.get(roomId);if(!built)return;
-    built.group.parent?.remove(built.group);
+    built.group.parent?.remove(built.group);disposeRoomGroup(built.group);
     for(let i=roomDoors.length-1;i>=0;i--)if(roomDoors[i].room===roomId){const at=doors.indexOf(roomDoors[i]);if(at>=0)doors.splice(at,1);roomDoors.splice(i,1);}
     for(let i=roomLabels.length-1;i>=0;i--)if(roomLabels[i].room===roomId){const mesh=roomLabels[i].mesh;mesh.parent?.remove(mesh);mesh.material?.map?.dispose();mesh.material?.dispose();mesh.geometry?.dispose();roomLabels.splice(i,1);}
     for(let i=roomTextureMaps.length-1;i>=0;i--)if(roomTextureMaps[i].room===roomId){roomTextureMaps[i].texture.dispose();roomTextureMaps.splice(i,1);}
@@ -1559,7 +1574,6 @@
     for(const floor of touched)if(floors[floor])navGrids[floor]=rasterize(floors[floor],a=>a.userData.walkable||a.userData.agent||a.visible===false);
     return customRooms.length;
   }
-  applyRooms(customRooms);
   // One rasterizer for start-up and furniture edits. skip(a) excludes ancestors (walkable pads, agents, hidden items).
   function rasterize(rootF,skip=a=>a.userData.walkable){
     const grid=rootF.userData.staticGrid?new Uint8Array(rootF.userData.staticGrid):new Uint8Array(NAV.w*NAV.h),bounds=new THREE.Box3(),y0=rootF.position.y;rootF.updateMatrixWorld(true);
@@ -1590,7 +1604,7 @@
     const groups=new Map(),drop=[];rootF.updateMatrixWorld(true);const inv=new THREE.Matrix4().copy(rootF.matrixWorld).invert();
     rootF.traverse(o=>{
       if(!o.isMesh||o.isInstancedMesh||o.isSkinnedMesh||o.material.transparent||Array.isArray(o.material)||o.userData.agent)return;
-      for(let a=o;a&&a!==rootF;a=a.parent)if(a.userData.customId||a.userData.deskArea||a.userData.agent||a.userData.model||a.userData.decor||a.userData.walkable||a.userData.keep||!a.visible)return;
+      for(let a=o;a&&a!==rootF;a=a.parent)if(a.userData.customId||a.userData.customRoom||a.userData.deskArea||a.userData.agent||a.userData.model||a.userData.decor||a.userData.walkable||a.userData.keep||!a.visible)return;
       if(doorPads.includes(o)||o.parent!==rootF&&o.parent.parent!==rootF&&!o.parent.isGroup)return;
       const geometry=o.geometry.index?o.geometry.toNonIndexed():o.geometry.clone();
       for(const name of Object.keys(geometry.attributes))if(!['position','normal','uv'].includes(name))geometry.deleteAttribute(name);
@@ -1609,6 +1623,8 @@
     for(const o of collisionObjects){o.parent.remove(o);o.geometry.dispose();}
   }
   for(const rootF of Object.values(floors))mergeStatic(rootF);
+  // Rooms are built after the one-time merge: they change at runtime and must stay removable.
+  applyRooms(customRooms);
   const cellOf=(x,z)=>[Math.floor((x-NAV.x0)/NAV.cell),Math.floor((z-NAV.z0)/NAV.cell)];
   const centerOf=(i,j)=>[NAV.x0+(i+.5)*NAV.cell,NAV.z0+(j+.5)*NAV.cell];
   const open=(grid,i,j)=>i>=0&&j>=0&&i<NAV.w&&j<NAV.h&&!grid[j*NAV.w+i];
@@ -3084,6 +3100,9 @@
     // Custom rooms (port): rebuild rooms without a reload and report live occupancy per room.
     applyRooms:list=>applyRooms(list),
     roomOccupancy:()=>Object.fromEntries(customRooms.map(room=>[room.id,roomSpots.filter(s=>s.room===room.id&&s.occupant).length])),
+    // Mesh count per custom room, including ghosts left behind by a bad rebuild; rooms-merge tests rely on this.
+    roomMeshes:()=>{const out={};scene.updateMatrixWorld(true);scene.traverse(o=>{if(!o.isMesh)return;let g=o;while(g&&!g.userData.customRoom)g=g.parent;if(g)out[g.userData.customRoom]=(out[g.userData.customRoom]||0)+1;});return out;},
+    meshCount:level=>{let n=0;floors[level]?.traverse(o=>{if(o.isMesh)n++;});return n;},
     visitorTravelAudit:()=>shop.people.map(c=>({state:c.state,mode:c.arrivalMode||'walking-existing',trip:c.vehicleTrip||null})),
     environmentAudit:()=>environment.audit(),
     mobilitySnapshot:()=>mobility.snapshot(),
