@@ -61,7 +61,7 @@ Jalankan dari direktori proyek:
 python3 -m http.server 4173 --bind 127.0.0.1 --directory public
 ```
 
-Buka http://127.0.0.1:4173. Internet diperlukan untuk memuat Three.js dari CDN dan font Archivo serta IBM Plex Mono dari Google Fonts.
+Buka http://127.0.0.1:4173. Three.js sudah disertakan di `public/vendor/three/`; internet hanya diperlukan untuk memuat font Archivo dan IBM Plex Mono dari Google Fonts. Tanpa internet, kantor tetap berjalan dengan font sistem.
 
 ## Mengelola tugas
 
@@ -199,6 +199,8 @@ Tes organisasi:
 - `tests/org-chart.cjs`: bagan, drag, panel, kolaborasi, konflik versi, dan sheet mobile.
 - `tests/org-wizard.cjs`: wizard pertama kali, susun ulang, dan dialog reset dengan arsip.
 - `tests/org-autolayout.cjs`: lantai kerja otomatis, rooftop tetap di atas, tanda area, dan furnitur yang tertimpa meja.
+- `tests/rooms-nav.cjs`: rebuild ruangan berbasis diff, sel tabrakan lama dibersihkan setelah ruangan dihapus atau dipindah, dan penghuni ruangan lain tidak kehilangan kursinya saat muncul ruangan baru.
+- `tests/task-retry.cjs`: respons `POST /api/tasks` yang hilang dilaporkan sekali dan tidak diulang menjadi tugas ganda.
 
 Tes 3D lama memakai `OFFICE_URL` untuk mengganti port 4173, misalnya `OFFICE_URL=http://127.0.0.1:8080 node tests/office.cjs`.
 
@@ -246,6 +248,6 @@ npm run test:docker       # fake CLI; live test menulis SKIP kecuali opt-in beri
 RUN_DOCKER_TESTS=1 npm run test:docker
 ```
 
-Pada PowerShell gunakan `$env:RUN_DOCKER_TESTS='1'; npm run test:docker`. Suite memakai DATA_DIR temporer dan provider mock lokal, tidak memakai task live atau menghabiskan token provider. Batas waktu setiap file browser 600 detik; exit code gagal tidak disembunyikan. Tes Windows lokal dilewati di host selain Windows.
+Pada PowerShell gunakan `$env:RUN_DOCKER_TESTS='1'; npm run test:docker`. `npm run test:unit` menjalankan tes Node murni dan tidak memerlukan Playwright; `npm run test:ui` menjalankan seluruh tes browser dan memerlukan `npm install` sekali di checkout ini (atau `PLAYWRIGHT_MODULE` yang menunjuk instalasi lain). Suite memakai DATA_DIR temporer dan provider mock lokal, tidak memakai task live atau menghabiskan token provider. Batas waktu setiap file browser 900 detik; exit code gagal tidak disembunyikan. Tes Windows lokal dilewati di host selain Windows.
 
 File browser memakai `tests/browser.cjs`, yang menyalakan Chromium dengan ANGLE diarahkan ke GPU asli (`--use-angle=d3d11` di Windows, `metal` di macOS, `gl` di Linux). Tanpa itu `chrome-headless-shell` tidak punya GPU dan WebGL jatuh ke rasterizer perangkat lunak SwiftShader: seluruh core CPU terpakai, tiap browser memakan ~450 MB, dan adegan kantor hanya berjalan beberapa frame per detik. Kalau tidak ada GPU yang bisa dipakai, Chrome otomatis kembali ke SwiftShader, jadi flag ini tidak pernah menggagalkan tes.
