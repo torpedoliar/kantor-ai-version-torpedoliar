@@ -10,13 +10,21 @@ const collections=['tasks','threads','messages','decisions','events','projects',
 // (the reset flow archives the whole workspace before clearing it). Keep the event window no
 // larger than the console's own 5,000-row window, so a fresh client can page through everything
 // retained without entering a resync loop.
-const EVENT_LIMIT=5000,EVENT_MAX_AGE=90*24*60*60*1000,REQUEST_LIMIT=1000,REQUEST_TTL=15*60*1000;
+const EVENT_LIMIT=5000,EVENT_MAX_AGE=90*24*60*60*1000,REQUEST_LIMIT=1000,REQUEST_TTL=15*60*1000,MESSAGE_LIMIT=5000,MESSAGE_MAX_AGE=90*24*60*60*1000;
 function prune(draft,now=Date.now()){
   let changed=false,first=draft.events.findIndex(event=>now-(Date.parse(event.at)||0)<=EVENT_MAX_AGE);
   if(first<0)first=draft.events.length;
   if(draft.events.length-first>EVENT_LIMIT)first=draft.events.length-EVENT_LIMIT;
   if(first>0){draft.events.splice(0,first);changed=true;}
   draft.firstSeq=draft.events[0]?.seq??draft.nextSeq;
+  // Conversations are capped like events so the workspace stays small; the task itself keeps its result.
+  if(Array.isArray(draft.messages)){
+    // Invalid/missing timestamps stay (legacy imports); the 5.000 cap still bounds them.
+    let firstMessage=draft.messages.findIndex(message=>{const at=Date.parse(message.at);return !Number.isFinite(at)||now-at<=MESSAGE_MAX_AGE;});
+    if(firstMessage<0)firstMessage=draft.messages.length;
+    if(draft.messages.length-firstMessage>MESSAGE_LIMIT)firstMessage=draft.messages.length-MESSAGE_LIMIT;
+    if(firstMessage>0){draft.messages.splice(0,firstMessage);changed=true;}
+  }
   for(const [key,entry] of Object.entries(draft.requests||{})){
     const at=Date.parse(entry?.at);
     if(!Number.isFinite(at)||now-at>REQUEST_TTL){delete draft.requests[key];changed=true;}
@@ -152,4 +160,4 @@ function createTaskStore({dataDir,write=atomicWrite}){
   }
   return {snapshot:()=>clone(state),saveTasks,transaction,firstSeq:()=>state.firstSeq,eventsAfter:(after=0,limit=200)=>clone(state.events.filter(e=>e.seq>after).slice(0,Math.max(1,Math.min(500,limit)))),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},recovery:()=>structuredClone(recovery),writes:()=>writes};
 }
-module.exports={remember,MEMORY_LIMIT,MEMORY_TEXT,acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries,prune,migrateWorkspace,EVENT_LIMIT,EVENT_MAX_AGE,REQUEST_LIMIT,REQUEST_TTL};
+module.exports={remember,MEMORY_LIMIT,MEMORY_TEXT,acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries,prune,migrateWorkspace,EVENT_LIMIT,EVENT_MAX_AGE,REQUEST_LIMIT,REQUEST_TTL,MESSAGE_LIMIT,MESSAGE_MAX_AGE};

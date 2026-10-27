@@ -12,6 +12,7 @@ const ws=createProjectWorkspace({dataDir:dir}),project=ws.createProject({taskId:
 const ok=ws.writeRevision(project.id,bundle({executable:'node',args:['probe.js',META]},[{path:'probe.js',content:probe}]));
 const bad=ws.writeRevision(project.id,bundle({executable:'node',args:['fail.js']},[{path:'fail.js',content:'console.error("kalkulator salah: 2+2=5");process.exit(1);'}]));
 const hang=ws.writeRevision(project.id,bundle({executable:'node',args:['slow.js']},[{path:'slow.js',content:slow}]));
+const noisy=ws.writeRevision(project.id,bundle({executable:'node',args:['noisy.js']},[{path:'noisy.js',content:"process.stdout.write('x'.repeat(20000));"}]));
 const manifest=rev=>ws.manifest(project.id,rev.id);
 const alive=pid=>{try{process.kill(pid,0);return true;}catch{return false;}};
 const wait=async(fn,label,ms=20000)=>{const t=Date.now();for(;;){const v=await fn();if(v)return v;if(Date.now()-t>ms)throw Error('timeout: '+label);await new Promise(r=>setTimeout(r,100));}};
@@ -44,6 +45,11 @@ function start(){const child=spawn(process.execPath,[path.join(__dirname,'../ser
   const seen=JSON.parse(ev.stdout);
   assert.deepEqual(seen.argv,[META],'metacharacters reach the program as one literal argument');
   assert.equal(seen.sentinel,null,'server env is not inherited');assert.equal(seen.apiKey,null);
+  // Evidence in the workspace is an excerpt; the full log is a file under the job folder.
+  assert.match(ev.logs.stdout,/^logs\/test\.stdout\.log$/);assert.ok(ev.stdoutBytes>0);
+  const logResponse=await fetch(`${origin}/api/jobs/${first.id}/logs/test/stdout`,{headers:{'x-kantor-org':token}});
+  assert.equal(logResponse.status,200);assert.match(await logResponse.text(),/"argv"/);
+  assert.equal((await fetch(`${origin}/api/jobs/${first.id}/logs/test/stdout`)).status,403,'logs are owner-only');
   assert.ok(seen.cwd.startsWith(path.join(fs.realpathSync(dir),'projects',project.id,'jobs'))||seen.cwd.toLowerCase().startsWith(path.join(dir,'projects',project.id,'jobs').toLowerCase()),'runs in the job folder, not the revision');
   // Windows adds its own session variables (USERNAME, USERPROFILE, …) to every process; what matters is that none of the
   // server's variables leak. This test process has dozens; the child must only see the allowlist plus those OS additions.
@@ -55,6 +61,17 @@ function start(){const child=spawn(process.execPath,[path.join(__dirname,'../ser
   const badApproval=(await approve(bad)).body;const failed=(await call('POST',`/api/projects/${project.id}/run`,{revisionId:bad.id,approvalId:badApproval.id})).body;
   const failedDone=await wait(async()=>{const j=(await call('GET',`/api/jobs/${failed.id}`)).body;return j.status!=='queued'&&j.status!=='running'&&j;},'failed job');
   assert.equal(failedDone.status,'failed');assert.equal(failedDone.evidence[0].exitCode,1);assert.match(failedDone.evidence[0].stderr,/2\+2=5/);
+  // A long log is clipped in the workspace but kept whole on disk.
+  const noisyApproval=(await approve(noisy)).body;
+  const noisyJob=(await call('POST',`/api/projects/${project.id}/run`,{revisionId:noisy.id,approvalId:noisyApproval.id})).body;
+  const noisyDone=await wait(async()=>{const j=(await call('GET',`/api/jobs/${noisyJob.id}`)).body;return ['passed','failed','timed_out','cancelled'].includes(j.status)&&j;},'noisy job');
+  assert.equal(noisyDone.status,'passed');
+  const noisyEvidence=noisyDone.evidence[0];
+  assert.equal(noisyEvidence.stdout.length,16384,'the workspace keeps a 16 KB excerpt');
+  assert.ok(noisyEvidence.stdoutBytes>=20000);assert.equal(noisyEvidence.stdoutTruncated,true);
+  const fullLog=await (await fetch(`${origin}/api/jobs/${noisyJob.id}/logs/test/stdout`,{headers:{'x-kantor-org':token}})).text();
+  assert.ok(fullLog.length>=20000,'the full log stays on disk');
+  assert.match(fullLog,/^x+$/,'the log is the raw captured stream');
   // Cancel and timeout kill the whole tree, grandchild included.
   const hangApproval=(await approve(hang)).body;
   const grandchild=async job=>Number(await wait(()=>{try{return fs.readFileSync(path.join(dir,'projects',project.id,'jobs',job.id,'tmp','grandchild.pid'),'utf8');}catch{return null;}},'grandchild pid'));

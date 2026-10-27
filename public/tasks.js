@@ -286,6 +286,17 @@
     }
     if(panel.dataset.mounted!=='chart'){panel.dataset.mounted='chart';window.OrgChart.mount(panel,orgApi);}else window.OrgChart.render();
   }
+  // Polling carries summaries; the task being shown is upgraded to its full record once.
+  const fullRequests=new Set();
+  function ensureFull(task){
+    if(!server||!task||Object.hasOwn(task,'brief')||fullRequests.has(task.id))return;
+    fullRequests.add(task.id);
+    call('GET',`/api/tasks/${task.id}`).then(full=>{
+      fullRequests.delete(task.id);if(!full?.id)return;
+      tasks=tasks.map(item=>item.id===full.id?full:item);
+      if(selectedId===full.id)render();
+    }).catch(()=>fullRequests.delete(task.id));
+  }
   function render() {
     const focused=el('taskList').contains(document.activeElement)&&document.activeElement.tagName==='TEXTAREA'?{id:document.activeElement.id,start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd}:null;
     announce();
@@ -303,6 +314,7 @@
     let selected = tasks.find(t => t.id === selectedId);
     if (!selected || !visible.includes(selected)) selected = [...visible].sort((a,b) => rank[a.status]-rank[b.status])[0] || null;
     selectedId = selected?.id || null;
+    if(selected)ensureFull(selected);
     window.TaskWorkspace.update({visible, all: tasks, selectedId});
     if (activeView === 'flow') window.TaskFlow.renderFlow();
     if (activeView === 'console') window.TaskFlow.renderConsole();
@@ -475,7 +487,7 @@
     document.dispatchEvent(new CustomEvent('officetasks:server', {detail: info}));
     setInterval(async () => {
       if(polling||writing)return;polling=true;const ticket=mutation;
-      const latest = await call('GET', '/api/tasks').catch(() => null);
+      const latest = await call('GET', `/api/tasks?summary=1${selectedId?`&full=${encodeURIComponent(selectedId)}`:''}`).catch(() => null);
       polling=false;if(ticket!==mutation)return;
       if (!latest || JSON.stringify(latest) === JSON.stringify(tasks)) return;
       apply(latest);render();

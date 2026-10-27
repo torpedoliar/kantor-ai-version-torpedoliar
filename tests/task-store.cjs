@@ -58,9 +58,10 @@ try{
   }finally{fs.rmSync(lastGood,{recursive:true,force:true});}
   // Retention: expired events and request keys are pruned, and the retained sequence starts at firstSeq.
   const stamp=Date.parse('2026-10-27T00:00:00Z'),old=new Date(stamp-200*24*60*60*1000).toISOString(),recent=new Date(stamp-1000).toISOString();
-  const retention={events:[{seq:1,at:old},{seq:2,at:recent}],nextSeq:3,requests:{old:{result:'x',at:old},fresh:{result:'y',at:recent},legacy:{result:'z'}}};
+  const retention={events:[{seq:1,at:old},{seq:2,at:recent}],messages:[{seq:1,at:old,text:'old'},{seq:2,at:recent,text:'new'}],nextSeq:3,requests:{old:{result:'x',at:old},fresh:{result:'y',at:recent},legacy:{result:'z'}}};
   assert.equal(prune(retention,stamp),true);
   assert.deepEqual(retention.events.map(event=>event.seq),[2]);assert.equal(retention.firstSeq,2);
+  assert.deepEqual(retention.messages.map(message=>message.text),['new'],'messages older than the window are pruned');
   assert.deepEqual(Object.keys(retention.requests),['fresh']);
   const many={events:Array.from({length:EVENT_LIMIT+3},(_,index)=>({seq:index+1,at:recent})),nextSeq:EVENT_LIMIT+4,requests:{}};
   for(let index=0;index<REQUEST_LIMIT+5;index++)many.requests['r'+index]={result:index,at:new Date(stamp-index*100).toISOString()};

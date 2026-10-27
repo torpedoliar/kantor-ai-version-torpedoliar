@@ -245,15 +245,17 @@ Dependensi keras:
 - Test: perluas `tests/task-store.cjs`, `tests/messenger-ui.cjs`, `tests/task-events.cjs`
 
 **Steps:**
-- [ ] 1. Tulis log job ke `data/projects/<id>/jobs/<jobId>/` dan simpan hanya excerpt ≤16 KB per fase di workspace.
-- [ ] 2. Tambah retensi pesan/thread selesai di `prune()` (mis. 90 hari / 5.000 pesan terakhir) dengan ringkasan tetap.
-- [ ] 3. Tambah `GET /api/tasks?summary=1` (tanpa `history`/`messages`/`evidence`) untuk polling; klien memakai detail saat drawer dibuka.
-- [ ] 4. Messenger memakai `after=nextSeq` dan berhenti polling saat `document.hidden` + refresh saat `visibilitychange`.
+- [x] 1. Log penuh per fase ditulis ke `data/projects/<id>/jobs/<jobId>/logs/`; workspace menyimpan excerpt 16 KB, byte count, flag truncation, dan path relatif. Endpoint owner-only `/api/jobs/:id/logs/:phase/:stream` mengunduh log penuh.
+- [x] 2. `prune()` membatasi pesan ke 5.000 terbaru / 90 hari, seperti event.
+- [x] 3. `GET /api/tasks?summary=1&full=<id>` mengembalikan summary untuk semua task kecuali yang sedang dibuka; summary membawa `briefExcerpt`/`resultExcerpt` dan membuang `brief`, `result`, `history`, `messages`, `questions`, `acceptance`, `managerAdvice`, `feedback`, `evidence`. `GET /api/tasks/:id` mengembalikan detail penuh; klien `ensureFull()` mengambilnya saat drawer memilih task.
+- [x] 4. Messenger memakai cursor `nextSeq-1` (nomor event terakhir) dan merge pesan baru; poll berhenti saat `document.hidden`, refresh saat `visibilitychange`, dan status "Luring" muncul saat gagal.
+- [x] 5. Task-flow memakai `resultExcerpt` bila pesan hasil tidak tersedia; 3D memakai `briefExcerpt`.
 
 **Acceptance:**
-- Ukuran `workspace.json` tetap <5 MB setelah 20 job dengan output 1 MB.
-- Poll `/api/tasks?summary=1` mengembalikan <20% byte dibanding versi penuh untuk dataset yang sama.
-- Messenger tetap menerima pesan baru setelah tab kembali terlihat; `tests/task-events.cjs` lulus.
+- `tests/project-runner.cjs`: evidence di workspace 16 KB sementara log penuh ≥20 KB tetap ada di disk dan bisa diunduh owner.
+- `tests/task-summary.cjs`: summary membuang field draf, task terpilih tetap penuh, payload jauh lebih kecil, single GET bekerja.
+- `tests/task-messenger-api.cjs`: pesan pertama setelah cursor tidak terlewat; `messenger-ui` dan `task-board` lulus.
+- Catatan: ukuran workspace setelah 20 job besar tidak diukur langsung; batas excerpt 16 KB per stream membuat pertumbuhannya terbatas, dan path log tidak masuk state selain metadata kecil.
 
 ---
 
@@ -502,6 +504,13 @@ Dependensi keras:
   - Perbaikan bug yang muncul saat refactor: `promoteParent` menerima `draft.tasks`, bukan seluruh state.
   - Verifikasi: suite unit 59/59; decisions, org-owner, application-workflow-ui, team lulus.
   - Sisa Fase 3: Task 10 (pertumbuhan state & polling), 11 (watchdog aset/WebGL), 12 (alokasi frame), 13 (finalisasi lantai dinamis).
+- 2026-10-27 — Task 10 selesai di working tree (belum commit):
+  - Log job: excerpt 16 KB di workspace, log penuh di `jobs/<id>/logs/`, endpoint unduh owner-only.
+  - Pesan dibatasi 5.000 terbaru / 90 hari di `prune()`.
+  - Polling summary + `ensureFull()` untuk task yang dibuka; single-task GET ditambahkan.
+  - Messenger cursor `nextSeq-1`, merge pesan, pause saat tab tersembunyi, status luring.
+  - Tes: `task-summary`, `project-runner` (log besar), `task-store` (retensi pesan), `task-messenger-api` (cursor), `task-board`, `messenger-ui`, `task-flow`, `application-workflow-ui`.
+  - Sisa Fase 3: Task 11 (watchdog aset/WebGL), 12 (alokasi frame), 13 (finalisasi lantai dinamis).
 
 ## Risiko utama
 

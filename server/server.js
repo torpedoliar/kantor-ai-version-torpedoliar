@@ -221,6 +221,12 @@ const normalizeTask = task => ({
   createdBy: typeof task.createdBy==='string'&&task.createdBy?task.createdBy:'owner'
 });
 const normalizeStoredTasks = list => list.map(normalizeTask);
+// Polling payload: everything the board needs, without drafts, history, conversations or acceptance
+// lists. The selected task is returned in full so its drawer stays complete.
+function taskSummary(task){
+  const {brief,result,history,messages,questions,acceptance,assumptions,feedback,managerAdvice,evidence,thread,...rest}=task;
+  return {...rest,briefExcerpt:String(brief||'').slice(0,400),resultExcerpt:String(result||'').slice(0,400)};
+}
 tasks = normalizeStoredTasks(tasks);
 
 // ---- agent worker: one task at a time per connected member, oldest first ----
@@ -817,6 +823,22 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
   }
   const appApprove=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})\/application\/approve$/);
   if(appApprove&&req.method==='POST'){if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});return send(res,202,await applications.approve(appApprove[1],await readJson(req)));}
+  // Full job logs live on disk; the workspace only carries an excerpt plus this relative path.
+  const jobLog=url.pathname.match(/^\/api\/jobs\/([0-9a-f-]{36})\/logs\/(build|test)\/(stdout|stderr)$/);
+  if(jobLog&&req.method==='GET'){
+    if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
+    const job=taskStore.snapshot().jobs.find(j=>j.id===jobLog[1]);
+    if(!job)return send(res,404,{error:'Job tidak ditemukan.'});
+    const entry=(job.evidence||[]).find(e=>e.phase===jobLog[2]&&e.logs?.[jobLog[3]]);
+    if(!entry)return send(res,404,{error:'Log tidak ditemukan.'});
+    const root=path.resolve(DATA_DIR,'projects',job.projectId,'jobs',job.id),target=path.resolve(root,...entry.logs[jobLog[3]].split('/'));
+    if(!target.startsWith(root+path.sep))return send(res,400,{error:'Invalid log path.'});
+    try{
+      const text=fs.readFileSync(target,'utf8');
+      res.writeHead(200,{'content-type':'text/plain; charset=utf-8','content-disposition':`attachment; filename="${jobLog[2]}.${jobLog[3]}.log"`,'x-content-type-options':'nosniff','cache-control':'no-store'});
+      return res.end(text);
+    }catch{return send(res,404,{error:'Log tidak ditemukan.'});}
+  }
   const projMatch=url.pathname.match(/^\/api\/projects\/([^/]+)\/(approve|run)$/),jobMatch=url.pathname.match(/^\/api\/jobs\/([0-9a-f-]{36})(\/cancel)?$/);
   if((projMatch&&req.method==='POST')||jobMatch){
     if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
@@ -882,7 +904,15 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
     const input=await readJson(req),answer=text(input?.answer,3000);if(!answer)return send(res,400,{error:'Tulis jawaban dulu.'});
     const result=answerDecision(decisionMatch[1],answer,input?.version,req.headers['x-kantor-request']);setImmediate(kick);return send(res,200,result);
   }
-  if (url.pathname === '/api/tasks' && req.method === 'GET') return send(res, 200, tasks);
+  if (url.pathname === '/api/tasks' && req.method === 'GET') {
+    if(url.searchParams.get('summary')==='1'){
+      const fullId=url.searchParams.get('full');
+      return send(res,200,tasks.map(task=>task.id===fullId?task:taskSummary(task)));
+    }
+    return send(res, 200, tasks);
+  }
+  const taskOne=url.pathname.match(/^\/api\/tasks\/([0-9a-f-]{36})$/);
+  if(taskOne&&req.method==='GET'){const task=tasks.find(t=>t.id===taskOne[1]);return task?send(res,200,task):send(res,404,{error:'Task not found.'});}
   // Moves every open task of one member to another, so a member can be removed or deactivated.
   if (url.pathname === '/api/tasks/reassign' && req.method === 'POST') {
     if(!org.verifyToken(req.headers['x-kantor-org']))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});

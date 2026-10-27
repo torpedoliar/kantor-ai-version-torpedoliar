@@ -2198,7 +2198,7 @@
     if(selected===agent&&$('iActiveTask')){
       const title=task?task.title:'Tidak ada tugas aktif';
       if($('iActiveTask').textContent!==title)$('iActiveTask').textContent=title;
-      const brief=task?.brief||'';
+      const brief=task?.brief||task?.briefExcerpt||'';
       if($('iTaskBrief').textContent!==brief)$('iTaskBrief').textContent=brief;
       $('iTaskBrief').hidden=!brief;
     }

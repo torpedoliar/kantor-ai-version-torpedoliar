@@ -4,7 +4,7 @@
 const fs=require('node:fs'),path=require('node:path'),{spawn,execFile}=require('node:child_process');
 const {sanitizeText}=require('./task-store');
 
-const OUTPUT_CAP=1024*1024,PHASES=['build','test'];
+const OUTPUT_CAP=1024*1024,EVIDENCE_EXCERPT=16*1024,PHASES=['build','test'];
 const WINDOWS_WARNING='Windows lokal bukan sandbox: kode berjalan dengan akses akun Windows kamu. Akses jaringan mengikuti OS (tidak bisa dimatikan di sini). Hanya setujui kode yang sudah kamu periksa.';
 // Only what Node needs on Windows; nothing from the server's own environment (keys, tokens, settings).
 function minimalEnv(tmp){
@@ -19,6 +19,24 @@ function killTree(child){
   return new Promise(resolve=>execFile('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true},()=>resolve()));
 }
 function capture(){let text='',dropped=0;return {add(chunk){const s=chunk.toString();if(text.length<OUTPUT_CAP)text+=s.slice(0,OUTPUT_CAP-text.length);dropped+=Math.max(0,s.length-(OUTPUT_CAP-text.length));},value(){return sanitizeText(text)+(dropped?`\n[… ${dropped} karakter dipotong]`:'');}};}
+// The workspace keeps a bounded excerpt; the full captured stream goes to the job folder so a
+// long log never bloats workspace.json (which is rewritten on every commit).
+function clipEvidence(result,jobDir,extra={}){
+  const logs={};
+  try{
+    const dir=path.join(jobDir,'logs');fs.mkdirSync(dir,{recursive:true});
+    for(const stream of ['stdout','stderr']){
+      const text=String(result[stream]??''),name=`${result.phase}.${stream}.log`;
+      fs.writeFileSync(path.join(dir,name),text,{mode:0o600});logs[stream]=`logs/${name}`;
+    }
+  }catch{/* evidence still carries the excerpt if the log write fails */}
+  const stdout=String(result.stdout??''),stderr=String(result.stderr??'');
+  return {phase:result.phase,argv:result.argv,exitCode:result.exitCode,ending:result.ending,startedAt:result.startedAt,durationMs:result.durationMs,...extra,
+    stdout:stdout.slice(0,EVIDENCE_EXCERPT),stderr:stderr.slice(0,EVIDENCE_EXCERPT),
+    stdoutBytes:Buffer.byteLength(stdout),stderrBytes:Buffer.byteLength(stderr),
+    stdoutTruncated:stdout.length>EVIDENCE_EXCERPT,stderrTruncated:stderr.length>EVIDENCE_EXCERPT,
+    ...(Object.keys(logs).length?{logs}:{})};
+}
 
 function runCommand({command,cwd,env,timeoutMs,signal}){
   return new Promise(resolve=>{
@@ -44,14 +62,14 @@ function prepareJob(sourceDir,manifest,jobDir){
 }
 async function run({job,sourceDir,manifest,jobDir,signal,onEvent,timeoutMs,environment='windows',networkAllowed=false,imageDigest,docker}){
   const {work,tmp}=prepareJob(sourceDir,manifest,jobDir);
-  if(environment==='docker')return (docker||dockerAdapter()).run({job,workDir:work,tmpDir:tmp,manifest,signal,timeoutMs,networkAllowed,imageDigest,onEvent});
+  if(environment==='docker')return (docker||dockerAdapter()).run({job,workDir:work,tmpDir:tmp,jobDir,manifest,signal,timeoutMs,networkAllowed,imageDigest,onEvent});
   if(environment!=='windows')throw Object.assign(new Error(`Lingkungan ${environment} tidak dikenal.`),{code:'ENVIRONMENT_UNAVAILABLE'});
   const env=minimalEnv(tmp),evidence=[];
   for(const phase of PHASES){
     const command=manifest.commands[phase];if(!command)continue;
     onEvent('command.started',{phase,argv:['node',...command.args]});
     const result=await runCommand({command,cwd:work,env,timeoutMs,signal});
-    evidence.push({phase,...result});
+    evidence.push(clipEvidence({phase,...result},jobDir));
     onEvent('command.finished',{phase,exitCode:result.exitCode,ending:result.ending,durationMs:result.durationMs});
     if(result.ending)return {status:result.ending,evidence};
     if(result.exitCode!==0)return {status:'failed',evidence};
@@ -89,7 +107,7 @@ function dockerAdapter({cli=process.env.KANTOR_DOCKER_CLI?JSON.parse(process.env
     const ids=list.stdout.split(/\s+/).filter(id=>/^[0-9a-f]{6,64}$/.test(id));
     if(ids.length)await call(['rm','-f',...ids]);
   }
-  async function run({job,workDir,tmpDir,manifest,signal,timeoutMs,networkAllowed,imageDigest,onEvent}){
+  async function run({job,workDir,tmpDir,jobDir,manifest,signal,timeoutMs,networkAllowed,imageDigest,onEvent}){
     const state=await availability();if(!state.available)throw Object.assign(new Error(state.reason),{code:'ENVIRONMENT_UNAVAILABLE',status:409});
     const evidence=[];
     for(const phase of PHASES){
@@ -101,7 +119,7 @@ function dockerAdapter({cli=process.env.KANTOR_DOCKER_CLI?JSON.parse(process.env
       const timer=setTimeout(()=>stop('timed_out'),timeoutMs),onAbort=()=>stop('cancelled');signal.addEventListener('abort',onAbort,{once:true});
       const result=await call(argv,{timeoutMs:timeoutMs+10000,signal:controller.signal});
       clearTimeout(timer);signal.removeEventListener('abort',onAbort);
-      evidence.push({phase,argv:['node',...command.args],environment:'docker',image:state.imageDigest||image,exitCode:result.code,ending,stdout:result.stdout,stderr:result.stderr,startedAt:new Date(started).toISOString(),durationMs:Date.now()-started});
+      evidence.push(clipEvidence({phase,argv:['node',...command.args],exitCode:result.code,ending,stdout:result.stdout,stderr:result.stderr,startedAt:new Date(started).toISOString(),durationMs:Date.now()-started},jobDir,{environment:'docker',image:state.imageDigest||image}));
       onEvent('command.finished',{phase,exitCode:result.code,ending,durationMs:Date.now()-started});
       if(ending)return {status:ending,evidence};
       if(result.code!==0)return {status:'failed',evidence};

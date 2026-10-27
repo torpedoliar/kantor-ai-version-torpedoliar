@@ -54,5 +54,10 @@ const wait=async(fn,label,ms=15000)=>{const t=Date.now();for(;;){const v=await f
   comm=(await call('GET','/api/communications')).body;assert.equal(comm.messages.length,msgCount);assert.equal(comm.reads[thread.id],last);
   // Incremental fetch only returns later messages.
   const inc=(await call('GET',`/api/communications?after=${last}`)).body;assert.ok(inc.messages.every(m=>m.seq>last));
+  // nextSeq-1 is the last assigned sequence: a message created next must not be skipped by the cursor.
+  const cursor=(await call('GET','/api/communications')).body.nextSeq-1;
+  const fresh=await call('POST',`/api/tasks/${plain.id}/messages`,{text:'Pesan baru setelah cursor'});
+  const inc2=(await call('GET',`/api/communications?after=${cursor}`)).body;
+  assert.ok(inc2.messages.some(m=>m.text==='Pesan baru setelah cursor'),'the first message after the cursor is delivered');
   console.log('PASS: messenger decisions, server-owned authorship, read cursors, idempotent answer resumes worker once with owner context');
 }finally{child.kill();mock.close();fs.rmSync(dir,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});

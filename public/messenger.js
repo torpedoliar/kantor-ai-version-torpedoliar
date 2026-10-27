@@ -5,7 +5,7 @@
   const draftKey = id => `kantor-ai.composer.${id}`;
   // Activity per thread (status + event lines), refreshed with the inbox; a 1s ticker keeps elapsed time live.
   const activity = new Map(); let ticker = null;
-  let api = null, data = {threads: [], messages: [], decisions: [], reads: {}}, current = null, filter = 'all', loaded = false, timer = null;
+  let api = null, data = {threads: [], messages: [], decisions: [], reads: {}}, current = null, filter = 'all', loaded = false, timer = null, cursor = 0, offline = false;
   const toasted = new Set();
   function node(tag, text, className) { const item = document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item; }
   function readDraft(id) { try { return sessionStorage.getItem(draftKey(id)) || ''; } catch { return ''; } }
@@ -17,14 +17,27 @@
   async function refresh() {
     if (!api.unlocked()) return;
     try {
-      // ponytail: whole inbox per refresh; page by seq when threads × messages get large.
-      // Rebuild the open thread only when something it draws changed; idle polls must not wipe open panels or previews.
+      // Threads and decisions are cheap; only new messages are fetched after the first load.
+      // A reset/import can lower nextSeq, so a cursor past it restarts from a full read.
       const before = threadKey();
-      data = await api.call('GET', '/api/communications?after=0');
+      const next = await api.call('GET', `/api/communications?after=${cursor}`);
+      const nextSeq = Number(next.nextSeq) || 0, nextCursor = nextSeq > 0 ? nextSeq - 1 : 0;
+      if (cursor && nextSeq && nextCursor < cursor) { cursor = 0; return; }
+      if (!cursor) data = {...next};
+      else {
+        const seen = new Set(data.messages.map(message => message.seq));
+        const added = (next.messages || []).filter(message => !seen.has(message.seq));
+        data = {...next, messages: [...data.messages, ...added].sort((a,b) => a.seq - b.seq).slice(-1000)};
+      }
+      cursor = nextCursor || cursor;
+      if (offline) { offline = false; const status = el('messengerStatus'); if (status && status.textContent.startsWith('Luring')) status.textContent = ''; }
       loaded = true; badge(); toasts(); alertToasts(); markHere();
       if (el('communicationDialog').open && current) { const task = data.threads.find(t => t.id === current)?.taskId; if (task) activity.set(current, await api.call('GET', `/api/tasks/${task}/activity`).catch(() => null)); }
       if (el('communicationDialog').open) { renderList(); if (before !== threadKey()) renderThread(); else renderStatus(); markHere(); }
-    } catch (error) { api.locked(error); }
+    } catch (error) {
+      offline = true; const status = el('messengerStatus'); if (status && !status.textContent) status.textContent = 'Luring · mencoba lagi…';
+      api.locked(error);
+    }
   }
   function badge() {
     const unread = data.threads.reduce((sum, t) => sum + t.unread, 0), open = openDecisions().length, button = el('bCommunications');
@@ -203,7 +216,7 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden && el('communicationDialog').open) renderThread(); });
   }
   window.Messenger = {
-    mount(options) { api = options; wire(); refresh(); timer = setInterval(refresh, 2500); setInterval(()=>{if(el('communicationDialog').open&&current&&api.unlocked())loadActivity(current);},500); },
+    mount(options) { api = options; wire(); refresh(); timer = setInterval(() => { if (!document.hidden) refresh(); }, 2500); document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); }); setInterval(()=>{if(el('communicationDialog').open&&current&&api.unlocked())loadActivity(current);},500); },
     open: open_, refresh,
     // Returns false when there is nothing to open (offline or no open decision) so the caller can fall back.
     // Locked: unlock first, then jump to the oldest waiting decision. Returns false only when there is no server.

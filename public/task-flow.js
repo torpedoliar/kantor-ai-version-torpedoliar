@@ -91,7 +91,7 @@
     const kind = EDGE[event.type], wanted = {delegation: 'delegation', result: 'result', question: 'decision'}[kind];
     const decisionId = event.data?.decisionId;
     const message = thread?.messages.find(m => decisionId ? m.decisionId === decisionId && (kind === 'question' ? m.kind === 'decision' : m.sender.type === 'owner') : m.kind === wanted) || null;
-    panel.append(node('div', message ? `${message.sender.name}: ${message.text}` : (kind === 'result' ? task.result || 'Hasil tidak tersimpan sebagai pesan.' : 'Pesan sumber tidak ditemukan.'), 'task-result'));
+    panel.append(node('div', message ? `${message.sender.name}: ${message.text}` : (kind === 'result' ? task.result || task.resultExcerpt || 'Hasil tidak tersimpan sebagai pesan.' : 'Pesan sumber tidak ditemukan.'), 'task-result'));
   }
 
   // Console: newest at the bottom, at most 200 rows rendered; pause freezes the view while events keep arriving.
