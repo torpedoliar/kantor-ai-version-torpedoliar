@@ -199,6 +199,8 @@ Heads, torsos, limbs, hair and shoes now use rounded block geometry shared betwe
 
 **View whole building** now uses a closer camera, navy panels, warm floor lights and a muted dusk sky. Individual floors keep the warm daylight interior. Navigation thumbnails are captured from the actual 3D floors at startup. Counts show team members currently on each floor, excluding people on the stairs and barber visitors; they are not online-presence indicators. Mobile navigation uses compact floor labels and counts instead of thumbnails. No analytics or account controls are implied.
 
+**Suasana** di kontrol bawah memilih **Pagi, Siang, Sore, atau Malam**. Setiap suasana mengubah posisi/warna matahari dan bayangan, langit serta kabut, intensitas cahaya ruangan, lampu jalan, jendela gedung kota, dan bintang/bulan; peralihan berlangsung halus sekitar 1,4 detik. **Siang** adalah bawaan dan mempertahankan tampilan lama. Pilihan disimpan di browser dan ikut menentukan langit tampilan gedung maupun lantai. Monitor di meja kerja, termasuk meja lead, memakai tiga kanvas animasi bersama (editor, dokumen, dan grafik) sehingga layar tetap hidup selama simulasi berjalan.
+
 Tes organisasi:
 - `tests/org-model.cjs`: logika murni (pindah anggota, siklus, lead, layout bagan, rencana tempat duduk).
 - `tests/org-fields.cjs`: `areaName`/`color`, penolakan anggota sibuk, dan endpoint `POST /api/tasks/reassign`.

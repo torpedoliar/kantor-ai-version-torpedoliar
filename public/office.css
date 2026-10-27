@@ -72,6 +72,11 @@ body:has(#info:not([hidden])) #log #logList{display:none}.log-head .btn{min-heig
 .music-volume{display:flex;align-items:center;gap:6px;min-height:44px;font-size:11px;color:var(--ink-2)}
 .music-volume input{width:64px;min-width:0;accent-color:var(--accent)}
 #bMusic[aria-pressed=true]{background:var(--ink);color:var(--sheet)}
+.mood-picker{display:inline-flex;align-items:center;gap:6px;min-height:44px;font-size:11px;color:var(--ink-2)}
+.mood-picker select{border:1px solid var(--line);background:var(--sheet);color:var(--ink);border-radius:8px;min-height:44px;padding:0 10px;font:inherit;font-size:13px;font-weight:500;cursor:pointer}
+.mood-picker select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:1000px){.mood-picker{gap:4px}.mood-picker select{padding:0 6px;font-size:12px}}
+@media(max-width:640px){.mood-picker{flex:1;min-width:0}.mood-picker>span{display:none}.mood-picker select{width:100%;font-size:11px;padding:0 3px}}
 @media(max-width:1000px){.camera-controls{flex-wrap:wrap}.camera-controls .btn{padding:8px 5px;font-size:11px}.music-volume{gap:4px}.music-volume input{width:50px}#cameraControls{right:12px;bottom:130px}}
 /* Kamera karakter: bilah kecil di atas tengah, tombol mode memakai status tekan seperti Jeda. */
 #followBar{position:fixed;top:22px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;padding:6px 6px 6px 12px;z-index:3}

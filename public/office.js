@@ -32,7 +32,7 @@
   Object.assign(sun.shadow.camera, {left:-45, right:45, top:55, bottom:-40, near:1, far:130});
   sun.shadow.bias = -.001; scene.add(sun);
   // Graphics level: pixel ratio, shadows, environment reflections, texture tier and post-processing per officeGraphics.
-  const GFX=window.officeGraphics,ADD=THREE.addons;let composer=null,envMap=null,gfxLevel=null,gfxPending=false,showFps=false,gfxSeq=0;
+  const GFX=window.officeGraphics,ADD=THREE.addons;let composer=null,envMap=null,gfxLevel=null,gfxPending=false,showFps=false,gfxSeq=0,moodEnvFactor=1;
   const fpsLabel=document.createElement('div');fpsLabel.id='fpsLabel';fpsLabel.className='fps-label';fpsLabel.hidden=true;document.body.append(fpsLabel);
   let envSource=null;
   async function environmentMap(){
@@ -67,7 +67,7 @@
     scene.environment=environment;
     // Materials must recompile when shadow/tone-mapping settings change.
     // Reflections are subtle (0.6): the HDRI lights metal, glass and gloss without washing out matte walls.
-    scene.traverse(o=>{if(o.material)(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if('envMapIntensity' in m)m.envMapIntensity=.6;m.needsUpdate=true;});});
+    scene.traverse(o=>{if(o.material)(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if('envMapIntensity' in m)m.envMapIntensity=.6*moodEnvFactor;m.needsUpdate=true;});});
     buildComposer(L);
     await window.officeSurfaces?.setTier?.(L.textures);
     if(run!==gfxSeq)return;
@@ -231,13 +231,29 @@
     root=atRoot;atRoot.add(g);
     return registerCustom('table',floor,g,x,z,0,{radius:Math.hypot(w,d)/2});
   }
-  // Three screen designs drawn once: code editor, document, chart. Bright enough to glow under bloom.
+  // Three animated desk screens: code editor, document and chart. One shared canvas per design updates every monitor.
+  const deskScreens=[];
   const screenContent=(()=>{
-    const draw=paint=>{const c=document.createElement('canvas');c.width=256;c.height=160;const g=c.getContext('2d');paint(g);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return new THREE.MeshBasicMaterial({map:t,toneMapped:false});};
+    const make=draw=>{const c=document.createElement('canvas');c.width=256;c.height=160;const g=c.getContext('2d');
+      const texture=new THREE.CanvasTexture(c);texture.colorSpace=THREE.SRGBColorSpace;
+      draw(g,0);const material=new THREE.MeshBasicMaterial({map:texture,toneMapped:false});
+      deskScreens.push({texture,draw:t=>{draw(g,t);texture.needsUpdate=true;},last:-1});return material;};
     return [
-      draw(g=>{g.fillStyle='#1e2430';g.fillRect(0,0,256,160);const cols=['#7fb3ff','#c3e88d','#f78c6c','#c792ea','#e6e6e6'];for(let i=0;i<14;i++){g.fillStyle=cols[i%5];g.fillRect(14+(i%4)*12,10+i*10,60+((i*37)%120),4);}}),
-      draw(g=>{g.fillStyle='#f4f2ee';g.fillRect(0,0,256,160);g.fillStyle='#2b2b2b';g.fillRect(20,14,140,8);g.fillStyle='#8a8a8a';for(let i=0;i<12;i++)g.fillRect(20,32+i*9,200-((i*29)%70),3);}),
-      draw(g=>{g.fillStyle='#10171f';g.fillRect(0,0,256,160);g.strokeStyle='#3ad29f';g.lineWidth=3;g.beginPath();[130,110,118,80,92,60,70,40].forEach((y,i)=>i?g.lineTo(20+i*30,y):g.moveTo(20,y));g.stroke();g.fillStyle='#e8a33d';for(let i=0;i<6;i++)g.fillRect(24+i*38,150-(20+i*12),18,20+i*12);}),
+      make((g,t)=>{g.fillStyle='#1e2430';g.fillRect(0,0,256,160);g.fillStyle='#151b24';g.fillRect(0,0,256,18);g.fillStyle='#8fa7b8';g.font='600 9px monospace';g.fillText('app.js',10,12);
+        const cols=['#7fb3ff','#c3e88d','#f78c6c','#c792ea','#e6e6e6'],scroll=Math.floor(t*20)%90;
+        for(let i=0;i<18;i++){const y=26+((i*10+scroll)%142);g.fillStyle='#4b5a66';g.fillRect(8,y,3,4);g.fillStyle=cols[i%5];g.fillRect(14+((i*13)%30),y,55+((i*37)%105),4);}
+        if(Math.floor(t*2)%2===0){g.fillStyle='#d7e5ee';g.fillRect(14+((18*13)%30),26+((18*10+scroll)%142),3,8);}}),
+      make((g,t)=>{g.fillStyle='#f4f2ee';g.fillRect(0,0,256,160);g.fillStyle='#2b2b2b';g.fillRect(20,14,140,8);g.fillStyle='#8a8a8a';
+        const visible=4+Math.floor((t*2.2)%9);for(let i=0;i<12;i++)if(i<visible)g.fillRect(20,32+i*9,200-((i*29)%70),3);
+        const at=Math.min(11,Math.max(0,Math.floor((t*1.4)%12)));g.fillStyle='rgba(240,165,49,.22)';g.fillRect(15,30+at*9,222,8);
+        if(Math.floor(t*3)%2===0){g.fillStyle='#2f6b4f';g.fillRect(20+(visible*13)%110,32+Math.min(11,visible)*9,2,7);}}),
+      make((g,t)=>{g.fillStyle='#10171f';g.fillRect(0,0,256,160);g.strokeStyle='rgba(120,150,170,.16)';g.lineWidth=1;
+        for(let y=34;y<140;y+=20){g.beginPath();g.moveTo(16,y);g.lineTo(244,y);g.stroke();}
+        g.fillStyle='#8fa7b8';g.font='600 9px monospace';g.fillText('TRAFFIC · LIVE',16,13);
+        g.strokeStyle='#3ad29f';g.lineWidth=3;g.beginPath();
+        for(let i=0;i<=10;i++){const x=20+i*22,v=Math.sin(i*.7+t*.9)+Math.sin(i*.28+t*.37)*.6,y=104-v*16;if(i===0)g.moveTo(x,y);else g.lineTo(x,y);}g.stroke();
+        for(let i=0;i<7;i++){const h=14+Math.abs(Math.sin(t*.8+i*.55))*34;g.fillStyle='#e8a33d';g.fillRect(24+i*32,140-h,16,h);}
+        g.fillStyle='#5f9a94';g.fillRect(16,148,70,4);g.fillStyle='#324450';g.fillRect(92,148,52,4);}),
     ];
   })();
   function screen(x,z,f,dual=false,keyboardZ=z-f*.46) {
@@ -245,8 +261,8 @@
       for(const offset of (dual?[-.38,.38]:[0])){
         const mon=model('monitor',{w:dual?.7:1.05},{x:x+offset,y:.99,z,rotY:f>0?Math.PI:0});
         // Kenney computerScreen.glb has an 8° tilted display. These are its inner face coordinates,
-        // relative to the normalized model pivot (not its stand's overall bounding box).
-        const panel=new THREE.Mesh(new THREE.PlaneGeometry(.378,.2335),screenContent[(Math.abs(Math.round(x*7+offset*3))%screenContent.length)]);
+        // kept inside the bezel; the monitor's parent scale turns them into the visible screen.
+        const panel=new THREE.Mesh(new THREE.PlaneGeometry(.345,.215),screenContent[(Math.abs(Math.round(x*7+offset*3))%screenContent.length)]);
         panel.rotation.x=-Math.atan2(.0325193,.2313867);
         panel.position.set(0,.171279+.0006*Math.sin(-panel.rotation.x),-.000069+.0006*Math.cos(panel.rotation.x));
         panel.userData.decor='screen';panel.userData.walkable=true;mon.add(panel);
@@ -841,23 +857,18 @@
   facade.traverse(o=>{o.castShadow=false;});
   const eveningLights=new THREE.Group();scene.add(eveningLights);eveningLights.visible=false;
   const lampMaterial=new THREE.MeshStandardMaterial({color:0xffdda0,emissive:0xffbb66,emissiveIntensity:1.6,roughness:.5});
+  const streetBulbMaterial=new THREE.MeshStandardMaterial({color:0xfff1cf,emissive:0xffc06a,emissiveIntensity:0,roughness:.4});
+  const cityFacadeMats=[];
   const levelLights={};
   function buildLights(level){
     const y=floorY(level),lights=new THREE.Group();eveningLights.add(lights);levelLights[level]=lights;
     const strip=new THREE.Mesh(new THREE.BoxGeometry(31,.07,.08),lampMaterial);strip.position.set(0,y+.12,12.15);lights.add(strip);
-    const light=new THREE.PointLight(0xffce8c,2.2,38,1);light.position.set(0,y+3,1);lights.add(light);
+    const light=new THREE.PointLight(0xffce8c,2.2,38,1);light.position.set(0,y+3,1);lights.add(light);lights.userData.point=light;
     for(const x of [-15,15]){
       const lamp=new THREE.Mesh(new THREE.BoxGeometry(.32,.55,.32),lampMaterial);lamp.position.set(x,y+.3,10.5);lights.add(lamp);
     }
   }
   for(const level of ORDER)buildLights(level);
-  function buildingMood(on){
-    // Bright late-morning city: warm sun, soft sky fill, interior lamps still glowing through the glass.
-    document.body.classList.toggle('building-view',on);eveningLights.visible=on;
-    scene.background.set(on?SKY_HAZE:SKY_INDOOR);scene.fog=on?new THREE.FogExp2(SKY_HAZE,.003):null;
-    ambient.color.set(on?0xe4eefa:0xdfe9f5);ambient.intensity=on?.9:1.1;
-    sun.color.set(on?0xffe2bd:0xffe7c7);sun.intensity=on?2.4:2.2;
-  }
   // Parts that fade during camera transitions get their own material copies, so floors keep full opacity.
   function prepareFade(root){root.traverse(o=>{if(!o.material)return;o.material=o.material.clone();o.material.transparent=true;o.userData.fadeMaterial=true;o.userData.baseOpacity=o.material.opacity;});}
   // Removed stair/facade groups own their fade clones, but not cached base or shared model materials.
@@ -940,7 +951,7 @@
       }
       ctx.fillStyle='#0d1419';ctx.fillRect(0,0,256,3);ctx.fillRect(0,61,256,3);
       const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
-      return new THREE.MeshStandardMaterial({map:tex,roughness:.58,metalness:.16});
+      const material=new THREE.MeshStandardMaterial({map:tex,roughness:.58,metalness:.16,emissive:0xffe0a8,emissiveMap:tex,emissiveIntensity:0});cityFacadeMats.push(material);return material;
     });
     const band=(w,d,x,y,z,mat)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w+.06,1.6,d+.06),mat);m.position.set(x,y+.8,z);m.castShadow=false;m.receiveShadow=true;skyline.add(m);};
     for(let placed=0,tries=0;placed<64&&tries<600;tries++){
@@ -1004,8 +1015,8 @@
     function streetlight(x,z,fx,fz){
       cylinder(.13,.17,.16,CURB,x,-.80,z,skyline);
       cylinder(.055,.075,4.28,METAL,x,-.64,z,skyline);
-      if(fx){box(1.4,.06,.06,METAL,x+fx*.7,3.50,z,skyline);box(.3,.1,.22,METAL,x+fx*1.36,3.46,z,skyline);}
-      else{box(.06,.06,1.4,METAL,x,3.50,z+fz*.7,skyline);box(.22,.1,.3,METAL,x,3.46,z+fz*1.36,skyline);}
+      if(fx){box(1.4,.06,.06,METAL,x+fx*.7,3.50,z,skyline);box(.3,.1,.22,METAL,x+fx*1.36,3.46,z,skyline);const b=new THREE.Mesh(new THREE.BoxGeometry(.3,.04,.2),streetBulbMaterial);b.position.set(x+fx*1.36,3.42,z);skyline.add(b);}
+      else{box(.06,.06,1.4,METAL,x,3.50,z+fz*.7,skyline);box(.22,.1,.3,METAL,x,3.46,z+fz*1.36,skyline);const b=new THREE.Mesh(new THREE.BoxGeometry(.2,.04,.3),streetBulbMaterial);b.position.set(x,3.42,z+fz*1.36);skyline.add(b);}
     }
     for(const [x,z,fx,fz] of [[-30,20.35,0,1],[-11,20.35,0,1],[18,20.35,0,1],[27,20.35,0,1],[-22,27.6,0,-1],[4,27.6,0,-1],[26,27.6,0,-1],[30.4,-14,1,0],[37.6,8,-1,0]])streetlight(x,z,fx,fz);
     {
@@ -1054,7 +1065,7 @@
       const a=i/12*Math.PI*2+rnd()*.3,dist=150+rnd()*25;
       const cloud=new THREE.Group();cloud.position.set(Math.cos(a)*dist,15+rnd()*10,Math.sin(a)*dist);skyline.add(cloud);
       const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:cloudMap,transparent:true,depthWrite:false,opacity:.85}));sprite.scale.set(42+rnd()*20,18+rnd()*6,1);cloud.add(sprite);
-      clouds.push({cloud,speed:1+rnd()*1.5});
+      clouds.push({cloud,sprite,speed:1+rnd()*1.5});
     }
   }
   // A small flock circles the neighbourhood above the roofs, flapping on the simulation clock.
@@ -1071,6 +1082,16 @@
       birds.push({sprite,r,y:16+(i%3)*2.5,phase:i*.8,speed:.05+(i%3)*.012});
     }
   }
+  // Night sky: a starfield and a soft moon, revealed by the Malam mood.
+  const nightSky=new THREE.Group();nightSky.visible=false;scene.add(nightSky);
+  const starMat=new THREE.PointsMaterial({color:0xdfe9ff,size:1.7,sizeAttenuation:false,transparent:true,opacity:0,depthWrite:false,fog:false});
+  {
+    const pos=[];let s=211;const rndStar=()=>(s=s*16807%2147483647)/2147483647;
+    for(let i=0;i<700;i++){const u=rndStar()*2-1,a=rndStar()*Math.PI*2,k=Math.sqrt(1-u*u),rad=280;pos.push(Math.cos(a)*k*rad,u*rad,Math.sin(a)*k*rad);}
+    const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));nightSky.add(new THREE.Points(geo,starMat));
+  }
+  const moonMat=(()=>{const c=document.createElement('canvas');c.width=128;c.height=128;const g=c.getContext('2d');const grad=g.createRadialGradient(64,64,8,64,64,62);grad.addColorStop(0,'rgba(255,250,226,1)');grad.addColorStop(.55,'rgba(255,246,214,.9)');grad.addColorStop(1,'rgba(255,246,214,0)');g.fillStyle=grad;g.beginPath();g.arc(64,64,62,0,Math.PI*2);g.fill();const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;return new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false,fog:false,opacity:0});})();
+  const moon=new THREE.Sprite(moonMat);moon.position.set(-150,150,-210);moon.scale.set(26,26,1);nightSky.add(moon);
   const environment=window.officeEnvironment.create({scene,parkingRoot:floors[1],onWarning:status});
   const mobility=window.OfficeMobility.create({...environment.layout,maxTeamAway:2});
   let ambientSerial=0,nextAmbient=2;
@@ -2719,10 +2740,72 @@
   }
   document.addEventListener('officetasks:change',()=>{for(const a of agents)if(a.vehicleTrip&&!window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),tasksKnown()))mobility.recall(a.n);drawBoard();drawStats();});
   window.officeTasks.init(TEAM,(name,state,title)=>{const a=agents.find(a=>a.n===name);if(a&&window.officeTasks.activeFor(name))setPath(a,a.desk);if(a&&SAY[state])say(a,SAY[state]);if(a&&state)log(`${name} ${TASK_LOG[state]}: ${title}`,a.group);},name=>{const a=agents.find(a=>a.n===name);if(a)selectAgent(a);});
+  // ---- Time-of-day moods: morning, noon, golden evening and night. ----
+  // Noon reproduces the previous light; the others move the sun, sky, fog, interior lamps, street lamps,
+  // city windows and stars. Changes blend over 1.4 s so the light shifts instead of snapping.
+  const MOODS={
+    pagi:{skyFloor:0xb9cad8,skyBuilding:0xc4d2dc,fog:0xc4d2dc,fogDensity:.0024,sunFloor:0xffd8b5,sunBuilding:0xffd8b5,sunI:1.8,sunB:1.9,sunPos:[-44,26,18],ambSky:0xe2eef8,ambGround:0x9a8b76,ambI:1.0,ambB:.8,env:.5,lamps:1.4,point:1.8,night:0,city:0,stars:0,birds:.7,clouds:.7,street:0},
+    siang:{skyFloor:0x8c9aa6,skyBuilding:0xa9b6c0,fog:0xa9b6c0,fogDensity:.003,sunFloor:0xffe7c7,sunBuilding:0xffe2bd,sunI:2.2,sunB:2.4,sunPos:[-12,55,25],ambSky:0xdfe9f5,ambGround:0x8a7a66,ambI:1.1,ambB:.9,env:.6,lamps:1.6,point:2.2,night:0,city:0,stars:0,birds:.7,clouds:.85,street:0},
+    sore:{skyFloor:0xc79f86,skyBuilding:0xc08e78,fog:0xc08e78,fogDensity:.0028,sunFloor:0xffb377,sunBuilding:0xffb377,sunI:2.4,sunB:2.6,sunPos:[38,15,25],ambSky:0xffd4b2,ambGround:0x6e5648,ambI:.8,ambB:.7,env:.42,lamps:2.0,point:2.4,night:.65,city:.7,stars:0,birds:.5,clouds:.55,street:1.0},
+    malam:{skyFloor:0x141c26,skyBuilding:0x0d141d,fog:0x0d141d,fogDensity:.0032,sunFloor:0x93add8,sunBuilding:0x93add8,sunI:.5,sunB:.6,sunPos:[-30,42,-35],ambSky:0x33445c,ambGround:0x14181e,ambI:.4,ambB:.3,env:.16,lamps:1.6,point:2.8,night:1,city:2.0,stars:1,birds:0,clouds:.12,street:1.8}
+  };
+  const moodColor=hex=>new THREE.Color(hex);
+  const moodLookOf=m=>({skyFloor:moodColor(m.skyFloor),skyBuilding:moodColor(m.skyBuilding),fog:moodColor(m.fog),fogDensity:m.fogDensity,sunColorFloor:moodColor(m.sunFloor),sunColorBuilding:moodColor(m.sunBuilding),sunI:m.sunI,sunB:m.sunB,sunPos:new THREE.Vector3(...m.sunPos),ambSky:moodColor(m.ambSky),ambGround:moodColor(m.ambGround),ambI:m.ambI,ambB:m.ambB,env:m.env,lamps:m.lamps,point:m.point,night:m.night,city:m.city,stars:m.stars,birds:m.birds,clouds:m.clouds,street:m.street});
+  const MOOD_COLORS=['skyFloor','skyBuilding','fog','sunColorFloor','sunColorBuilding','ambSky','ambGround'],MOOD_NUMBERS=['fogDensity','sunI','sunB','ambI','ambB','env','lamps','point','night','city','stars','birds','clouds','street'];
+  const cloneMoodLook=look=>{const copy={};for(const key of MOOD_COLORS)copy[key]=look[key].clone();copy.sunPos=look.sunPos.clone();for(const key of MOOD_NUMBERS)copy[key]=look[key];return copy;};
+  let buildingView=false,moodId='siang',moodBlend=1,moodFrom=null,moodTo=null,moodCurrent=moodLookOf(MOODS.siang);
+  const moodFog=new THREE.FogExp2(MOODS.siang.fog,MOODS.siang.fogDensity);
+  function setEnvIntensity(value){scene.traverse(o=>{if(!o.material)return;for(const m of [o.material].flat())if(m&&'envMapIntensity'in m)m.envMapIntensity=value;});}
+  function syncLevelLights(look){
+    eveningLights.visible=buildingView||look.night>.02;
+    for(const [level,lights]of Object.entries(levelLights)){
+      lights.visible=buildingView||Number(level)===activeFloor;
+      if(lights.userData.point)lights.userData.point.intensity=buildingView?look.point:look.point*look.night;
+    }
+    lampMaterial.emissiveIntensity=buildingView?look.lamps:look.lamps*look.night;
+  }
+  function applyMoodLook(){
+    const m=moodCurrent;
+    scene.background.copy(buildingView?m.skyBuilding:m.skyFloor);
+    if(buildingView){moodFog.color.copy(m.fog);moodFog.density=m.fogDensity;scene.fog=moodFog;}else scene.fog=null;
+    sun.color.copy(buildingView?m.sunColorBuilding:m.sunColorFloor);sun.intensity=buildingView?m.sunB:m.sunI;sun.position.copy(m.sunPos);
+    ambient.color.copy(m.ambSky);ambient.groundColor.copy(m.ambGround);ambient.intensity=buildingView?m.ambB:m.ambI;
+    syncLevelLights(m);
+    streetBulbMaterial.emissiveIntensity=m.street;
+    for(const mat of cityFacadeMats)mat.emissiveIntensity=m.city;
+    nightSky.visible=m.stars>.02;starMat.opacity=.9*m.stars;moonMat.opacity=.9*m.stars;
+    for(const c of clouds){c.sprite.userData.baseOpacity=m.clouds;c.sprite.material.opacity=m.clouds;}
+    for(const b of birds){b.sprite.userData.baseOpacity=m.birds;b.sprite.material.opacity=m.birds;b.sprite.visible=m.birds>.04;}
+  }
+  function moodStep(realDt){
+    if(moodBlend>=1||!moodFrom||!moodTo)return;
+    moodBlend=Math.min(1,moodBlend+realDt/1.4);
+    const t=moodBlend*moodBlend*(3-2*moodBlend);
+    for(const key of MOOD_COLORS)moodCurrent[key].copy(moodFrom[key]).lerp(moodTo[key],t);
+    moodCurrent.sunPos.copy(moodFrom.sunPos).lerp(moodTo.sunPos,t);
+    for(const key of MOOD_NUMBERS)moodCurrent[key]=moodFrom[key]+(moodTo[key]-moodFrom[key])*t;
+    applyMoodLook();
+  }
+  function setMood(id,{instant=false}={}){
+    if(!MOODS[id])return false;
+    moodId=id;
+    const select=$('bMood');if(select&&select.value!==id)select.value=id;
+    try{localStorage.setItem('kantor-ai.mood',id);}catch{/* storage can be blocked */}
+    const target=moodLookOf(MOODS[id]);
+    moodEnvFactor=target.env/.6;setEnvIntensity(target.env);
+    if(instant){moodCurrent=target;moodFrom=moodTo=null;moodBlend=1;applyMoodLook();return true;}
+    moodFrom=cloneMoodLook(moodCurrent);moodTo=target;moodBlend=0;applyMoodLook();return true;
+  }
+  // Floor changes switch between the cut-away sky and the hazy city sky; the current mood supplies both.
+  function buildingMood(on){document.body.classList.toggle('building-view',!!on);buildingView=!!on;applyMoodLook();}
+  const moodSelect=$('bMood');if(moodSelect)moodSelect.onchange=()=>setMood(moodSelect.value);
+  let savedMood='siang';try{savedMood=localStorage.getItem('kantor-ai.mood')||'siang';}catch{/* storage can be blocked */}
+  setMood(MOODS[savedMood]?savedMood:'siang',{instant:true});
   const projected=new THREE.Vector3(),world=new THREE.Vector3();let last=performance.now();
   function frame(now) {
     // Allow slower renderers to keep pace, while limiting jumps after a background-tab pause.
     requestAnimationFrame(frame);const realDt=Math.min(.15,(now-last)/1000);last=now;const dt=paused?0:realDt;simTime+=dt;
+    if(moodBlend<1)moodStep(realDt);
     if(document.querySelector('dialog:modal')){for(const k in keys)keys[k]=false;}
     if(transition&&!follow)stepTransition(realDt);
     if(!drag&&cam.spin){cam.theta+=cam.spin*realDt;cam.spin*=Math.pow(.03,realDt);if(Math.abs(cam.spin)<.01)cam.spin=0;}
@@ -2744,6 +2827,8 @@
     stepShop(dt);
     // Keep-visible dashboards: redraw the executive monitors a few times per second while time runs.
     if(dt>0)for(const screen of animatedScreens){if(simTime-screen.last<.45)continue;screen.last=simTime;screen.draw(simTime);screen.texture.needsUpdate=true;}
+    // Desk monitors share three animated canvases, so every workstation is alive without per-desk textures.
+    if(dt>0)for(const screen of deskScreens){if(simTime-screen.last<.4)continue;screen.last=simTime;screen.draw(simTime);}
     for(const d of doors){const near=agents.some(a=>a.floor===d.floor&&a.state!=='stairs'&&a.g.position.distanceTo(d.center)<1.6);d.open+=((near?1:0)-d.open)*Math.min(1,dt*6);d.pivot.rotation.y=d.base+d.open*1.45;}
     if(garage){const near=mobility.snapshot().vehicles.some(v=>v.pose[0]>0&&v.pose[0]<16&&v.pose[2]>5&&v.pose[2]<18);garage.open+=((near?1:0)-garage.open)*Math.min(1,dt*4);garage.group.scale.y=Math.max(.015,1-garage.open*.985);}
     if(follow){scene.updateMatrixWorld(true);followCamera(realDt);}
@@ -2970,6 +3055,9 @@
       models:window.officeModels3d?.status()||{loaded:0,failed:[]},
       graphics:(()=>{const L=GFX.LEVELS[gfxLevel]||{};return {environmentSource:scene.environment?envSource:null,level:gfxLevel,pending:gfxPending,shadows:renderer.shadowMap.enabled,environment:!!scene.environment,post:[...(L.ao&&composer?['sao']:[]),...(L.bloom&&composer?['bloom']:[])],aoSize:(()=>{const a=composer?.passes.find(p=>p instanceof ADD.SAOPass);return a?[a.saoRenderTarget.width,a.saoRenderTarget.height]:null;})(),textures:window.officeSurfaces?.tier?.()??L.textures??null,drawCalls:renderer.info.render.calls,textureCount:renderer.info.memory.textures};})()}),
     showFps:on=>{showFps=!!on;fpsLabel.hidden=!showFps;},
+    // Time-of-day state for the mood picker and its browser test.
+    mood:()=>({id:moodId,blend:+moodBlend.toFixed(2),sun:+sun.intensity.toFixed(2),ambient:+ambient.intensity.toFixed(2),background:'#'+scene.background.getHexString(),fog:!!scene.fog,stars:nightSky.visible,lamps:eveningLights.visible,city:+(cityFacadeMats[0]?.emissiveIntensity||0).toFixed(2),street:+(streetBulbMaterial.emissiveIntensity||0).toFixed(2)}),
+    setMood:(id,instant=false)=>{setMood(id,{instant:!!instant});return moodId;},
     decor:level=>{const kinds=new Set();let total=0;floors[level]?.traverse(o=>{if(o.userData.decor){total++;kinds.add(o.userData.decor==='rug'||o.userData.decor==='wood_panel'||o.userData.decor==='window_frame'?o.userData.decor:o.userData.decor);}if(o.userData.model&&!o.userData.decor){total++;kinds.add(o.userData.model);}});return {total,kinds:[...kinds]};},
     // Mean relative luminance (0–1) of the current frame, rendered with the active graphics pipeline.
     luminance:()=>{renderFrame();const gl=renderer.getContext(),w=gl.drawingBufferWidth,h=gl.drawingBufferHeight,px=new Uint8Array(w*h*4);gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,px);
@@ -3008,7 +3096,7 @@
       return {overlaps,seats};},
     sendToStretch:name=>{const a=agents.find(x=>x.n===name);if(a){clearActivity(a);assign(a,a.stretchSpot,30);}},
     workstationAudit:()=>{scene.updateMatrixWorld(true);return agents.filter(a=>a.spot===a.desk).map(a=>{const head=headBounds(a),monitors=[];floors[a.floor].traverse(o=>{if(o.userData.model!=='monitor')return;const b=new THREE.Box3().setFromObject(o);if(Math.abs(b.getCenter(new THREE.Vector3()).x-a.desk.x)<1)monitors.push(b);});const gap=b=>Math.hypot(...['x','y','z'].map(k=>Math.max(0,head.min[k]-b.max[k],b.min[k]-head.max[k])));return {name:a.n,side:a.desk.f,monitors:monitors.length,minGap:monitors.length?Math.min(...monitors.map(gap)):null};});},
-    screenAudit:()=>{scene.updateMatrixWorld(true);const out=[];scene.traverse(o=>{if(o.userData.decor!=='screen')return;const p=o.getWorldPosition(new THREE.Vector3()),normal=new THREE.Vector3(0,0,1).applyQuaternion(o.getWorldQuaternion(new THREE.Quaternion())),ray=new THREE.Raycaster(p.clone().addScaledVector(normal,.01),normal.clone().negate()),attached=o.parent.userData.model==='monitor',hit=attached?ray.intersectObjects(o.parent.children.filter(c=>c!==o),true)[0]:null;out.push({attached,gap:hit?hit.distance-.01:null});});return out;},
+    screenAudit:()=>{scene.updateMatrixWorld(true);const out=[];scene.traverse(o=>{if(o.userData.decor!=='screen')return;const p=o.getWorldPosition(new THREE.Vector3()),normal=new THREE.Vector3(0,0,1).applyQuaternion(o.getWorldQuaternion(new THREE.Quaternion())),ray=new THREE.Raycaster(p.clone().addScaledVector(normal,.01),normal.clone().negate()),attached=o.parent.userData.model==='monitor',hit=attached?ray.intersectObjects(o.parent.children.filter(c=>c!==o),true)[0]:null;const box=new THREE.Box3().setFromObject(o);let marginX=null,marginY=null;if(attached){const mon=new THREE.Box3().setFromObject(o.parent),mw=mon.max.x-mon.min.x,mh=mon.max.y-mon.min.y;marginX=+(1-(box.max.x-box.min.x)/mw).toFixed(3);marginY=+(1-(box.max.y-box.min.y)/mh).toFixed(3);}out.push({attached,gap:hit?hit.distance-.01:null,marginX,marginY});});return out;},
     geometryAudit:()=>{scene.updateMatrixWorld(true);const decor=[];for(const [level,f] of Object.entries(floors))f.traverse(o=>{if(!o.userData.decor)return;const b=new THREE.Box3().setFromObject(o);decor.push({level:Number(level),kind:o.userData.decor,size:b.getSize(new THREE.Vector3()).toArray(),min:b.min.toArray(),max:b.max.toArray()});});return {decor,facades:Object.entries(facadeLevels).map(([level,f])=>{const b=new THREE.Box3().setFromObject(f);return {level:Number(level),minY:b.min.y,maxY:b.max.y};})};},
     surfaceAudit:level=>{let textured=0,flat=0;floors[level]?.traverse(o=>{if(!o.isMesh||o.material?.isMeshBasicMaterial||o.material?.transparent||!o.geometry.parameters?.width)return;const {width:w,height:h,depth:d}=o.geometry.parameters;if(Math.max(w*d,w*h,d*h)<.2)return;if(o.material.map)textured++;else flat++;});return {textured,flat};},
     // The walking grid of a floor (1 = blocked), for tests and debugging.
