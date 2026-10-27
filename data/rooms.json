@@ -1,0 +1,80 @@
+[
+  {
+    "id": "seed-meeting",
+    "builtIn": true,
+    "name": "Meeting Room",
+    "floor": 3,
+    "type": "meeting",
+    "x": -12.9,
+    "z": -9.25,
+    "w": 5.9,
+    "d": 5.3,
+    "capacity": 6,
+    "furniture": []
+  },
+  {
+    "id": "seed-pantry",
+    "builtIn": true,
+    "name": "Pantry & Lounge",
+    "floor": 3,
+    "type": "pantry",
+    "x": 12.5,
+    "z": -8.1,
+    "w": 5.2,
+    "d": 7.8,
+    "capacity": 4,
+    "furniture": []
+  },
+  {
+    "id": "seed-musholla",
+    "builtIn": true,
+    "name": "Prayer Room",
+    "floor": 3,
+    "type": "musholla",
+    "x": 13.3,
+    "z": 10.15,
+    "w": 5.3,
+    "d": 3.3,
+    "capacity": 8,
+    "furniture": []
+  },
+  {
+    "id": "seed-booth-1",
+    "builtIn": true,
+    "name": "Phone Booth 1",
+    "floor": 3,
+    "type": "focus",
+    "x": -14.6,
+    "z": 10.5,
+    "w": 1.9,
+    "d": 1.9,
+    "capacity": 1,
+    "furniture": []
+  },
+  {
+    "id": "seed-booth-2",
+    "builtIn": true,
+    "name": "Phone Booth 2",
+    "floor": 3,
+    "type": "focus",
+    "x": -12.4,
+    "z": 10.5,
+    "w": 1.9,
+    "d": 1.9,
+    "capacity": 1,
+    "furniture": []
+  },
+  {
+    "id": "room-vmeh0njw",
+    "name": "Ruang Koh Arman",
+    "floor": 3,
+    "type": "focus",
+    "x": -13.7,
+    "z": 0.15,
+    "w": 4.4,
+    "d": 6.6,
+    "capacity": 1,
+    "owner": "Koh Arman",
+    "furniture": []
+  }
+]

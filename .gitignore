@@ -2,7 +2,9 @@
 .claude/
 node_modules/
 .env
-data/
+data/*
+# The office layout is shared between hosts; runtime state, keys and credentials stay local.
+!data/rooms.json
 .superpowers/
 graphify-out/
 .impeccable/
