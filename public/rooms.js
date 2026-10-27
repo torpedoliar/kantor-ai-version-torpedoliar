@@ -12,6 +12,7 @@
     custom: {label: 'Ruang bebas', capacity: 4, w: 5, d: 4},
   };
   const ROOM_KINDS = ['table', 'chair', 'sofa', 'board', 'plant'];
+  const ROOM_KIND_LABELS = {table: 'Meja', chair: 'Kursi', sofa: 'Sofa', board: 'Papan', plant: 'Tanaman'};
   const PLAN = {w: 360, h: 272, scale: 10}; // the 32x24 floor slab, 10px per metre
   let roomsList = [], editingRoom = null, planRoom = null, planDrag = null, csrf = '', stamp = '', members = [], refreshSeq = 0;
 
@@ -81,7 +82,7 @@
     el('roomFloor').value = String(room?.floor ?? 3);
     el('roomType').replaceChildren(...Object.entries(ROOM_TYPES).map(([value, meta]) => { const option = document.createElement('option'); option.value = value; option.textContent = meta.label; return option; }));
     el('roomType').value = room?.type || 'lounge';
-    el('roomKind').replaceChildren(...ROOM_KINDS.map(kind => { const option = document.createElement('option'); option.value = kind; option.textContent = kind; return option; }));
+    el('roomKind').replaceChildren(...ROOM_KINDS.map(kind => { const option = document.createElement('option'); option.value = kind; option.textContent = ROOM_KIND_LABELS[kind] || kind; return option; }));
     el('roomFloor').disabled = locked; el('roomType').disabled = locked; el('roomCapacity').disabled = locked;
     el('roomCapacity').value = room?.capacity ?? ROOM_TYPES.lounge.capacity;
     // Private rooms: seats belong to one member; everyone else cannot pick them.
@@ -93,6 +94,8 @@
     planRoom = room
       ? {x: room.x, z: room.z, w: room.w, d: room.d, furniture: (room.furniture || []).map(item => ({...item}))}
       : {x: 0, z: 0, w: template.w, d: template.d, furniture: []};
+    el('roomX').value = planRoom.x.toFixed(1); el('roomZ').value = planRoom.z.toFixed(1);
+    el('roomX').disabled = locked; el('roomZ').disabled = locked;
     el('roomForm').hidden = false;
     drawPlan(); renderFurnitureList();
     el('roomName').focus();
@@ -135,11 +138,26 @@
     list.replaceChildren();
     if (!planRoom?.furniture.length) { const empty = document.createElement('span'); empty.className = 'settings-note'; empty.textContent = 'Belum ada furnitur.'; list.append(empty); return; }
     planRoom.furniture.forEach((item, index) => {
-      const chip = document.createElement('span'); chip.className = 'furnish-chip'; chip.textContent = `${item.kind} (${item.x}, ${item.z}) `;
-      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'furnish-remove'; remove.setAttribute('aria-label', `Hapus ${item.kind}`); remove.textContent = '×';
+      const label = ROOM_KIND_LABELS[item.kind] || item.kind;
+      const chip = document.createElement('span'); chip.className = 'furnish-chip'; chip.textContent = `${label} (${item.x}, ${item.z}) `;
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'furnish-remove'; remove.setAttribute('aria-label', `Hapus ${label}`); remove.textContent = '×';
       remove.onclick = () => { planRoom.furniture.splice(index, 1); renderFurnitureList(); drawPlan(); };
       chip.append(remove); list.append(chip);
     });
+  }
+
+  // Move the room to an absolute position, clamped to the floor, and keep the X/Z fields in sync.
+  function movePlan(x, z) {
+    if (!planRoom) return false;
+    const nx = Math.max(-15.9 + planRoom.w / 2, Math.min(15.9 - planRoom.w / 2, x));
+    const nz = Math.max(-11.5 + planRoom.d / 2, Math.min(11.5 - planRoom.d / 2, z));
+    if (nx === planRoom.x && nz === planRoom.z) return false;
+    planRoom.x = nx; planRoom.z = nz;
+    if (el('roomX') && document.activeElement !== el('roomX')) el('roomX').value = nx.toFixed(1);
+    if (el('roomZ') && document.activeElement !== el('roomZ')) el('roomZ').value = nz.toFixed(1);
+    message(`Posisi ruangan: X ${nx.toFixed(1)}, Z ${nz.toFixed(1)}.`);
+    drawPlan();
+    return true;
   }
 
   function bindPlanCanvas(canvas) {
@@ -157,10 +175,23 @@
     canvas.addEventListener('pointermove', event => {
       if (!planDrag || !planRoom) return;
       const [x, z] = canvasToPlan(...point(event));
-      const nx = Math.max(-15.9 + planRoom.w / 2, Math.min(15.9 - planRoom.w / 2, x + planDrag.offX));
-      const nz = Math.max(-11.5 + planRoom.d / 2, Math.min(11.5 - planRoom.d / 2, z + planDrag.offZ));
-      if (nx !== planRoom.x || nz !== planRoom.z) { planRoom.x = nx; planRoom.z = nz; planDrag.moved = true; drawPlan(); }
+      if (movePlan(x + planDrag.offX, z + planDrag.offZ)) planDrag.moved = true;
     });
+    // Keyboard placement: arrows nudge by 0.1 m, Shift by 0.5 m. The canvas is focusable.
+    canvas.addEventListener('keydown', event => {
+      if (!planRoom || el('roomForm').hidden || el('roomType').disabled) return;
+      const step = event.shiftKey ? .5 : .1;
+      const moves = {ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step]};
+      const delta = moves[event.key]; if (!delta) return;
+      event.preventDefault();
+      movePlan(planRoom.x + delta[0], planRoom.z + delta[1]);
+    });
+    const fromInput = () => {
+      if (!planRoom || el('roomType').disabled) return;
+      const x = Number(el('roomX').value), z = Number(el('roomZ').value);
+      if (Number.isFinite(x) && Number.isFinite(z)) movePlan(x, z);
+    };
+    el('roomX')?.addEventListener('input', fromInput); el('roomZ')?.addEventListener('input', fromInput);
     canvas.addEventListener('pointerup', event => {
       if (!planDrag || !planRoom) { planDrag = null; return; }
       const moved = planDrag.moved; planDrag = null;

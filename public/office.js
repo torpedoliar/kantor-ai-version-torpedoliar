@@ -205,6 +205,23 @@
     const m=new THREE.Mesh(new THREE.PlaneGeometry(width,width/8),signMaterial);
     m.rotation.x=-Math.PI/2;m.position.set(x,.08,z);parent.add(m);return m;
   }
+  // Built-in rooms are hardcoded geometry; only their floor signs are replaced when the owner renames them.
+  const builtInLabels=new Map(),BUILT_IN_NAMES={'seed-meeting':'Meeting Room','seed-pantry':'Pantry & Lounge','seed-musholla':'Prayer Room'};
+  function builtInLabel(id,text,x,z,width,parent=root){
+    const record={id,text,original:text,x,z,width,parent,mesh:textPlane(text,x,z,width,'#5c554b',parent)};
+    builtInLabels.set(id,record);return record;
+  }
+  function updateBuiltInLabels(list){
+    const names=new Map((list||[]).filter(room=>room.builtIn).map(room=>[room.id,room.name]));
+    for(const record of builtInLabels.values()){
+      const name=names.get(record.id);if(!name)continue;
+      const label=name===BUILT_IN_NAMES[record.id]?record.original:name.toUpperCase();
+      if(label===record.text)continue;
+      record.text=label;
+      const old=record.mesh;old.parent?.remove(old);old.material?.map?.dispose();old.material?.dispose();old.geometry?.dispose();
+      record.mesh=textPlane(label,record.x,record.z,record.width,'#5c554b',record.parent);
+    }
+  }
   function oval(w,h,d,color,x,y,z,parent=root){
     const m=mesh(new THREE.SphereGeometry(1,16,12),color,x,y,z,parent,false);m.scale.set(w/2,h/2,d/2);return m;
   }
@@ -583,7 +600,7 @@
   box(6.2,.08,.1,DARK,-12.9,2.4,-6.5);box(.1,.08,5.5,DARK,-9.8,2.4,-9.25);
   table(-13.2,-9,2.8,1.4).sub='meeting';
   box(2.2,1.1,.08,DARK,-13.2,1.1,-11.82);box(2,.95,.02,SCREEN,-13.2,1.17,-11.77);
-  textPlane('MEETING ROOM',-12.9,-5.8,4.6);
+  builtInLabel('seed-meeting','MEETING ROOM',-12.9,-5.8,4.6);
   // Doors swing open on their own when someone comes within reach, then close again.
   const doors=[];
   function door(hx,hz,width,base,color){
@@ -615,7 +632,7 @@
   box(4.6,.9,.8,0xcdb28a,11.8,0,-11.2);box(4.7,.06,.9,CARD,11.8,.9,-11.2);
   box(.45,.55,.45,CARD,10.4,.96,-11.25);cylinder(.2,.2,.45,0xc4dadb,10.4,1.51,-11.25);
   box(.5,.6,.42,DARK,13.2,.96,-11.3);for(const x of [12.1,12.4])cylinder(.08,.07,.16,CARD,x,.96,-11);
-  textPlane('PANTRY',11.8,-8.9,3.6);
+  builtInLabel('seed-pantry','PANTRY',11.8,-8.9,3.6);
   // Pantry and lounge share one glass room with its door on the aisle.
   box(.05,2.4,7.8,'glass',9.6,0,-8.1);box(5.2,2.4,.05,'glass',13.4,0,-4.2);
   for(const [x,z] of [[9.6,-4.2],[10.8,-4.2],[9.6,-11.9]])box(.1,2.45,.1,DARK,x,0,z);
@@ -641,7 +658,7 @@
     box(.7,.03,1.1,i%2?0xa98158:0x86968a,x,.03,z);
     prayerSpots.push({x,z,f:-1,floor:3,route:[[10,P3],[10,10.1],[x,10.1]],state:'pray',label:'Menuju ruang salat',occupant:null});
   }
-  textPlane('PRAYER ROOM',13.3,7.9,3.6);
+  builtInLabel('seed-musholla','PRAYER ROOM',13.3,7.9,3.6);
   plant(15,-11,.9);restroom(-14.45,-5.05,2.9,2.5,'+x');
   // Back lounge between the meeting room and the pantry: sofa on a round rug, two armchairs, books and a quote panel.
   cylinder(3.1,3.1,.03,0xe8cfc0,-2.6,.02,-9.6);
@@ -1250,7 +1267,7 @@
     rig.cue=mesh(new THREE.CylinderGeometry(.012,.02,1.45,8),BALSA,0,-.3,0,rig.arms[1].elbow,false);rig.cue.visible=false;
     const bubble=new THREE.Sprite(bubbleMaterial);bubble.scale.set(.75,.45,1);bubble.center.set(-.3,-.1);bubble.visible=false;g.add(bubble);
     const label=document.createElement('button');label.className='name-label';label.type='button';label.textContent=person.initials;
-    label.title=`${person.initials}, ${person.role}`;label.setAttribute('aria-label',`View ${person.initials}, ${person.role}`);$('labels').append(label);
+    label.title=`${person.initials}, ${person.role}`;label.setAttribute('aria-label',`Lihat ${person.initials}, ${person.role}`);$('labels').append(label);
     const desk=desks[person.n];g.position.set(desk.x,0,desk.z);g.rotation.y=facing(desk);floors[desk.floor].add(g);
     const aisle=desk.route[0][0],stretchZ=desk.z-desk.f*.95;
     const stretchSpot=linkSpot(desk._item,{x:desk.x,z:stretchZ,f:desk.f,floor:desk.floor,route:[[aisle,passage(desk.floor)],[aisle,stretchZ]],state:'stretch',local:true,label:'Berdiri sejenak'},false);stretchSpot._dynamic=true;
@@ -1574,6 +1591,7 @@
     for(const spot of built.seats){spot.ownerRoom=room.owner||null;roomSpots.push(spot);if(spot.state==='pray')prayerSpots.push(spot);else roomPool(room.floor).push(spot);}
   }
   function applyRooms(list){
+    updateBuiltInLabels(list);
     const next=(list||[]).filter(room=>!room.builtIn&&Number.isFinite(room.x)&&Number.isFinite(room.z));
     const nextById=new Map(next.map(room=>[room.id,room])),touched=new Set();
     // Rebuild only removed or changed rooms. Unchanged rooms keep their group, seats and occupants.
@@ -2245,8 +2263,8 @@
   function syncTaskDisplay(agent,activeTasks){
     const task=activeTasks?activeTasks.get(agent.n):window.officeTasks.activeFor(agent.n);
     agent.label.classList.toggle('has-task',!!task);
-    const description=`${agent.initials}, ${agent.role}${task?` · In progress: ${task.title}`:''}`;
-    if(agent.label.title!==description){agent.label.title=description;agent.label.setAttribute('aria-label',`View ${description}`);}
+    const description=`${agent.initials}, ${agent.role}${task?` · Sedang dikerjakan: ${task.title}`:''}`;
+    if(agent.label.title!==description){agent.label.title=description;agent.label.setAttribute('aria-label',`Lihat ${description}`);}
     if(selected===agent&&$('iActiveTask')){
       const title=task?task.title:'Tidak ada tugas aktif';
       if($('iActiveTask').textContent!==title)$('iActiveTask').textContent=title;
@@ -2477,7 +2495,7 @@
   function placeCustom(item){item.group.position.set(item.x,item.y||0,item.z);item.group.rotation.y=item.rot*Math.PI/180;rebuildNavFloor(item.floor);reseatCustom(item);}
   const clampCustom=(item,x,z)=>{const r=item.radius+.1;return [Math.max(-16+r,Math.min(16-r,x)),Math.max(-12+r,Math.min(12-r,z))];};
   const INVENTORY_KEY='kantor-ai.inventory.v1';
-  const INVENTORY_CATALOG={chair:{label:'Chair',stock:6,floor:3},table:{label:'Table',stock:2,floor:3},sofa:{label:'Sofa',stock:2,floor:3},plant:{label:'Plant',stock:4,floor:3},lamp:{label:'Lamp',stock:4,floor:4},shelf:{label:'Bookshelf',stock:2,floor:3},coffee:{label:'Coffee table',stock:2,floor:3},whiteboard:{label:'Whiteboard',stock:2,floor:3}};
+  const INVENTORY_CATALOG={chair:{label:'Kursi',stock:6,floor:3},table:{label:'Meja',stock:2,floor:3},sofa:{label:'Sofa',stock:2,floor:3},plant:{label:'Tanaman',stock:4,floor:3},lamp:{label:'Lampu',stock:4,floor:4},shelf:{label:'Rak buku',stock:2,floor:3},coffee:{label:'Meja kopi',stock:2,floor:3},whiteboard:{label:'Papan tulis',stock:2,floor:3}};
   const inventoryStore={stock:Object.fromEntries(Object.entries(INVENTORY_CATALOG).map(([type,data])=>[type,data.stock])),placed:{},items:[]};
   try{const saved=JSON.parse(localStorage.getItem(INVENTORY_KEY)||'null');if(saved?.stock&&typeof saved.stock==='object')for(const type of Object.keys(INVENTORY_CATALOG))if(Number.isFinite(saved.stock[type]))inventoryStore.stock[type]=Math.max(0,Math.floor(saved.stock[type]));if(saved?.placed&&typeof saved.placed==='object')inventoryStore.placed={...saved.placed};if(Array.isArray(saved?.items))inventoryStore.items=saved.items.filter(item=>INVENTORY_CATALOG[item.type]&&typeof item.id==='string'&&Number.isFinite(item.floor)&&Number.isFinite(item.x)&&Number.isFinite(item.z)&&Number.isFinite(item.rot));}catch{}
   const saveInventory=()=>{try{localStorage.setItem(INVENTORY_KEY,JSON.stringify(inventoryStore));}catch{status('Inventaris tidak bisa disimpan di browser ini.');}};
@@ -2507,13 +2525,13 @@
   }
   const freeSpawn=(type,floor)=>{const probe={floor,radius:type==='chair'?.5:type==='sofa'?1.4:type==='table'?1.3:type==='shelf'||type==='whiteboard'?1.3:type==='coffee'?1:type==='plant'?.65:.5};for(let z=-10;z<=10;z+=2)for(let x=-14;x<=14;x+=2)if(!customItems.some(o=>o.floor===floor&&Math.hypot(o.x-x,o.z-z)<o.radius+probe.radius+.15))return [x,z];return null;};
   const removeCustomItem=item=>{item.seatRefs.forEach(spot=>{for(const a of agents){if(a.activity?.spot===spot){clearActivity(a);setPath(a,a.desk);}if(a.destination===spot){a.destination=a.desk;a.path=[];}}const index=hangouts.indexOf(spot);if(index>=0)hangouts.splice(index,1);});disposeGroup(item.group);const index=customItems.indexOf(item);if(index>=0)customItems.splice(index,1);customById.delete(item.id);if(customSel===item){customSel=null;customDraft=null;customRing.visible=false;}rebuildNavFloor(item.floor);syncCustomPanel();};
-  const renderInventory=()=>{const list=$('inventoryList');if(!list)return;list.replaceChildren(...Object.entries(INVENTORY_CATALOG).map(([type,data])=>{const row=document.createElement('div');row.className='inventory-row';const name=document.createElement('span');name.textContent=data.label;const count=document.createElement('strong');count.textContent=inventoryStore.stock[type];const minus=document.createElement('button');minus.className='btn';minus.type='button';minus.textContent='−';minus.disabled=inventoryStore.stock[type]===0;minus.onclick=()=>adjustStock(type,-1);const plus=document.createElement('button');plus.className='btn';plus.type='button';plus.textContent='+';plus.onclick=()=>adjustStock(type,1);const add=document.createElement('button');add.className='btn';add.type='button';add.textContent='Add';add.disabled=inventoryStore.stock[type]===0;add.onclick=()=>addInventory(type);row.append(name,count,minus,plus,add);return row;}));};
+  const renderInventory=()=>{const list=$('inventoryList');if(!list)return;list.replaceChildren(...Object.entries(INVENTORY_CATALOG).map(([type,data])=>{const row=document.createElement('div');row.className='inventory-row';const name=document.createElement('span');name.textContent=data.label;const count=document.createElement('strong');count.textContent=inventoryStore.stock[type];const minus=document.createElement('button');minus.className='btn';minus.type='button';minus.textContent='−';minus.disabled=inventoryStore.stock[type]===0;minus.onclick=()=>adjustStock(type,-1);const plus=document.createElement('button');plus.className='btn';plus.type='button';plus.textContent='+';plus.onclick=()=>adjustStock(type,1);const add=document.createElement('button');add.className='btn';add.type='button';add.textContent='Tambah';add.disabled=inventoryStore.stock[type]===0;add.onclick=()=>addInventory(type);row.append(name,count,minus,plus,add);return row;}));};
   function adjustStock(type,delta){if(!INVENTORY_CATALOG[type]||!Number.isFinite(delta))return inventoryStore.stock[type]??0;inventoryStore.stock[type]=Math.max(0,inventoryStore.stock[type]+Math.trunc(delta));saveInventory();renderInventory();return inventoryStore.stock[type];}
-  function addInventory(type){if(!INVENTORY_CATALOG[type]||inventoryStore.stock[type]<1)return false;const floor=INVENTORY_CATALOG[type].floor,spawn=freeSpawn(type,floor);if(!spawn){customMsg('No free location on this floor.',true);return false;}if(activeFloor!==floor)setFloor(floor,false);const item=runtimeFurniture(type,floor,...spawn);if(!item)return false;selectCustom(item);renderInventory();customMsg(`Preview ${INVENTORY_CATALOG[type].label}; Apply to add it.`);return {id:item.id,preview:true};}
+  function addInventory(type){if(!INVENTORY_CATALOG[type]||inventoryStore.stock[type]<1)return false;const floor=INVENTORY_CATALOG[type].floor,spawn=freeSpawn(type,floor);if(!spawn){customMsg('Tidak ada tempat kosong di lantai ini.',true);return false;}if(activeFloor!==floor)setFloor(floor,false);const item=runtimeFurniture(type,floor,...spawn);if(!item)return false;selectCustom(item);renderInventory();customMsg(`Pratinjau ${INVENTORY_CATALOG[type].label}; klik Terapkan untuk menambahkannya.`);return {id:item.id,preview:true};}
   function restoreInventoryItems(){for(const saved of inventoryStore.items){const item=runtimeFurniture(saved.type,saved.floor,saved.x,saved.z,saved.id);if(item){item.rot=saved.rot;item.home.rot=saved.rot;placeCustom(item);}}}
-  function applyInventory(){if(!customSel?.isPreview)return applyCustom();const item=customSel;if(!applyCustom())return false;item.isPreview=false;inventoryStore.stock[item.catalog]--;inventoryStore.placed[item.catalog]=(inventoryStore.placed[item.catalog]||0)+1;inventoryStore.items.push({id:item.id,type:item.catalog,floor:item.floor,x:item.home.x,z:item.home.z,rot:item.home.rot});if(customSlotIdx>0){const d=customStore.layouts[customSlotIdx-1]||(customStore.layouts[customSlotIdx-1]={});d[item.id]={x:item.x,z:item.z,rot:item.rot};saveCustom();}saveInventory();renderInventory();customMsg('Added to inventory layout.');syncCustomPanel();return true;}
-  function cancelInventory(){if(customSel?.isPreview){const item=customSel;removeCustomItem(item);renderInventory();customMsg('Preview discarded.');return true;}return cancelCustom();}
-  function returnInventory(id){const item=customById.get(id);if(!item?.isExtra||item.isPreview)return false;if(!confirm('Return this furniture to inventory? This removes it from all layout slots.'))return false;const type=item.catalog;for(const layout of customStore.layouts)if(layout)delete layout[id];inventoryStore.items=inventoryStore.items.filter(saved=>saved.id!==id);removeCustomItem(item);inventoryStore.stock[type]=(inventoryStore.stock[type]||0)+1;inventoryStore.placed[type]=Math.max(0,(inventoryStore.placed[type]||1)-1);saveInventory();saveCustom();renderInventory();customMsg('Furniture returned to inventory.');return true;}
+  function applyInventory(){if(!customSel?.isPreview)return applyCustom();const item=customSel;if(!applyCustom())return false;item.isPreview=false;inventoryStore.stock[item.catalog]--;inventoryStore.placed[item.catalog]=(inventoryStore.placed[item.catalog]||0)+1;inventoryStore.items.push({id:item.id,type:item.catalog,floor:item.floor,x:item.home.x,z:item.home.z,rot:item.home.rot});if(customSlotIdx>0){const d=customStore.layouts[customSlotIdx-1]||(customStore.layouts[customSlotIdx-1]={});d[item.id]={x:item.x,z:item.z,rot:item.rot};saveCustom();}saveInventory();renderInventory();customMsg('Ditambahkan ke tata letak inventaris.');syncCustomPanel();return true;}
+  function cancelInventory(){if(customSel?.isPreview){const item=customSel;removeCustomItem(item);renderInventory();customMsg('Pratinjau dibuang.');return true;}return cancelCustom();}
+  function returnInventory(id){const item=customById.get(id);if(!item?.isExtra||item.isPreview)return false;if(!confirm('Kembalikan furnitur ini ke inventaris? Furnitur dihapus dari semua slot tata letak.'))return false;const type=item.catalog;for(const layout of customStore.layouts)if(layout)delete layout[id];inventoryStore.items=inventoryStore.items.filter(saved=>saved.id!==id);removeCustomItem(item);inventoryStore.stock[type]=(inventoryStore.stock[type]||0)+1;inventoryStore.placed[type]=Math.max(0,(inventoryStore.placed[type]||1)-1);saveInventory();saveCustom();renderInventory();customMsg('Furnitur dikembalikan ke inventaris.');return true;}
 
   function overlapCustom(item,x,z){
     for(const o of customItems){
@@ -2561,24 +2579,24 @@
     if(item)customMsg('');
   }
   function applyCustom(){
-    if(!customSel||!customDraft){customMsg('Pick a piece of furniture first.',true);return false;}
+    if(!customSel||!customDraft){customMsg('Pilih furnitur dulu.',true);return false;}
     const [cx,cz]=clampCustom(customSel,customDraft.x,customDraft.z);
     const rot=customSel.rotatable?((Math.round(customDraft.rot)%360)+360)%360:customSel.rot;
     const bad=overlapCustom(customSel,cx,cz);
-    if(bad){customDraft={x:customSel.x,z:customSel.z,rot:customSel.rot};previewCustom();syncCustomPanel();customMsg(`Blocked: overlaps with ${bad.type}.`,true);return false;}
+    if(bad){customDraft={x:customSel.x,z:customSel.z,rot:customSel.rot};previewCustom();syncCustomPanel();customMsg(`Tidak bisa: bertabrakan dengan ${bad.type}.`,true);return false;}
     customSel.x=cx;customSel.z=cz;customSel.rot=rot;customDraft={x:cx,z:cz,rot};
     placeCustom(customSel);
     if(customSel.isPreview){syncCustomPanel();return true;}
     if(customSel.isExtra){const saved=inventoryStore.items.find(entry=>entry.id===customSel.id);if(saved){saved.x=cx;saved.z=cz;saved.rot=rot;saveInventory();}}
     if(customSlotIdx>0){
       const d=customStore.layouts[customSlotIdx-1]||(customStore.layouts[customSlotIdx-1]={});
-      d[customSel.id]={x:cx,z:cz,rot};saveCustom();customMsg('Applied and saved.');
-    }else customMsg('Applied (Default is read-only — pick Slot 1–5 to keep it).');
+      d[customSel.id]={x:cx,z:cz,rot};saveCustom();customMsg('Diterapkan dan disimpan.');
+    }else customMsg('Diterapkan (Default hanya-baca — pilih Slot 1–5 untuk menyimpannya).');
     syncCustomPanel();return true;
   }
   function cancelCustom(){
     if(!customSel||!customDraft)return;
-    customDraft={x:customSel.x,z:customSel.z,rot:customSel.rot};previewCustom();syncCustomPanel();customMsg('Changes discarded.');
+    customDraft={x:customSel.x,z:customSel.z,rot:customSel.rot};previewCustom();syncCustomPanel();customMsg('Perubahan dibuang.');
   }
   function loadCustomSlot(i,silent=false){
     if(customSel){customSel.group.position.set(customSel.x,customSel.y||0,customSel.z);customSel.group.rotation.y=customSel.rot*Math.PI/180;}
@@ -2616,7 +2634,7 @@
       reseatCustom(item);touched.add(item.floor);
     }
     for(const f of touched)rebuildNavFloor(f);
-    syncCustomPanel();customMsg('Back to Default.');
+    syncCustomPanel();customMsg('Kembali ke Default.');
   }
   function customFloorPoint(event,floor){
     pointer.set(event.clientX/innerWidth*2-1,-event.clientY/innerHeight*2+1);ray.setFromCamera(pointer,camera);
@@ -2633,7 +2651,7 @@
       if(activeFloor===0)setFloor(3);
       customizing=true;document.body.classList.add('customizing');
       $('bCustom').setAttribute('aria-pressed','true');$('customPanel').hidden=false;
-      syncCustomSlotUI();syncCustomPanel();customMsg('Pick furniture, or add a bookshelf, coffee table or whiteboard from inventory.');
+      syncCustomSlotUI();syncCustomPanel();customMsg('Pilih furnitur, atau tambah rak buku, meja kopi, atau papan tulis dari inventaris.');
       status('Mode tata ruang: seret furnitur untuk memindahkan, atau tambah dari inventaris.');
     }else{
       if(customSel&&customDraft&&(customDraft.x!==customSel.x||customDraft.z!==customSel.z||customDraft.rot!==customSel.rot)){
@@ -2654,10 +2672,10 @@
   window.officeNav?.onOpen(()=>{if(customizing)setCustomizing(false)});
   $('cSlot').onchange=e=>loadCustomSlot(Number(e.target.value));
   $('cRename').onclick=()=>{
-    if(customSlotIdx===0){customMsg('Default cannot be renamed.',true);return;}
+    if(customSlotIdx===0){customMsg('Default tidak bisa diganti nama.',true);return;}
     const name=$('cSlotName').value.trim().slice(0,40);
-    if(!name){customMsg('Type a name first.',true);return;}
-    customStore.names[customSlotIdx-1]=name;saveCustom();syncCustomSlotUI();customMsg(`Saved as "${name}".`);
+    if(!name){customMsg('Isi nama dulu.',true);return;}
+    customStore.names[customSlotIdx-1]=name;saveCustom();syncCustomSlotUI();customMsg(`Disimpan sebagai "${name}".`);
   };
   $('cX').oninput=e=>{if(!customSel||!customDraft)return;const v=parseFloat(e.target.value);if(!Number.isFinite(v))return;customDraft.x=v;previewCustom();customMsg('');};
   $('cZ').oninput=e=>{if(!customSel||!customDraft)return;const v=parseFloat(e.target.value);if(!Number.isFinite(v))return;customDraft.z=v;previewCustom();customMsg('');};
@@ -2996,7 +3014,7 @@
       const count=floorCounts[level]||0;
       let badge=floorBadgeCache.get(level);
       if(!badge){badge=document.querySelector(`[data-floor="${level}"] .floor-count`);if(badge)floorBadgeCache.set(level,badge);}
-      if(badge&&badge.textContent!==String(count)){badge.textContent=String(count);badge.setAttribute('aria-label',`${count} team members on this floor`);}
+      if(badge&&badge.textContent!==String(count)){badge.textContent=String(count);badge.setAttribute('aria-label',`${count} anggota tim di lantai ini`);}
     }
     renderFrame(realDt);
     if(showFps){fpsFrames++;const t=performance.now();if(t-fpsSince>=1000){fpsLabel.textContent=`${fpsFrames} FPS`;fpsFrames=0;fpsSince=t;}}
@@ -3196,6 +3214,7 @@
     roomOccupancy:()=>Object.fromEntries(customRooms.map(room=>[room.id,roomSpots.filter(s=>s.room===room.id&&s.occupant).length])),
     // Mesh count per custom room, including ghosts left behind by a bad rebuild; rooms-merge tests rely on this.
     roomMeshes:()=>{const out={};scene.updateMatrixWorld(true);scene.traverse(o=>{if(!o.isMesh)return;let g=o;while(g&&!g.userData.customRoom)g=g.parent;if(g)out[g.userData.customRoom]=(out[g.userData.customRoom]||0)+1;});return out;},
+    roomLabelText:id=>builtInLabels.get(id)?.text||null,
     meshCount:level=>{let n=0;floors[level]?.traverse(o=>{if(o.isMesh)n++;});return n;},
     visitorTravelAudit:()=>shop.people.map(c=>({state:c.state,mode:c.arrivalMode||'walking-existing',trip:c.vehicleTrip||null})),
     environmentAudit:()=>environment.audit(),

@@ -91,6 +91,10 @@ const wait=async(fn,label,ms=20000)=>{const t=Date.now();for(;;){const v=await f
   await page.click('#bTasks');await page.locator(`.task-card[data-task-id="${ask.id}"] .task-card-open`).click();
   await page.locator('#taskDetail').getByRole('button',{name:'Buka percakapan'}).click();await page.locator('#communicationDialog[open]').waitFor();
   assert.equal(await page.locator('#threadList [aria-current="true"]').getAttribute('data-thread-id'),ask.id);
+  // A 2.5 s refresh rebuilds the thread list; keyboard focus must stay on the same thread.
+  const threadItem=page.locator('#threadList .thread-item').first();await threadItem.focus();
+  const threadId=await threadItem.getAttribute('data-thread-id');await page.waitForTimeout(3000);
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset?.threadId),threadId,'a poll keeps focus on the thread');
   // Phone: inbox and thread alternate with a back button; no page overflow.
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.locator('#messageTimeline').isVisible(),true);await page.click('#threadBack');assert.equal(await page.locator('#threadList').isVisible(),true);

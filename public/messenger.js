@@ -72,6 +72,7 @@
   }
   function renderList() {
     const list = el('threadList');
+    const active = document.activeElement, focusId = active instanceof Element ? active.closest('.thread-item')?.dataset.threadId : null;
     const shown = data.threads.filter(t => filter === 'all' || (filter === 'decision' ? openDecisions().some(d => d.threadId === t.id) : t.unread));
     list.replaceChildren(...shown.map(thread => {
       const item = node('button', undefined, 'thread-item'); item.type = 'button'; item.dataset.threadId = thread.id;
@@ -84,6 +85,7 @@
       return item;
     }));
     if (!shown.length) list.append(node('p', 'Tidak ada percakapan di filter ini.', 'task-column-empty'));
+    if (focusId) list.querySelector(`[data-thread-id="${CSS.escape(focusId)}"]`)?.focus({preventScroll:true});
   }
   function bubble(message) {
     const item = node("div", undefined, `bubble bubble-${message.sender.type}${message.kind==="error"?" bubble-error":""}`); item.dataset.seq = message.seq;

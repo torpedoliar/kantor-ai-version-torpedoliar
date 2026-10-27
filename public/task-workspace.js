@@ -1,6 +1,6 @@
 // Task board: one global board with four columns. Cards only select; the detail panel (tasks.js) holds every action.
 (() => {
-  const COLUMNS = [['queued', 'Tugas'], ['progress', 'In progress'], ['review', 'Review'], ['done', 'Selesai']];
+  const COLUMNS = [['queued', 'Tugas'], ['progress', 'Sedang dikerjakan'], ['review', 'Review'], ['done', 'Selesai']];
   const columnOf = status => ({queued: 'queued', active: 'progress', blocked: 'progress', 'manager-review': 'review', review: 'review', done: 'done'})[status] || 'queued';
   let root = null, api = null;
   function node(tag, text, className) {
@@ -41,6 +41,11 @@
   // `visible` is already filtered; `all` resolves parent titles and child counts.
   function update({visible, all, selectedId}) {
     if (!root) return;
+    // A poll or selection rebuild repaints every card; keep the keyboard on the same card.
+    const active = document.activeElement;
+    const focusTask = active && root.contains(active) ? active.closest('[data-task-id]')?.dataset.taskId : null;
+    const focusClass = active && active.classList?.contains('task-root-link') ? 'task-root-link' : 'task-card-open';
+    const scroll = root.scrollLeft;
     root.replaceChildren(...COLUMNS.map(([id, label]) => {
       const list = visible.filter(task => columnOf(task.status) === id);
       const column = node('section', undefined, 'task-column'); column.dataset.column = id;
@@ -50,6 +55,8 @@
       list.forEach(task => column.append(card(task, all, selectedId)));
       return column;
     }));
+    root.scrollLeft = scroll;
+    if (focusTask) root.querySelector(`[data-task-id="${CSS.escape(focusTask)}"] .${focusClass}`)?.focus({preventScroll: true});
   }
   window.TaskWorkspace = {mount(container, options) { root = container; api = options; }, update, columnOf};
 })();

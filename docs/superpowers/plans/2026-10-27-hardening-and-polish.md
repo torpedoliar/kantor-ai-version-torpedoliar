@@ -393,13 +393,15 @@ Dependensi keras:
 - Test: perluas `tests/task-board.cjs`, `tests/messenger-ui.cjs`, `tests/nav.cjs`
 
 **Steps:**
-- [ ] 1. Setelah render, kembalikan fokus ke `[data-task-id="…"] .task-card-open` / `[data-thread-id="…"]`; pertahankan `scrollLeft` board.
-- [ ] 2. Tambah tabel string Indonesia untuk label yang masih Inggris (kolom board, pesan custom/inventory, aria-label, jenis furnitur).
-- [ ] 3. Jaga `lang="id"` konsisten; istilah teknis yang dipertahankan dalam Inggris diberi penjelasan singkat.
+- [x] 1. `TaskWorkspace.update` mengingat task/kartu yang fokus dan `scrollLeft`, lalu mengembalikan fokus setelah rebuild; `Messenger.renderList` melakukan hal yang sama untuk `data-thread-id`.
+- [x] 2. Kolom board "In progress" → "Sedang dikerjakan"; label karakter dan badge lantai memakai "Lihat …"/"anggota tim di lantai ini".
+- [x] 3. Katalog inventaris, tombol Tambah, pesan custom, nama jenis furnitur ruangan, dan konfirmasi dikembalikan ke bahasa Indonesia.
+- Catatan: istilah teknis (AI, dry run, Docker, review) tetap dipakai dengan konteks Indonesia; tidak ada tabel i18n penuh.
 
 **Acceptance:**
-- Memilih kartu task tidak kehilangan fokus; panah atas/bawah tetap berfungsi pada daftar.
-- Tes `grep` memastikan tidak ada `aria-label` berbahasa Inggris pada elemen yang terlihat.
+- `task-board.cjs`: fokus kartu bertahan setelah `officeTasks.open()` memicu rebuild; kolom memakai nama Indonesia; inventaris "Kursi" dan label karakter "Lihat …".
+- `messenger-ui.cjs`: fokus thread bertahan melewati satu poll 2,5 detik.
+- `office`, `rooms-nav` lulus.
 
 ---
 
@@ -538,6 +540,10 @@ Dependensi keras:
   - Preferensi rutinitas dibaca saat init dan diterapkan saat disimpan.
   - Poll org setiap 2,5 detik; jeda saat tab tersembunyi dan lanjut saat terlihat.
   - Tes `sync-routine`; settings-ui/office lulus.
+- 2026-10-27 — Task 17 selesai di working tree (belum commit):
+  - Fokus kartu task dan thread messenger bertahan setelah render/poll; scroll board dipertahankan.
+  - Bahasa UI diseragamkan (kolom, aria-label, inventaris, jenis furnitur, pesan custom).
+  - Verifikasi: task-board, messenger-ui, rooms-nav, office.
 
 ## Risiko utama
 

@@ -27,7 +27,7 @@ const cardIds=page=>page.locator('.task-card[data-task-id]').evaluateAll(cards=>
   assert.equal(await page.locator('#taskKanbanTab').count(),0,'no separate list/kanban/summary tabs');
   // Exactly four columns in order, with the agreed names.
   assert.deepEqual(await page.locator('#taskBoard [data-column]').evaluateAll(cols=>cols.map(c=>c.dataset.column)),['queued','progress','review','done']);
-  assert.deepEqual(await page.locator('#taskBoard [data-column] h3').allInnerTexts().then(t=>t.map(s=>s.replace(/\s*\d+$/,'').trim())),['Tugas','In progress','Review','Selesai']);
+  assert.deepEqual(await page.locator('#taskBoard [data-column] h3').allInnerTexts().then(t=>t.map(s=>s.replace(/\s*\d+$/,'').trim())),['Tugas','Sedang dikerjakan','Review','Selesai']);
   // Every task exactly once, children included as their own cards.
   const ids=await cardIds(page);assert.deepEqual([...ids].sort(),fixtures.map(t=>t.id).sort());
   const inColumn=async(column,id)=>page.locator(`[data-column="${column}"] .task-card[data-task-id="${id}"]`).count();
@@ -35,6 +35,10 @@ const cardIds=page=>page.locator('.task-card[data-task-id]').evaluateAll(cards=>
   assert.equal(await inColumn('progress','t-active'),1);assert.equal(await inColumn('progress','t-blocked'),1,'blocked stays In progress');
   assert.equal(await inColumn('review','t-review'),1);assert.equal(await inColumn('done','t-done'),1,'done is visible');
   assert.match(await page.locator('.task-card[data-task-id="t-blocked"]').innerText(),/Menunggu jawabanmu/);
+  // Re-rendering the board keeps the keyboard on the same card.
+  const activeCard=page.locator('.task-card[data-task-id="t-active"] .task-card-open');await activeCard.focus();
+  await page.evaluate(()=>window.officeTasks.open());
+  assert.equal(await page.evaluate(()=>document.activeElement?.closest('[data-task-id]')?.dataset.taskId),'t-active','a board rebuild keeps card focus');
   // A child links to its root; following the link opens the root in the detail panel.
   const childCard=page.locator('.task-card[data-task-id="t-child"]');assert.match(await childCard.innerText(),/Kalkulator web/);
   await childCard.locator('.task-root-link').click();await page.locator('#taskDetail',{hasText:'Untuk siapa kalkulator ini?'}).waitFor();
@@ -66,5 +70,12 @@ const cardIds=page=>page.locator('.task-card[data-task-id]').evaluateAll(cards=>
   await page.click('#closeTasks');await page.click('#bTasks');await page.waitForFunction(()=>!/dry run/i.test(document.getElementById('taskNote').textContent));
   // No horizontal page overflow on a phone; the board itself may scroll.
   for(const [width,height] of [[390,844],[768,900]]){await page.setViewportSize({width,height});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),true,`no page overflow at ${width}`);assert.equal(await page.locator('#taskDialog').evaluate(d=>d.scrollWidth<=d.clientWidth+1),true,`drawer fits at ${width}`);}
-  console.log('PASS: four global columns, every task once, blocked badge, root links, filters, gated create form, live status note');
+  // The visible furniture kit and character labels use Indonesian names.
+  await page.setViewportSize({width:1440,height:900});
+  await page.evaluate(()=>officeScene.setEditing(true));
+  const inventory=await page.locator('#inventoryList').innerText();assert.match(inventory,/Kursi/);assert.doesNotMatch(inventory,/Chair/);
+  await page.evaluate(()=>officeScene.setEditing(false));
+  const nameLabels=await page.locator('.name-label').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('aria-label')).filter(Boolean));
+  assert.ok(nameLabels.length&&nameLabels.every(label=>label.startsWith('Lihat ')),`character labels use Indonesian: ${nameLabels.slice(0,2)}`);
+  console.log('PASS: four global columns, every task once, blocked badge, root links, filters, gated create form, live status note, focus and language');
 }finally{if(browser)await browser.close();child.kill();fs.rmSync(dir,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});
