@@ -128,7 +128,7 @@
   const buildFloor=()=>root?.userData?.floor||3;
   // Seat links: owner seats sit exactly on the item (chairs), followers keep an offset (lounge/billiard spots).
   const linkSpot=(item,spot,owner=true)=>{spot.itemId=item.id;spot._item=item;if(owner){spot._ref=[item,item.seatRefs.push(spot)-1];}else{spot._dx=spot.x-item.x;spot._dz=spot.z-item.z;spot._ref=[item,-1];item.seatRefs.push(spot);}return spot;};
-  let root, activeFloor = 3, selected = null, paused = false, simTime = 0;
+  let root, activeFloor = 3, selected = null, paused = false, simTime = 0, garage = null;
   let routineOn = !matchMedia('(prefers-reduced-motion: reduce)').matches;
   const linear = color => new THREE.Color(color).convertSRGBToLinear();
   const hex = color => '#' + color.toString(16).padStart(6, '0');
@@ -347,6 +347,15 @@
   textPlane('BARBER',-8,-3,7);textPlane('PARKING',7,8.7,8);
   for(const x of [2,7,12]){
     box(.07,.004,8,CARD,x-2.3,.03,-5);box(4.6,.004,.07,CARD,x,.03,-9);
+  }
+  // Sectional garage door across the open parking half; it rolls up when a car is inside or approaching.
+  {
+    const width=15.8,group=new THREE.Group();group.position.set(8,3.0,12.75);group.userData.walkable=true;floors[1].add(group);
+    for(let i=0;i<8;i++){const y=-.35-i*.37;box(width,.35,.08,0x6f7a80,0,y,0,group);box(width-.36,.2,.02,0x9aa5aa,0,y+.065,.055,group);}
+    box(width+.2,.14,.16,0x2a2e32,0,-2.97,0,group);
+    for(const x of [.06,15.94])box(.14,3.05,.2,0x2a2e32,x,.03,12.78,floors[1]);
+    box(width+.3,.28,.5,0x2a2e32,8,2.78,12.78,floors[1]);
+    garage={group,open:0};
   }
   // Parked vehicles are local detailed CC0 models placed by officeEnvironment.
   textPlane('ENTRANCE',7,11,4);
@@ -917,17 +926,62 @@
     // Zebra crossings at the corner.
     for(let k=0;k<6;k++){flat(.5,5,LINE,27.4-k*.9,-.855,24);flat(5,.5,LINE,34,-.855,17.4-k*.9);}
     const tones=[0xc9c2b4,0xb8b2a6,0xd2cbbd,0xa9a69d];
+    // Three shared curtain-wall textures replace the old solid stripes; bands merge by material.
+    const facadeMats=[0,1,2].map(variant=>{
+      const c=document.createElement('canvas');c.width=256;c.height=64;const ctx=c.getContext('2d');
+      let s=19+variant*17;const rndTex=()=>(s=s*16807%2147483647)/2147483647;
+      ctx.fillStyle=['#22313b','#2b333a','#1d2a33'][variant];ctx.fillRect(0,0,256,64);
+      for(let i=0;i<8;i++){
+        const x=i*32;
+        ctx.fillStyle='#0f171d';ctx.fillRect(x,0,2,64);ctx.fillRect(x+30,0,2,64);
+        ctx.fillStyle=['#3b5361','#46545c','#324a58'][variant];ctx.fillRect(x+4,7,24,50);
+        if(rndTex()<.28){ctx.fillStyle='#dfbd83';ctx.fillRect(x+6,11,20,42);}
+        ctx.fillStyle='rgba(255,255,255,.10)';ctx.fillRect(x+4,7,24,9);
+      }
+      ctx.fillStyle='#0d1419';ctx.fillRect(0,0,256,3);ctx.fillRect(0,61,256,3);
+      const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+      return new THREE.MeshStandardMaterial({map:tex,roughness:.58,metalness:.16});
+    });
+    const band=(w,d,x,y,z,mat)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w+.06,1.6,d+.06),mat);m.position.set(x,y+.8,z);m.castShadow=false;m.receiveShadow=true;skyline.add(m);};
     for(let placed=0,tries=0;placed<64&&tries<600;tries++){
       const a=rnd()*Math.PI*2,dist=40+rnd()*100,x=Math.cos(a)*dist,z=Math.sin(a)*dist,w=6+rnd()*7,d=6+rnd()*7;
       if(Math.hypot(x,z)+Math.max(w,d)>145)continue;
       if(Math.abs(z-24)<d/2+6||Math.abs(x-34)<w/2+6)continue;
       if(x>-40&&x<28&&z>-28&&z<22)continue;
       // Near blocks stay low so they never hide the office from the default camera; far ones rise higher.
-      const h=dist<65?4+rnd()*10:8+rnd()*(dist/140)*42;
+      const h=dist<65?4+rnd()*10:8+rnd()*(dist/140)*42,base=-.9,tone=tones[placed%4],mat=facadeMats[placed%3];
+      const stepped=dist>70&&h>24&&rnd()<.5,bodyH=stepped?h*.72:h,shoulder=base+bodyH,topY=base+h;
       flat(w+3,d+3,rnd()<.5?LAWN:SIDEWALK,x,-.895,z);
-      box(w,h,d,tones[placed%4],x,-.9,z,skyline);
-      for(let y=1.4;y<h-1;y+=3.2)box(w+.04,1.7,d+.04,0x5d7a86,x,-.9+y,z,skyline).children.forEach(line=>line.visible=false);
-      if(rnd()<.35)flat(w*.8,d*.8,0x9fbf73,x,h-.88,z);else if(rnd()<.5)box(w*.35,1.2,d*.35,0xcfc8ba,x,h-.9,z,skyline);
+      // Dark podium with a glazed lobby, then the lit body and its window bands.
+      box(w+.16,3.0,d+.16,0x3b4247,x,base,z,skyline);
+      box(w,bodyH,d,tone,x,base,z,skyline);
+      for(let y=2.2;y+1.6<bodyH-.1;y+=3.2)band(w,d,x,base+y,z,mat);
+      for(const sx of [-1,1])for(const sz of [-1,1])box(.14,bodyH,.14,0x3a4146,x+sx*(w/2-.07),base,z+sz*(d/2-.07),skyline);
+      if(stepped){
+        const tw=w*.62,td=d*.62,th=h-bodyH;
+        box(tw,th,td,tone,x,shoulder,z,skyline);
+        for(let y=shoulder+1.8;y+1.6<topY-.1;y+=3.2)band(tw,td,x,y,z,mat);
+        for(const sx of [-1,1])for(const sz of [-1,1])box(.12,th,.12,0x3a4146,x+sx*(tw/2-.06),shoulder,z+sz*(td/2-.06),skyline);
+      }
+      // Roof slab, parapet and plant equipment.
+      const rw=stepped?w*.62:w,rd=stepped?d*.62:d;
+      box(rw+.2,.16,rd+.2,0x8b8579,x,topY-.16,z,skyline);
+      for(const [pw,pd,px,pz] of [[rw+.2,.16,0,rd/2+.08],[rw+.2,.16,0,-rd/2-.08],[.16,rd+.2,rw/2+.08,0],[.16,rd+.2,-rw/2-.08,0]])box(pw,.55,pd,0x6b6a63,x+px,topY,pz?z+pz:z,skyline);
+      if(rnd()<.65)box(Math.min(3,rw*.24),.75,Math.min(3,rd*.24),0xb9b3a6,x+rw*.16,topY,z-rd*.12,skyline);
+      if(rnd()<.35)cylinder(.3,.3,1.1,0x9c9a90,x-rw*.2,topY,z+rd*.12,skyline);
+      if(rnd()<.22)box(.05,2.2,.05,0x4a4a46,x,topY,z,skyline);
+      if(rnd()<.3)flat(rw*.55,rd*.55,0x9fbf73,x,topY+.06,z);
+      // A canopy, sign and lobby glass face the office, giving each block a front door.
+      const faceX=Math.abs(x)>=Math.abs(z),dir=faceX?(x>=0?-1:1):(z>=0?-1:1);
+      if(faceX){
+        box(1.3,.16,2.4,0xd8d2c4,x+dir*(w/2+.55),base+3.1,z,skyline);
+        box(.06,1.3,d*.62,0x8faab0,x+dir*(w/2+.09),base+.6,z,skyline);
+        box(.06,.48,2.2,0xe8e2d8,x+dir*(w/2+.04),base+3.3,z,skyline);
+      }else{
+        box(2.4,.16,1.3,0xd8d2c4,x,base+3.1,z+dir*(d/2+.55),skyline);
+        box(w*.62,1.3,.06,0x8faab0,x,base+.6,z+dir*(d/2+.09),skyline);
+        box(2.2,.48,.06,0xe8e2d8,x,base+3.3,z+dir*(d/2+.04),skyline);
+      }
       placed++;
     }
     // Front garden: clipped hedges and flowers frame the lawn; the office sign faces the street.
@@ -1131,6 +1185,28 @@
   // grown by a body radius. Built once, before any people are placed, so only the static office counts.
   // Cells are 0 open, 1 furniture (a seat can be reached through it) or 2 wall (walls, glass, partitions: never crossed).
   const NAV={cell:.2,x0:-16.4,z0:-12.4,w:164,h:124,clear:.22,soft:.16};
+  // A clear 16:9 presentation display for the meeting room: bright slide, slim bezel, soundbar and camera.
+  function meetingDisplay(x,z,parent){
+    const c=document.createElement('canvas');c.width=768;c.height=432;const ctx=c.getContext('2d');
+    ctx.fillStyle='#f5f1e8';ctx.fillRect(0,0,768,432);
+    ctx.fillStyle='#1e2230';ctx.fillRect(0,0,768,56);
+    ctx.fillStyle='#f5f1e8';ctx.font='700 22px Archivo, system-ui, sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('KANTOR KITA',24,29);
+    ctx.fillStyle='#f0a531';ctx.fillRect(700,18,40,20);
+    ctx.fillStyle='#1e2230';ctx.font='700 42px Archivo, system-ui, sans-serif';ctx.fillText('Sinkronisasi mingguan',24,116);
+    ctx.fillStyle='#6b6f7b';ctx.font='500 19px Archivo, system-ui, sans-serif';ctx.fillText('Ruang rapat · agenda, progres, dan keputusan',24,151);
+    const cards=[['Tugas aktif','8','#f0a531'],['Selesai','12','#5f9a94'],['Perlu keputusan','2','#c95f5f']];
+    cards.forEach(([label,value,color],i)=>{const cx=24+i*244;ctx.fillStyle='#ffffff';ctx.fillRect(cx,178,224,92);ctx.fillStyle=color;ctx.fillRect(cx,178,6,92);ctx.fillStyle='#6b6f7b';ctx.font='600 16px Archivo, system-ui, sans-serif';ctx.fillText(label,cx+20,206);ctx.fillStyle='#1e2230';ctx.font='700 32px Archivo, system-ui, sans-serif';ctx.fillText(value,cx+20,244);});
+    ctx.fillStyle='#1e2230';ctx.font='700 18px Archivo, system-ui, sans-serif';ctx.textBaseline='alphabetic';ctx.fillText('Progres per divisi',24,314);
+    [38,54,44,68,58,72].forEach((h,i)=>{ctx.fillStyle=i%2?'#5f9a94':'#f0a531';ctx.fillRect(24+i*48,400-h,28,h);});
+    ctx.strokeStyle='#d8d2c6';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(24,402);ctx.lineTo(330,402);ctx.stroke();
+    ctx.fillStyle='#9a9488';ctx.font='500 14px Archivo, system-ui, sans-serif';ctx.fillText('Rapat dimulai 09.30 · 45 menit',24,420);
+    const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+    box(2.7,1.55,.07,DARK,x,.86,z,parent);
+    const screen=new THREE.Mesh(new THREE.PlaneGeometry(2.48,1.36),new THREE.MeshBasicMaterial({map:tex}));
+    screen.position.set(x,1.635,z+.045);parent.add(screen);
+    box(1.8,.1,.12,0x22262a,x,.72,z+.06,parent);
+    box(1.1,.07,.08,0x2a2e32,x,2.48,z+.03,parent);
+  }
   // Room dressing in the spirit of the reference interiors: art on the walls, plants, shelves, rugs, lounge pieces,
   // pendant and arc lights, a TV in the meeting room, and dark window mullions. Placed in free space only.
   function dress(level){
@@ -1142,8 +1218,8 @@
     if(isWork(level)){
       for(const [x,z,r] of [[-6.5,-11.85,0],[1.5,-11.85,0],[8,-11.85,0],[-15.85,2,Math.PI/2],[15.85,2.5,-Math.PI/2]])wall('painting',x,z,r);
       wall('clock',-1,-11.88,0,2.05,{w:.4});
-      // Meeting room: wall TV on a walnut panel, patterned rug.
-      decorBox('wood_panel',2.6,1.6,.04,'wood_panel_walnut',-13.2,.75,-11.84,f);wall('tv',-13.2,-11.35,0,1.05,{w:1.6,h:.9,d:.6});
+      // Meeting room: a large presentation screen on a walnut slat wall, patterned rug.
+      decorBox('wood_panel',3.4,2.2,.04,'wood_panel_walnut',-13.2,.45,-11.86,f);meetingDisplay(-13.2,-11.8,f);
       decorBox('rug',3.6,.012,2.6,'rug_pattern',-13.2,.025,-9,f);
       // Back lounge: shaggy rug, glass coffee table, cushions, arc lamp, tall plants, bookshelf with books.
       decorBox('rug',3.2,.012,2.2,'rug_shaggy',-2.8,.03,-9.4,f);decor('coffee_table_glass',{w:1.1},f,{x:-1.6,z:-9.2});
@@ -2669,6 +2745,7 @@
     // Keep-visible dashboards: redraw the executive monitors a few times per second while time runs.
     if(dt>0)for(const screen of animatedScreens){if(simTime-screen.last<.45)continue;screen.last=simTime;screen.draw(simTime);screen.texture.needsUpdate=true;}
     for(const d of doors){const near=agents.some(a=>a.floor===d.floor&&a.state!=='stairs'&&a.g.position.distanceTo(d.center)<1.6);d.open+=((near?1:0)-d.open)*Math.min(1,dt*6);d.pivot.rotation.y=d.base+d.open*1.45;}
+    if(garage){const near=mobility.snapshot().vehicles.some(v=>v.pose[0]>0&&v.pose[0]<16&&v.pose[2]>5&&v.pose[2]<18);garage.open+=((near?1:0)-garage.open)*Math.min(1,dt*4);garage.group.scale.y=Math.max(.015,1-garage.open*.985);}
     if(follow){scene.updateMatrixWorld(true);followCamera(realDt);}
     scene.updateMatrixWorld(true);
     const occupied=[];

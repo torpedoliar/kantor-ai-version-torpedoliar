@@ -24,8 +24,25 @@
     const ready=(async()=>{let timer;try{await Promise.race([(async()=>{const response=await fetch('assets/environment/manifest.json');if(!response.ok)throw Error('manifest');const m=await response.json();for(const key of ['asphalt','grass'])loadGround(key,m.assets[key]);await Promise.all(['tree','car','motorcycle'].map(async key=>{try{const gltf=await new T.addons.GLTFLoader().loadAsync(m.assets[key].file);if(dead||!loading){gltf.scene.traverse(o=>{o.geometry?.dispose();for(const m of [o.material].flat().filter(Boolean)){for(const v of Object.values(m))if(v?.isTexture)v.dispose();m.dispose();}});return;}templates.set(key,gltf.scene);}catch{failed.push(key);onWarning('Model lingkungan gagal: '+key);}}));})(),new Promise(resolve=>{timer=setTimeout(()=>{failed.push('timeout');onWarning('Model lingkungan lambat; kantor tetap berjalan.');resolve();},15000);})]);}catch{failed.push('manifest');onWarning('Aset lingkungan belum tersedia.');}finally{loading=false;clearTimeout(timer);}})();
     // Ordinary street paint colours; picked from the vehicle id so a car keeps its colour.
     const PAINTS=[0xd9d9d6,0x2b2f33,0x8a8f94,0x7a1f24,0x1f3550,0xe8e4da,0x3b4a3c];
+    // Seated rider for moving motorcycles; one shared kit keeps every rider cheap.
+    const riderGeo={torso:new T.BoxGeometry(.42,.5,.26),head:new T.SphereGeometry(.14,12,8),visor:new T.BoxGeometry(.2,.055,.05),limb:new T.CylinderGeometry(.055,.07,1,8)};
+    const riderMat={jacket:new T.MeshStandardMaterial({color:0x2f3a45,roughness:.85}),helmet:new T.MeshStandardMaterial({color:0xe8e4da,roughness:.45,metalness:.05}),pants:new T.MeshStandardMaterial({color:0x2a2c30,roughness:.9}),visor:new T.MeshStandardMaterial({color:0x11161a,roughness:.25,metalness:.35})};
+    function addRider(g){
+      const rider=new T.Group();
+      const part=(geo,mat,x,y,z,sx=1,sy=1,sz=1,rx=0,rz=0)=>{const m=new T.Mesh(geo,mat);m.position.set(x,y,z);m.scale.set(sx,sy,sz);m.rotation.x=rx;m.rotation.z=rz;m.castShadow=false;m.receiveShadow=true;rider.add(m);return m;};
+      part(riderGeo.torso,riderMat.jacket,0,.94,-.08,1,1,1,.15,0);
+      part(riderGeo.head,riderMat.helmet,0,1.31,.01);
+      part(riderGeo.visor,riderMat.visor,0,1.30,.145);
+      for(const sx of [-1,1]){
+        part(riderGeo.limb,riderMat.jacket,sx*.22,1.10,.25,.9,.46,.9,-1.05,sx*.12);
+        part(riderGeo.limb,riderMat.pants,sx*.2,.67,.05,1,.5,1,-.8,sx*.12);
+        part(riderGeo.limb,riderMat.pants,sx*.24,.4,.25,.9,.45,.9,.45,0);
+      }
+      g.userData.rider=rider;g.add(rider);
+    }
     function spawn(kind,id,parent){if(!templates.has(kind))return null;const g=templates.get(kind).clone(true);let h=0;for(const c of id)h=(h*31+c.charCodeAt(0))>>>0;
       g.traverse(o=>{if(!o.isMesh)return;o.castShadow=false;o.receiveShadow=true;if(kind==='car'&&o.material?.name==='ToyCar'){o.material=o.material.clone();o.material.color.setHex(PAINTS[h%PAINTS.length]);owned.add(o.material);}});
+      if(kind==='motorcycle'&&!id.startsWith('parked-'))addRider(g);
       parent.add(g);instances.set(id,g);return g;}
     ready.then(()=>{if(dead)return;
       for(const [id,kind,x,z]of [['parked-car1','car',2,-5],['parked-car2','car',12,-5],['parked-motor1','motorcycle',3,3.5],['parked-motor2','motorcycle',6,3.5]]){const g=spawn(kind,id,parkingRoot);if(g)g.position.set(x,PARKING_Y,z);}
@@ -53,6 +70,7 @@
         live.add(v.id);const parent=v.lane?city:parkingRoot,g=instances.get(v.id)||spawn(v.kind,v.id,parent);if(!g)continue;
         if(g.parent!==parent)parent.add(g);
         g.rotation.order='YXZ';g.position.set(...v.pose);g.rotation.x=Number.isFinite(v.pitch)?v.pitch:0;g.rotation.z=Number.isFinite(v.roll)?v.roll:0;g.rotation.y=v.heading;g.visible=true;
+        if(g.userData.rider)g.userData.rider.visible=!!v.lane;
       }
       for(const [id,g]of instances){
         if(id.startsWith('parked-'))continue;

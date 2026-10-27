@@ -17,7 +17,7 @@ const ready=page=>page.waitForFunction(()=>window.officeScene?.snapshot().models
   assert.ok(await real.page.evaluate(()=>officeScene.modelCount(3)>=40),'work floor uses real furniture models');
   // Room dressing like the reference interiors: small items, plants, art, lighting, lounge pieces.
   const d3=await real.page.evaluate(()=>officeScene.decor(3));assert.ok(d3.total>=60,`floor 3 decor ${d3.total}`);
-  for(const kind of ['monitor','keyboard','plant_small','plant_tall','painting','bookshelf','pendant_lamp','sofa_sectional','coffee_table_glass','rug','arc_lamp','tv'])assert.ok(d3.kinds.includes(kind),`floor 3 has ${kind}: ${d3.kinds}`);
+  for(const kind of ['monitor','keyboard','plant_small','plant_tall','painting','bookshelf','pendant_lamp','sofa_sectional','coffee_table_glass','rug','arc_lamp'])assert.ok(d3.kinds.includes(kind),`floor 3 has ${kind}: ${d3.kinds}`);
   for(const level of [1,2,4])assert.ok((await real.page.evaluate(l=>officeScene.decor(l).total,level))>=15,`floor ${level} decor`);
   // Decor never blocks a desk: with routines paused everyone is sent back and sits at work.
   await real.page.evaluate(()=>{officeScene.setRoutine?.(false);officeScene.everyoneToDesk?.();});
