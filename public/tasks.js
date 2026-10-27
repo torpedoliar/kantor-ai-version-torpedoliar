@@ -485,13 +485,19 @@
     if(orgState.configured===false&&!snoozed)window.OrgWizard?.open('first-run',wizardApi);
     tasks.filter(t => t.status === 'active' && team.some(person => person.n === t.assignee)).forEach(t => changed(t.assignee));
     document.dispatchEvent(new CustomEvent('officetasks:server', {detail: info}));
-    setInterval(async () => {
-      if(polling||writing)return;polling=true;const ticket=mutation;
-      const latest = await call('GET', `/api/tasks?summary=1${selectedId?`&full=${encodeURIComponent(selectedId)}`:''}`).catch(() => null);
+    const poll = async () => {
+      if(document.hidden||polling||writing)return;polling=true;const ticket=mutation;
+      const [latest,orgLatest] = await Promise.all([
+        call('GET', `/api/tasks?summary=1${selectedId?`&full=${encodeURIComponent(selectedId)}`:''}`).catch(() => null),
+        call('GET','/api/org').catch(() => null)
+      ]);
       polling=false;if(ticket!==mutation)return;
+      if(orgLatest&&orgLatest.version!==orgState.version){orgState=orgLatest;orgChanged();}
       if (!latest || JSON.stringify(latest) === JSON.stringify(tasks)) return;
       apply(latest);render();
-    }, 2500);
+    };
+    setInterval(poll, 2500);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
   }
   window.officeTasks = {
     activeFor: name => tasks.find(t => t.assignee === name && t.status === 'active'),

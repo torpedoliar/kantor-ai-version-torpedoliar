@@ -146,7 +146,9 @@
   // Seat links: owner seats sit exactly on the item (chairs), followers keep an offset (lounge/billiard spots).
   const linkSpot=(item,spot,owner=true)=>{spot.itemId=item.id;spot._item=item;if(owner){spot._ref=[item,item.seatRefs.push(spot)-1];}else{spot._dx=spot.x-item.x;spot._dz=spot.z-item.z;spot._ref=[item,-1];item.seatRefs.push(spot);}return spot;};
   let root, activeFloor = 3, selected = null, paused = false, simTime = 0, garage = null;
-  let routineOn = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // The saved Settings preference applies on load; reduced motion keeps the default off.
+  let routineOn = !reduceMotion && (window.officeSettings?.preferences?.read?.().routineDefault !== false);
   // Per-frame caches: mobility is cloned once after tick, tasks are cloned once, and the selected
   // task map replaces per-agent list scans.
   let frameMobility=null,frameTasks=[],activeTaskByAgent=new Map();
@@ -2329,7 +2331,6 @@
   // Moving between one floor and the whole building glides the camera, while the other floors slide in to assemble
   // the building (zooming out) or slide away (zooming in). Glass, stairs and the city settle at the end.
   let transition=null,viewReady=false;
-  const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)').matches;
   function startTransition(from,to){
     transition={to,focus:to===0?from:to,t:0,duration:1.4,from:{target:cam.target.clone(),theta:cam.theta,phi:cam.phi,radius:cam.radius},dest:cameraFor(to)};
     cam.spin=0;showLevels(ORDER,false);stepTransition(0);

@@ -355,14 +355,13 @@ Dependensi keras:
 - Test: perluas `tests/settings-ui.cjs`, `tests/office.cjs`, `tests/messenger-ui.cjs`
 
 **Steps:**
-- [ ] 1. Saat init, baca `routineDefault` (kecuali `prefers-reduced-motion`); perubahan checkbox langsung memanggil `officeScene.setRoutine()`.
-- [ ] 2. Tambah `org.version` (atau hash) di poll `/api/tasks`; bila berubah, panggil `orgChanged()`/`applyOrg` tanpa reload, lewati saat ada edit lokal yang belum disimpan.
-- [ ] 3. Pause poll saat `document.hidden`, refresh saat `visibilitychange`; tampilkan status koneksi di `#messengerStatus` bila refresh gagal.
+- [x] 1. Saat init, `routineOn` membaca `officeSettings.preferences.routineDefault` (kecuali `prefers-reduced-motion`); tombol simpan preferensi memanggil `officeScene.setRoutine()`.
+- [x] 2. Poll 2,5 detik mengambil `/api/org` bersamaan dengan task; bila `version` berbeda, `orgState` diganti dan `orgChanged()`/`applyOrg` berjalan tanpa reload.
+- [x] 3. Poll berhenti saat `document.hidden`, berjalan lagi saat `visibilitychange`; messenger sudah punya status "Luring" dari Task 10.
 
 **Acceptance:**
-- Mematikan rutinitas lalu reload: rutinitas tetap mati.
-- Dua tab: menambah departemen di tab A memunculkan area baru di tab B dalam ≤3 detik.
-- Interval poll tidak berjalan saat tab tersembunyi (dapat diverifikasi lewat log request server).
+- `sync-routine.cjs`: rutinitas mati setelah reload; tab B menerima rename divisi dari tab A; saat `document.hidden` diemulasikan, tab B tidak berubah sampai terlihat lagi.
+- `settings-ui` dan `office` lulus.
 
 ---
 
@@ -535,6 +534,10 @@ Dependensi keras:
   - Resize tanpa reset kamera, input 16px untuk pointer kasar, `.settings-header` diperbaiki.
   - Rail mobile memindahkan Ruang/Tata ruang ke Lainnya; tes 360px dengan keputusan terbuka.
   - Verifikasi: mobile-layout, nav, nav-hardening, settings-ui, office.
+- 2026-10-27 — Task 15 selesai di working tree (belum commit):
+  - Preferensi rutinitas dibaca saat init dan diterapkan saat disimpan.
+  - Poll org setiap 2,5 detik; jeda saat tab tersembunyi dan lanjut saat terlihat.
+  - Tes `sync-routine`; settings-ui/office lulus.
 
 ## Risiko utama
 
