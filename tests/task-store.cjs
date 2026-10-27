@@ -1,7 +1,7 @@
 // Durable lifecycle transactions: migration once, atomic changes, request deduplication and cursor replay.
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
-const {createTaskStore,transitionTask}=require('../server/task-store');
+const {createTaskStore,transitionTask,prune,EVENT_LIMIT,REQUEST_LIMIT,REQUEST_TTL}=require('../server/task-store');
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-task-store-'));
 try{
   const legacy='[{"id":"old","title":"Old task","assignee":"A","status":"queued","version":0,"messages":[{"by":"Owner","text":"A note","at":"2026-10-20T00:00:00Z"}]}]';
@@ -37,5 +37,18 @@ try{
   fs.writeFileSync(path.join(dir,'tasks.json'),'[]');assert.equal(createTaskStore({dataDir:dir}).snapshot().tasks.length,1);
   const bad=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-task-bad-'));
   try{fs.writeFileSync(path.join(bad,'tasks.json'),'broken');assert.throws(()=>createTaskStore({dataDir:bad}),/Cannot read/);assert.equal(fs.existsSync(path.join(bad,'workspace.json')),false);}finally{fs.rmSync(bad,{recursive:true,force:true});}
-  console.log('PASS: transactional task migration, atomic rollback, request deduplication, lifecycle guards and ordered event replay');
+  // Retention: expired events and request keys are pruned, and the retained sequence starts at firstSeq.
+  const stamp=Date.parse('2026-10-27T00:00:00Z'),old=new Date(stamp-200*24*60*60*1000).toISOString(),recent=new Date(stamp-1000).toISOString();
+  const retention={events:[{seq:1,at:old},{seq:2,at:recent}],nextSeq:3,requests:{old:{result:'x',at:old},fresh:{result:'y',at:recent},legacy:{result:'z'}}};
+  assert.equal(prune(retention,stamp),true);
+  assert.deepEqual(retention.events.map(event=>event.seq),[2]);assert.equal(retention.firstSeq,2);
+  assert.deepEqual(Object.keys(retention.requests),['fresh']);
+  const many={events:Array.from({length:EVENT_LIMIT+3},(_,index)=>({seq:index+1,at:recent})),nextSeq:EVENT_LIMIT+4,requests:{}};
+  for(let index=0;index<REQUEST_LIMIT+5;index++)many.requests['r'+index]={result:index,at:new Date(stamp-index*100).toISOString()};
+  prune(many,stamp);
+  assert.equal(many.events.length,EVENT_LIMIT);assert.equal(many.firstSeq,4);
+  assert.equal(Object.keys(many.requests).length,REQUEST_LIMIT);
+  assert.ok(!Object.hasOwn(many.requests,'r'+REQUEST_LIMIT),'oldest request key is dropped first');
+  assert.ok(REQUEST_TTL>0);
+  console.log('PASS: transactional task migration, atomic rollback, request deduplication, lifecycle guards, ordered event replay and bounded retention');
 }finally{fs.rmSync(dir,{recursive:true,force:true});}

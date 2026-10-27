@@ -4,8 +4,32 @@ const crypto=require('node:crypto');
 
 const clone=value=>structuredClone(value);
 const collections=['tasks','threads','messages','decisions','events','projects','jobs'];
+// Long-running offices keep the console useful without letting workspace.json grow forever.
+// Request keys only need to survive a retry window; events outside the window are dropped
+// (the reset flow archives the whole workspace before clearing it). Keep the event window no
+// larger than the console's own 5,000-row window, so a fresh client can page through everything
+// retained without entering a resync loop.
+const EVENT_LIMIT=5000,EVENT_MAX_AGE=90*24*60*60*1000,REQUEST_LIMIT=1000,REQUEST_TTL=15*60*1000;
+function prune(draft,now=Date.now()){
+  let changed=false,first=draft.events.findIndex(event=>now-(Date.parse(event.at)||0)<=EVENT_MAX_AGE);
+  if(first<0)first=draft.events.length;
+  if(draft.events.length-first>EVENT_LIMIT)first=draft.events.length-EVENT_LIMIT;
+  if(first>0){draft.events.splice(0,first);changed=true;}
+  draft.firstSeq=draft.events[0]?.seq??draft.nextSeq;
+  for(const [key,entry] of Object.entries(draft.requests||{})){
+    const at=Date.parse(entry?.at);
+    if(!Number.isFinite(at)||now-at>REQUEST_TTL){delete draft.requests[key];changed=true;}
+  }
+  const entries=Object.entries(draft.requests||{});
+  if(entries.length>REQUEST_LIMIT){
+    entries.sort((a,b)=>(Date.parse(a[1]?.at)||0)-(Date.parse(b[1]?.at)||0));
+    for(const [key] of entries.slice(0,entries.length-REQUEST_LIMIT))delete draft.requests[key];
+    changed=true;
+  }
+  return changed;
+}
 function conflict(code,message){return Object.assign(new Error(message),{status:409,code});}
-function empty(){return {schemaVersion:1,version:0,nextSeq:1,tasks:[],threads:[],messages:[],decisions:[],events:[],projects:[],jobs:[],reads:{owner:{}},requests:{},memories:{}};}
+function empty(){return {schemaVersion:1,version:0,nextSeq:1,firstSeq:1,tasks:[],threads:[],messages:[],decisions:[],events:[],projects:[],jobs:[],reads:{owner:{}},requests:{},memories:{}};}
 // Agent memory: at most 20 short notes per agent, newest last. Notes are summaries, never whole drafts.
 const MEMORY_LIMIT=20,MEMORY_TEXT=300;
 function remember(draft,agent,notes){draft.memories=draft.memories||{};const list=[...(draft.memories[agent]||[]),...notes.map(text=>({text:String(text).replace(/\s+/g,' ').trim().slice(0,MEMORY_TEXT),at:new Date().toISOString()})).filter(n=>n.text)];draft.memories[agent]=list.slice(-MEMORY_LIMIT);return draft.memories[agent];}
@@ -49,7 +73,7 @@ function threadSummaries(state){
     .sort((a,b)=>(b.lastMessage?.seq||0)-(a.lastMessage?.seq||0));
 }
 function validate(state){
-  if(state?.schemaVersion!==1||!Number.isInteger(state.version)||!Number.isInteger(state.nextSeq)||state.nextSeq<1||collections.some(key=>!Array.isArray(state[key]))||!state.reads?.owner||!state.requests)throw Error('Invalid workspace state.');
+  if(state?.schemaVersion!==1||!Number.isInteger(state.version)||!Number.isInteger(state.nextSeq)||state.nextSeq<1||!Number.isInteger(state.firstSeq)||state.firstSeq<1||state.firstSeq>state.nextSeq||collections.some(key=>!Array.isArray(state[key]))||!state.reads?.owner||!state.requests)throw Error('Invalid workspace state.');
   let seq=0;for(const event of state.events){if(!Number.isInteger(event.seq)||event.seq<=seq||event.seq>=state.nextSeq)throw Error('Invalid event sequence.');seq=event.seq;}
 }
 function migrate(tasks){
@@ -80,10 +104,10 @@ function repairLegacyDecisions(draft,emit){
 function createTaskStore({dataDir,write=atomicWrite}){
   fs.mkdirSync(dataDir,{recursive:true});const file=path.join(dataDir,'workspace.json'),legacy=path.join(dataDir,'tasks.json');let state;
   try{
-    if(fs.existsSync(file)){state=JSON.parse(fs.readFileSync(file,'utf8'));validate(state);state.memories=state.memories||{};}
+    if(fs.existsSync(file)){state=JSON.parse(fs.readFileSync(file,'utf8'));state.firstSeq=Number.isInteger(state.firstSeq)?state.firstSeq:(Array.isArray(state.events)?state.events[0]?.seq??state.nextSeq:state.nextSeq);state.memories=state.memories||{};validate(state);}
     else{state=fs.existsSync(legacy)?migrate(JSON.parse(fs.readFileSync(legacy,'utf8'))):empty();validate(state);write(file,JSON.stringify(state,null,2));}
   }catch(error){throw new Error(`Cannot read task workspace: ${error.message}`);}
-  {const draft=clone(state);if(repairLegacyDecisions(draft,event=>emitEvent(draft,event))){draft.version=state.version+1;validate(draft);write(file,JSON.stringify(draft,null,2));state=draft;}}
+  {const draft=clone(state);const repaired=repairLegacyDecisions(draft,event=>emitEvent(draft,event)),trimmed=prune(draft);if(repaired||trimmed){draft.version=state.version+1;validate(draft);write(file,JSON.stringify(draft,null,2));state=draft;}}
   const listeners=new Set();
   function transaction(expectedVersion,mutate,{requestKey}={}){
     if(requestKey&&Object.hasOwn(state.requests,requestKey))return clone(state.requests[requestKey].result);
@@ -92,7 +116,8 @@ function createTaskStore({dataDir,write=atomicWrite}){
     if(result&&typeof result.then==='function')throw Error('Transaction mutator must be synchronous.');
     for(const message of draft.messages)if(typeof message.text==='string')message.text=message.text.slice(0,8000);
     draft.version=state.version+1;
-    if(requestKey)draft.requests[requestKey]={result:clone(result??null)};
+    if(requestKey)draft.requests[requestKey]={result:clone(result??null),at:new Date().toISOString()};
+    prune(draft);
     validate(draft);write(file,JSON.stringify(draft,null,2));state=draft;
     const events=state.events.filter(event=>event.seq>=firstSeq);
     for(const listener of listeners){try{listener(clone(events));}catch{/* A view listener cannot roll back a committed write. */}}
@@ -105,6 +130,6 @@ function createTaskStore({dataDir,write=atomicWrite}){
       draft.tasks=clone(tasks);
     });
   }
-  return {snapshot:()=>clone(state),saveTasks,transaction,eventsAfter:(after=0,limit=200)=>clone(state.events.filter(e=>e.seq>after).slice(0,Math.max(1,Math.min(500,limit)))),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);}};
+  return {snapshot:()=>clone(state),saveTasks,transaction,firstSeq:()=>state.firstSeq,eventsAfter:(after=0,limit=200)=>clone(state.events.filter(e=>e.seq>after).slice(0,Math.max(1,Math.min(500,limit)))),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);}};
 }
-module.exports={remember,MEMORY_LIMIT,MEMORY_TEXT,acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries};
+module.exports={remember,MEMORY_LIMIT,MEMORY_TEXT,acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries,prune,EVENT_LIMIT,EVENT_MAX_AGE,REQUEST_LIMIT,REQUEST_TTL};

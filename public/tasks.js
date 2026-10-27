@@ -54,10 +54,17 @@
     try{
       if(write&&!csrf){const session=await fetch('/api/session',{cache:'no-store'});if(session.ok)csrf=(await session.json()).csrf||'';}
       const headers={'content-type':'application/json'};if(csrf)headers['x-kantor-csrf']=csrf;if(options.request)headers['x-kantor-request']=options.request;if(orgToken)headers['x-kantor-org']=orgToken;
+      // Only reads, and writes that already carry an idempotency key, may be retried. Retrying a plain
+      // POST after a lost response could create the same task or room twice.
+      const retryable=method==='GET'||method==='HEAD'||!!options.request;
       let response;
-      // A dropped connection (server restarted, browser tab left over from before) gets one retry, then a readable message.
       try{response=await fetch(path,{method,headers,body:body&&JSON.stringify(body)});}
-      catch{await new Promise(r=>setTimeout(r,800));try{response=await fetch(path,{method,headers,body:body&&JSON.stringify(body)});}catch{const error=new Error('Server Kantor Kita tidak bisa dihubungi. Pastikan server berjalan (npm start), lalu muat ulang halaman ini dengan Ctrl+F5.');error.code='SERVER_UNREACHABLE';throw error;}}
+      catch{
+        if(!retryable){const error=new Error('Koneksi terputus saat menyimpan. Muat ulang halaman dan periksa apakah perubahan sudah tersimpan.');error.code='SERVER_UNREACHABLE';throw error;}
+        await new Promise(r=>setTimeout(r,800));
+        try{response=await fetch(path,{method,headers,body:body&&JSON.stringify(body)});}
+        catch{const error=new Error('Server Kantor Kita tidak bisa dihubungi. Pastikan server berjalan (npm start), lalu muat ulang halaman ini dengan Ctrl+F5.');error.code='SERVER_UNREACHABLE';throw error;}
+      }
       const data=await response.json().catch(()=>({}));
       if(!response.ok){const error=new Error(data.error||`Server error ${response.status}`);error.code=data.code;error.status=response.status;if(Array.isArray(data.tasks))error.tasks=data.tasks;throw error;}
       return data;
@@ -377,7 +384,13 @@
   // Events need the owner unlock. Without it the flow/console say so instead of showing an empty, misleading view.
   async function loadEvents() {
     if (!server || !orgToken) { if (activeView !== 'board') feedback('Buka kunci owner untuk melihat alur kerja dan console.'); return; }
-    for (let guard = 0; guard < 20; guard++) { const page = await call('GET', `/api/task-events?after=${eventSeq}`).catch(error => { recoverOrgLock(error); return null; }); if (!page || !addEvents(page.events)) break; }
+    for (let guard = 0; guard < 20; guard++) {
+      const page = await call('GET', `/api/task-events?after=${eventSeq}`).catch(error => { recoverOrgLock(error); return null; });
+      if (!page) break;
+      // History was pruned past this cursor: start again at the oldest retained event.
+      if (page.resync) { events = []; eventSeq = Math.max(0, (page.firstSeq || 1) - 1); }
+      if (!addEvents(page.events)) break;
+    }
     render(); openFeed();
   }
   // SSE over fetch (headers carry the owner token); a dropped stream reconnects from the last seq, polling covers the gap.

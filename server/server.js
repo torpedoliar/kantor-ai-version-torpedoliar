@@ -408,8 +408,10 @@ function openEventStream(req,res,after){
   const write=chunk=>{if(res.writableEnded)return;res.write(chunk);if(res.writableLength>1e6)client.close();};
   const client={cursor:after,push(event){if(event.seq>client.cursor){client.cursor=event.seq;write(`id: ${event.seq}\nevent: task\ndata: ${JSON.stringify(event)}\n\n`);}},close(){streams.delete(client);clearInterval(beat);res.end();}};
   const beat=setInterval(()=>write(': heartbeat\n\n'),15000);
-  const backlog=taskStore.eventsAfter(after,EVENT_REPLAY),latest=taskStore.snapshot().nextSeq-1;
-  if(backlog.length&&backlog.at(-1).seq<latest){client.cursor=latest;write(`event: resync\ndata: ${JSON.stringify({seq:latest})}\n\n`);}
+  const first=taskStore.firstSeq(),backlog=taskStore.eventsAfter(after,EVENT_REPLAY),latest=taskStore.snapshot().nextSeq-1;
+  // A cursor older than the retained history cannot be replayed without gaps: ask the client to resync.
+  if(after<first-1){client.cursor=latest;write(`event: resync\ndata: ${JSON.stringify({seq:latest})}\n\n`);}
+  else if(backlog.length&&backlog.at(-1).seq<latest){client.cursor=latest;write(`event: resync\ndata: ${JSON.stringify({seq:latest})}\n\n`);}
   else backlog.forEach(event=>client.push(event));
   streams.add(client);req.on('close',()=>{streams.delete(client);clearInterval(beat);});
 }
@@ -671,12 +673,12 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
   }
   if (url.pathname.startsWith('/api/task-events') && req.method === 'GET' && !org.verifyToken(req.headers['x-kantor-org']||url.searchParams.get('token')))return send(res,403,{error:'A valid owner unlock is required.',code:'ORG_LOCKED'});
   if (url.pathname === '/api/task-events/snapshot' && req.method === 'GET') {
-    const state=taskStore.snapshot();return send(res,200,{seq:state.nextSeq-1,tasks:state.tasks,streams:streams.size});
+    const state=taskStore.snapshot();return send(res,200,{seq:state.nextSeq-1,firstSeq:state.firstSeq,tasks:state.tasks,streams:streams.size});
   }
   if (url.pathname === '/api/task-events' && req.method === 'GET') {
     const after=Math.max(0,Number(req.headers['last-event-id']??url.searchParams.get('after')??0)||0);
     if((req.headers.accept||'').includes('text/event-stream'))return openEventStream(req,res,after);
-    return send(res,200,{events:taskStore.eventsAfter(after,EVENT_REPLAY)});
+    const first=taskStore.firstSeq();return send(res,200,{events:taskStore.eventsAfter(after,EVENT_REPLAY),firstSeq:first,resync:after<first-1});
   }
   if (url.pathname === '/api/communications' && req.method === 'GET') {
     const after=Number(url.searchParams.get('after')||0),state=taskStore.snapshot();
