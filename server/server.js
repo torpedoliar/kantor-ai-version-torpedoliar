@@ -117,9 +117,10 @@ function save(){
   try{taskStore.saveTasks(tasks);}
   catch(error){tasks=taskStore.snapshot().tasks;throw error;}
 }
-// Messenger and decision writes: one transaction over the durable state, then refresh the working task list.
+// Messenger and decision writes: exactly one transaction over the durable state, then refresh the
+// working task list. Handlers must mutate the transaction draft, never the cached tasks array.
 function commit(mutate,options){
-  save();const result=taskStore.transaction(taskStore.snapshot().version,mutate,options);
+  const result=taskStore.transaction(taskStore.snapshot().version,mutate,options);
   tasks=taskStore.snapshot().tasks;return result;
 }
 // Answering resolves the decision, records the owner's reply and requeues the task in one transaction.
@@ -541,14 +542,17 @@ function requireOrgToken(req, task) {
   if (!privilegedTask(task) || org.verifyToken(req.headers['x-kantor-org'])) return null;
   return {status:403,error:'A valid owner unlock is required for this action.',code:'ORG_LOCKED'};
 }
-function promoteParent(parentId){
-  if(!parentId)return;
-  const parent=tasks.find(item=>item.id===parentId);if(!parent)return;
-  const children=tasks.filter(item=>item.parentId===parentId);if(children.length&&children.every(item=>item.status==='done')&&['queued','active'].includes(parent.status)){
+function promoteParent(parentId,list=tasks){
+  if(!parentId)return null;
+  const parent=list.find(item=>item.id===parentId);if(!parent)return null;
+  const children=list.filter(item=>item.parentId===parentId);if(children.length&&children.every(item=>item.status==='done')&&['queued','active'].includes(parent.status)){
+    const from=parent.status;
     // A manual split has no lead synthesis: the owner reviews the children's own results, listed as the parent result.
     const result=parent.result||children.map(item=>`### ${item.title} (${item.assignee})\n${item.result||'(tanpa hasil)'}`).join('\n\n').slice(0,10000);
     Object.assign(parent,{status:'review',result,version:(parent.version||0)+1,updatedAt:now()});
+    return {parent,from};
   }
+  return null;
 }
 function newTask(input) {
   if(!input||typeof input!=='object')return null;
@@ -567,7 +571,7 @@ async function api(req, res, url) {
     const state=taskStore.snapshot(),tasksByStatus={};
     for(const task of state.tasks)tasksByStatus[task.status]=(tasksByStatus[task.status]||0)+1;
     let dataDirWritable=true;try{fs.accessSync(DATA_DIR,fs.constants.W_OK);}catch{dataDirWritable=false;}
-    return send(res,200,{ok:true,closing,uptimeSeconds:Math.round(process.uptime()),port:PORT,dataDir:DATA_DIR,dataDirWritable,workspaceVersion:state.version,tasks:tasksByStatus,streams:streams.size,runningJobs:running.size,retryTimers:retryTimers.size,models:modelGate.snapshot(),recovery:startupRecovery});
+    return send(res,200,{ok:true,closing,uptimeSeconds:Math.round(process.uptime()),port:PORT,dataDir:DATA_DIR,dataDirWritable,workspaceVersion:state.version,workspaceWrites:taskStore.writes(),tasks:tasksByStatus,streams:streams.size,runningJobs:running.size,retryTimers:retryTimers.size,models:modelGate.snapshot(),recovery:startupRecovery});
   }
   if (url.pathname === '/api/ready' && req.method === 'GET') return send(res,closing?503:200,{ready:!closing,uptimeSeconds:Math.round(process.uptime())});
   if (url.pathname === '/api/settings' && req.method === 'GET') return send(res,200,settings.publicState());
@@ -955,13 +959,24 @@ Keterangan: ${text(company.description,4000)||'(tidak ada)'}`;
       if(task.status!=='review'||input.version!==(task.version||0))return send(res,409,{error:'This draft changed. Refresh and review the latest version.'});
       if(input.action==='revise'&&!text(input.feedback,5000))return send(res,400,{error:'Describe the changes needed.'});
       if(input.action==='approve'&&!text(task.result,10000))return send(res,409,{error:'Belum ada hasil yang bisa disetujui. Minta lead menyusun hasil dulu.',code:'RESULT_REQUIRED'});
-      if(input.action==='revise'&&task.outputType==='application'){await previews.stop(task.id);task.evidence=null;task.phase='queued';task.repairAttempts=0;}
-      Object.assign(task,{status:input.action==='approve'?'done':'queued',feedback:input.action==='revise'?text(input.feedback,5000):'',reviewedAt:input.action==='approve'?now():null,runId:null,error:undefined,version:(task.version||0)+1,updatedAt:now()});
-      if(input.action==='approve'){promoteParent(task.parentId);
-        const answers=taskStore.snapshot().decisions.filter(d=>d.taskId===task.id&&d.status==='answered'&&d.kind!=='approval').map(d=>`${!d.answeredBy||d.answeredBy==='Owner'?'Owner':`Lead ${d.answeredBy}`} menjawab untuk "${task.title}": ${d.answer}`);
-        const summary=`Tugas selesai & disetujui owner: "${task.title}". Hasil: ${String(task.result||'').split('\n').find(l=>l.trim())||'-'}`;
-        commit(draft=>{remember(draft,task.assignee,[...answers,summary]);});}
-      save();send(res,200,task);setImmediate(kick);return;
+      if(input.action==='revise'&&task.outputType==='application')await previews.stop(task.id);
+      // One transaction: the draft decision, parent promotion and remembered notes commit together.
+      const updated=commit((draft,emit)=>{
+        const t=draft.tasks.find(x=>x.id===task.id);
+        if(!t||t.status!=='review'||input.version!==(t.version||0))throw Object.assign(new Error('This draft changed. Refresh and review the latest version.'),{status:409});
+        if(input.action==='revise'&&t.outputType==='application'){t.evidence=null;t.phase='queued';t.repairAttempts=0;}
+        Object.assign(t,{status:input.action==='approve'?'done':'queued',feedback:input.action==='revise'?text(input.feedback,5000):'',reviewedAt:input.action==='approve'?now():null,runId:null,error:undefined,version:(t.version||0)+1,updatedAt:now()});
+        emit({type:'task.phase',taskId:t.id,rootId:t.rootId||t.id,agent:t.assignee,data:{from:'review',to:t.status,phase:t.status,by:'owner'}});
+        if(input.action==='approve'){
+          const promoted=promoteParent(t.parentId,draft.tasks);
+          if(promoted)emit({type:'task.phase',taskId:promoted.parent.id,rootId:promoted.parent.rootId||promoted.parent.id,agent:promoted.parent.assignee,data:{from:promoted.from,to:promoted.parent.status,phase:promoted.parent.status,by:'owner'}});
+          const answers=draft.decisions.filter(d=>d.taskId===t.id&&d.status==='answered'&&d.kind!=='approval').map(d=>`${!d.answeredBy||d.answeredBy==='Owner'?'Owner':`Lead ${d.answeredBy}`} menjawab untuk "${t.title}": ${d.answer}`);
+          const summary=`Tugas selesai & disetujui owner: "${t.title}". Hasil: ${String(t.result||'').split('\n').find(l=>l.trim())||'-'}`;
+          remember(draft,t.assignee,[...answers,summary]);
+        }
+        return t;
+      });
+      send(res,200,updated);setImmediate(kick);return;
     }
     if(input.message!==undefined){
       if(input.version!==(task.version||0))return send(res,409,{error:'This task changed. Refresh before sending another update.'});

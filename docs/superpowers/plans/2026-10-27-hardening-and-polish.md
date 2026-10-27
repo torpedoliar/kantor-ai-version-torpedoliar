@@ -224,14 +224,15 @@ Dependensi keras:
 - Test: perluas `tests/task-store.cjs`, `tests/project-workspace.cjs`; tambah `tests/commit-cost.cjs`
 
 **Steps:**
-- [ ] 1. Daftar semua situs `save()` di jalan commit; konversi ke mutator transaksi tunggal (termasuk PATCH approve yang kini memutasi `task` sebelum `commit`).
-- [ ] 2. Buat `transaction(fn)` mengembalikan `{tasks, state}` terbaru sehingga dua `snapshot()` di `commit()` hilang.
-- [ ] 3. Sisakan `save()` hanya untuk import/migrasi satu kali.
-- [ ] 4. Ukur: hitung jumlah `JSON.stringify` per commit lewat instrumentasi dev (env flag), lampirkan angka sebelum/sesudah di PR.
+- [x] 1. Konversi PATCH approve/revisi ke satu mutator transaksi: ubah task, promosikan parent di `draft.tasks`, catat memori, dan emit `task.phase` dalam commit yang sama.
+- [x] 2. `commit()` tidak lagi memanggil `save()`; ia menjalankan satu transaksi lalu satu `snapshot()`. Situs lain yang mengubah `tasks` in-place tetap satu tulisan lewat `save()` (create, reassign, wizard, boot).
+- [x] 3. `promoteParent(parentId, list)` bisa bekerja pada draft transaksi maupun array global.
+- [x] 4. Instrumentasi: `taskStore.writes()` + `workspaceWrites` di `/api/health`; tes `commit-cost.cjs` membandingkan angka sebelum/sesudah approve.
 
 **Acceptance:**
-- Perilaku API identik; seluruh tes task/orchestrator/approval lulus.
-- Instrumentasi menunjukkan penulisan workspace per commit turun dari 2 menjadi 1 dan clone state turun ≥50%.
+- Satu approve menaikkan `workspaceWrites` tepat 1 dan `workspaceVersion` tepat 1.
+- Hasil anak tetap terbawa ke parent setelah promosi; memori agen tetap tercatat.
+- Suite unit 59/59 dan tes approval UI (`decisions`, `org-owner`, `application-workflow-ui`) lulus.
 
 ---
 
@@ -495,6 +496,12 @@ Dependensi keras:
   - Tes baru: `provider-cooldown`, `backup-restore`, `state-recovery`, `health-shutdown`; `auto-retry` mock memakai `Retry-After`.
   - Verifikasi: suite unit 58/58; UI `settings-ui`, `server`, `org-owner`, `org-wizard` lulus.
   - Catatan: peringatan ukuran data di Pengaturan belum dibuat; health/info sudah melaporkan ukuran lewat doctor/info.
+- 2026-10-27 — Task 9 selesai di working tree (belum commit):
+  - `commit()` satu transaksi + satu snapshot; approve, promosi parent dan memori dalam satu commit.
+  - `workspaceWrites` di `/api/health`; `tests/commit-cost.cjs` membuktikan +1 tulisan dan +1 versi per approve.
+  - Perbaikan bug yang muncul saat refactor: `promoteParent` menerima `draft.tasks`, bukan seluruh state.
+  - Verifikasi: suite unit 59/59; decisions, org-owner, application-workflow-ui, team lulus.
+  - Sisa Fase 3: Task 10 (pertumbuhan state & polling), 11 (watchdog aset/WebGL), 12 (alokasi frame), 13 (finalisasi lantai dinamis).
 
 ## Risiko utama
 

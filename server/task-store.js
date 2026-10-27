@@ -105,28 +105,29 @@ function repairLegacyDecisions(draft,emit){
   return changed;
 }
 function createTaskStore({dataDir,write=atomicWrite}){
-  fs.mkdirSync(dataDir,{recursive:true});const file=path.join(dataDir,'workspace.json'),legacy=path.join(dataDir,'tasks.json');let state,recovery;
+  fs.mkdirSync(dataDir,{recursive:true});const file=path.join(dataDir,'workspace.json'),legacy=path.join(dataDir,'tasks.json');let state,recovery,writes=0;
+  const persist=(target,data)=>{write(target,data);writes++;};
   const normalizeState=value=>{value.firstSeq=Number.isInteger(value.firstSeq)?value.firstSeq:(Array.isArray(value.events)?value.events[0]?.seq??value.nextSeq:value.nextSeq);value.memories=value.memories||{};migrateWorkspace(value);validate(value);};
   if(fs.existsSync(file)){
     const result=recoverState({file,dataDir,label:'workspace',validate:normalizeState,fresh:empty,corruptFresh:empty});
     state=result.value;recovery=result;
-    if(result.recovered||result.degraded)write(file,JSON.stringify(state,null,2));
+    if(result.recovered||result.degraded)persist(file,JSON.stringify(state,null,2));
   }else if(fs.existsSync(legacy)){
     // Keep a copy of the legacy file before a one-time migration touches it.
     snapshotLastGood(legacy,dataDir,'tasks');
     try{
       const parsed=JSON.parse(fs.readFileSync(legacy,'utf8'));if(!Array.isArray(parsed))throw new Error('Legacy tasks must be a list.');
-      state=migrate(parsed);validate(state);write(file,JSON.stringify(state,null,2));
+      state=migrate(parsed);validate(state);persist(file,JSON.stringify(state,null,2));
       recovery={label:'workspace',file,missing:false,migrated:true,recovered:false,degraded:false};
     }catch(error){
-      const corruptPath=archiveCorrupt(legacy,dataDir);state=empty();write(file,JSON.stringify(state,null,2));
+      const corruptPath=archiveCorrupt(legacy,dataDir);state=empty();persist(file,JSON.stringify(state,null,2));
       recovery={label:'workspace',file,missing:false,migrated:false,recovered:false,degraded:true,corruptPath,error:error.message};
     }
   }else{
-    state=empty();validate(state);write(file,JSON.stringify(state,null,2));
+    state=empty();validate(state);persist(file,JSON.stringify(state,null,2));
     recovery={label:'workspace',file,missing:true,recovered:false,degraded:false};
   }
-  {const draft=clone(state);const repaired=repairLegacyDecisions(draft,event=>emitEvent(draft,event)),trimmed=prune(draft);if(repaired||trimmed){draft.version=state.version+1;validate(draft);write(file,JSON.stringify(draft,null,2));state=draft;}}
+  {const draft=clone(state);const repaired=repairLegacyDecisions(draft,event=>emitEvent(draft,event)),trimmed=prune(draft);if(repaired||trimmed){draft.version=state.version+1;validate(draft);persist(file,JSON.stringify(draft,null,2));state=draft;}}
   const listeners=new Set();
   function transaction(expectedVersion,mutate,{requestKey}={}){
     if(requestKey&&Object.hasOwn(state.requests,requestKey))return clone(state.requests[requestKey].result);
@@ -137,7 +138,7 @@ function createTaskStore({dataDir,write=atomicWrite}){
     draft.version=state.version+1;
     if(requestKey)draft.requests[requestKey]={result:clone(result??null),at:new Date().toISOString()};
     prune(draft);
-    validate(draft);write(file,JSON.stringify(draft,null,2));state=draft;
+    validate(draft);persist(file,JSON.stringify(draft,null,2));state=draft;
     const events=state.events.filter(event=>event.seq>=firstSeq);
     for(const listener of listeners){try{listener(clone(events));}catch{/* A view listener cannot roll back a committed write. */}}
     return clone(result);
@@ -149,6 +150,6 @@ function createTaskStore({dataDir,write=atomicWrite}){
       draft.tasks=clone(tasks);
     });
   }
-  return {snapshot:()=>clone(state),saveTasks,transaction,firstSeq:()=>state.firstSeq,eventsAfter:(after=0,limit=200)=>clone(state.events.filter(e=>e.seq>after).slice(0,Math.max(1,Math.min(500,limit)))),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},recovery:()=>structuredClone(recovery)};
+  return {snapshot:()=>clone(state),saveTasks,transaction,firstSeq:()=>state.firstSeq,eventsAfter:(after=0,limit=200)=>clone(state.events.filter(e=>e.seq>after).slice(0,Math.max(1,Math.min(500,limit)))),subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},recovery:()=>structuredClone(recovery),writes:()=>writes};
 }
 module.exports={remember,MEMORY_LIMIT,MEMORY_TEXT,acknowledge,sanitizeText,createTaskStore,transitionTask,ensureThread,addMessage,openDecision,threadSummaries,prune,migrateWorkspace,EVENT_LIMIT,EVENT_MAX_AGE,REQUEST_LIMIT,REQUEST_TTL};

@@ -46,7 +46,7 @@ const stop=child=>new Promise(r=>{child.once('exit',r);child.kill();});
   assert.equal((await call('PATCH',`/api/tasks/${t.id}`,{action:'approve',version:mr.version})).status,409,'no skipping the manager');
   const saved=token;token='';assert.equal((await call('PATCH',`/api/tasks/${t.id}`,{action:'manager-approve',version:mr.version})).status,403,'manager approve needs the owner unlock');token=saved;
   const up=await call('PATCH',`/api/tasks/${t.id}`,{action:'manager-approve',version:mr.version});assert.equal(up.status,200);assert.equal(up.body.status,'review');assert.equal(up.body.managerReviewedBy,'Kak Dewi');
-  assert.equal((await call('PATCH',`/api/tasks/${t.id}`,{action:'approve',version:up.body.version})).body.status,'done');
+  const finalApprove=await call('PATCH',`/api/tasks/${t.id}`,{action:'approve',version:up.body.version});assert.equal(finalApprove.status,200,JSON.stringify(finalApprove.body));assert.equal(finalApprove.body.status,'done');
   // 5. Reject needs feedback and sends the draft back to the queue.
   const t2=(await call('POST','/api/tasks',{title:'Staff post 2',assignee:'Kak Rani',division:'marketing',parentId:root.id,brief:'another long brief here'})).body;
   const mr2=await wait(async()=>{const x=(await call('GET','/api/tasks')).body.find(x=>x.id===t2.id);return x.status==='manager-review'&&x;},'manager-review 2');
