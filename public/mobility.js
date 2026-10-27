@@ -3,7 +3,7 @@
   function create({lanes,parking,maxTeamAway=2}){
     const roads=new Map(lanes.map(l=>{let length=0;const segments=[];for(let i=1;i<l.points.length;i++){const a=l.points[i-1],b=l.points[i],n=Math.hypot(...b.map((v,k)=>v-a[k]));segments.push({a,b,n,start:length});length+=n;}return [l.id,{...l,length,segments}];}));
     parking=structuredClone(parking);
-    const bays=new Map(parking.map(p=>[p.id,p])),trips=new Map(),vehicles=new Map(),reserved=new Map(),locks=new Map(),crossings=new Set();let enabled=true,limit=Infinity,time=0;
+    const bays=new Map(parking.map(p=>[p.id,p])),trips=new Map(),vehicles=new Map(),reserved=new Map(),locks=new Map(),crossings=new Set();let enabled=true,limit=Infinity,time=0,snapshots=0;
     const distance=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]));
     for(const bay of parking){
       const exit=roads.get(bay.exitLane),entry=roads.get(bay.entryLane);
@@ -101,7 +101,7 @@
       }
     }
     function tick(dt){let left=Math.min(.15,Math.max(0,Number.isFinite(dt)?dt:0));while(left>1e-8){const step=Math.min(1/30,left);advance(step);left-=step;}}
-    return {tick,request,requestVisitor,departVisitor,requestTraffic,arrive,recall,removeOwner,setDepartures:on=>{enabled=!!on;if(!enabled)for(const t of trips.values())if(t.kind==='team')recall(t.owner);},setLimit:n=>{limit=Math.max(0,n);},occupyCrossing:(id,on)=>on?crossings.add(id):crossings.delete(id),snapshot:()=>structuredClone({retainedTrips:trips.size,vehicles:[...vehicles.values()],trips:[...trips.values()].filter(t=>t.phase!=='complete'),reservations:[...reserved].map(([parking,trip])=>({parking,trip}))})};
+    return {tick,request,requestVisitor,departVisitor,requestTraffic,arrive,recall,removeOwner,setDepartures:on=>{enabled=!!on;if(!enabled)for(const t of trips.values())if(t.kind==='team')recall(t.owner);},setLimit:n=>{limit=Math.max(0,n);},occupyCrossing:(id,on)=>on?crossings.add(id):crossings.delete(id),snapshot:()=>{snapshots++;return structuredClone({retainedTrips:trips.size,vehicles:[...vehicles.values()],trips:[...trips.values()].filter(t=>t.phase!=='complete'),reservations:[...reserved].map(([parking,trip])=>({parking,trip}))});},snapshotCount:()=>snapshots};
   }
   const canDepart=(name,tasks,known)=>!!known&&Array.isArray(tasks)&&!tasks.some(t=>t.assignee===name&&t.status!=='done');
   const api={create,canDepart};if(typeof module==='object'&&module.exports)module.exports=api;else root.OfficeMobility=api;

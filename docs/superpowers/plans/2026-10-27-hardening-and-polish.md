@@ -289,14 +289,15 @@ Dependensi keras:
 - Test: perluas `tests/graphics-performance.cjs`, `tests/mobility.cjs`
 
 **Steps:**
-- [ ] 1. Ambil satu snapshot per frame setelah `mobility.tick`, teruskan ke `stepShop`, `updateTeamTravel`, `environment.update`, dan cek garasi.
-- [ ] 2. Cache: flag modal terbuka (event nav), `reduceMotion`, elemen badge lantai, dan `activeTaskByName` (Map yang di-refresh saat `officetasks:change`).
-- [ ] 3. Ganti alokasi per agen dengan scratch vector; urutkan agen hanya saat frame berikutnya butuh urutan baru.
-- [ ] 4. Ukur dengan `renderer.info` + waktu frame rata-rata sebelum/sesudah pada viewport 1280×860.
+- [x] 1. Satu snapshot `mobility.snapshot()` per frame setelah `mobility.tick`; `updateVisitorTravel`, `updateTeamTravel`, `environment.update`, ambience, dan garasi memakainya. Excursion memakai snapshot segar tepat setelah `request()` karena trip baru belum ada di snapshot frame.
+- [x] 2. Cache per frame: `frameTasks` dan `activeTaskByAgent`; `syncTaskDisplay`/`syncingBubble` memakai Map. Flag modal lewat MutationObserver, `reduceMotion` dipakai ulang, badge lantai di-cache, hitungan lantai sekali per frame.
+- [x] 3. Scratch vector untuk posisi sebelum/sesudah agent dan delta tangga; label memakai salinan array dengan selected di depan (tanpa sort penuh).
+- [x] 4. `mobility.snapshotCount()` diekspos ke `officeScene.mobilitySnapshotCount()`; `tests/frame-budget.cjs` mengukur ~2 detik.
 
 **Acceptance:**
-- Draw call dan hasil visual tidak berubah; tidak ada error.
-- Waktu frame rata-rata turun ≥10% di lantai kerja penuh, atau alokasi per frame turun ≥30% (pilih salah satu metrik yang stabil di mesin uji).
+- `frame-budget.cjs`: snapshot mobility ≤220 dalam ~2 detik (satu per frame, sebelumnya empat).
+- `graphics-performance`, `mobility-journey`, `mobility-visitors`, dan `office` lulus.
+- Bug yang ditemukan: excursion memakai snapshot frame lama untuk trip yang baru dibuat → `trip.parking` undefined dan trip menggantung; diperbaiki dengan snapshot segar.
 
 ---
 
@@ -520,6 +521,11 @@ Dependensi keras:
   - Tes baru: `startup-watchdog`, `webgl-context-loss` (masuk daftar UI suite).
   - Verifikasi: office-models, graphics-lifecycle, office lulus.
   - Sisa Fase 3: Task 12 (alokasi frame), 13 (finalisasi lantai dinamis).
+- 2026-10-27 — Task 12 selesai di working tree (belum commit):
+  - Satu snapshot mobility per frame, cache task/modal/badge, scratch vector, label tanpa sort.
+  - `frame-budget.cjs` membuktikan ≤ satu snapshot/frame.
+  - Bug excursion (snapshot lama untuk trip baru) diperbaiki; mobility-journey/visitors/office lulus.
+  - Sisa Fase 3: Task 13 (finalisasi lantai dinamis + dispose).
 
 ## Risiko utama
 

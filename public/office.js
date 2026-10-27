@@ -147,6 +147,9 @@
   const linkSpot=(item,spot,owner=true)=>{spot.itemId=item.id;spot._item=item;if(owner){spot._ref=[item,item.seatRefs.push(spot)-1];}else{spot._dx=spot.x-item.x;spot._dz=spot.z-item.z;spot._ref=[item,-1];item.seatRefs.push(spot);}return spot;};
   let root, activeFloor = 3, selected = null, paused = false, simTime = 0, garage = null;
   let routineOn = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Per-frame caches: mobility is cloned once after tick, tasks are cloned once, and the selected
+  // task map replaces per-agent list scans.
+  let frameMobility=null,frameTasks=[],activeTaskByAgent=new Map();
   const linear = color => new THREE.Color(color).convertSRGBToLinear();
   const hex = color => '#' + color.toString(16).padStart(6, '0');
   const mix = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), t).getHex();
@@ -1755,7 +1758,7 @@
     phone.visible=person.pose==='phone';
     person.g.rotation.y+=wrap(person.heading-person.g.rotation.y)*Math.min(1,dt*8);
   }
-  function updateVisitorTravel(dt){if(dt<=0)return;const snapshot=mobility.snapshot();for(const c of shop.people){if(!c.vehicleTrip)continue;const t=snapshot.trips.find(t=>t.id===c.vehicleTrip);if(!t){c.vehicleTrip=null;c.state='outside';c.g.visible=false;continue;}
+  function updateVisitorTravel(dt){if(dt<=0)return;const snapshot=frameMobility||mobility.snapshot();for(const c of shop.people){if(!c.vehicleTrip)continue;const t=snapshot.trips.find(t=>t.id===c.vehicleTrip);if(!t){c.vehicleTrip=null;c.state='outside';c.g.visible=false;continue;}
     if(t.phase==='dismount'){const seat=shop.seats.find(s=>!s.customer);if(!seat)continue;const bay=environment.layout.parking.find(b=>b.id===t.parking);c.g.visible=true;c.g.position.set(bay.position[0]+1.35,0,bay.position[2]);mobility.arrive(t.id,'dismount');seat.customer=c;c.state='toSofa';walk(c,[[7,c.g.position.z],[7,4.5],[-3,4.5],[seat.x,5.8],[seat.x,7.1]],()=>{c.state='waiting';c.since=simTime;sit(c,0,-.09);mobility.arrive(t.id,'walkToOffice');});}
     else if(t.phase==='mount'){c.vehicleTimer=(c.vehicleTimer||0)+dt;if(c.vehicleTimer>.7){c.g.visible=false;mobility.arrive(t.id,'mount');c.state='driving';}}
   }}
@@ -1783,7 +1786,7 @@
     const payer=shop.paying;
     if(payer?.state==='pay'&&simTime>payer.until){
       shop.paying=null;payer.state='leaving';
-      if(payer.vehicleTrip){const trip=mobility.snapshot().trips.find(t=>t.id===payer.vehicleTrip),bay=trip&&environment.layout.parking.find(b=>b.id===trip.parking);if(bay){mobility.departVisitor(trip.owner);walk(payer,[[-10,3.5],[-10,4.5],[7,4.5],[bay.position[0]+1.35,bay.position[2]]],()=>{mobility.arrive(trip.id,'walkToVehicle');payer.state='mounting';payer.vehicleTimer=0;});}}
+      if(payer.vehicleTrip){const trip=(frameMobility||mobility.snapshot()).trips.find(t=>t.id===payer.vehicleTrip),bay=trip&&environment.layout.parking.find(b=>b.id===trip.parking);if(bay){mobility.departVisitor(trip.owner);walk(payer,[[-10,3.5],[-10,4.5],[7,4.5],[bay.position[0]+1.35,bay.position[2]]],()=>{mobility.arrive(trip.id,'walkToVehicle');payer.state='mounting';payer.vehicleTimer=0;});}}
       else walk(payer,[[-10,3.5],[-10,4.5],[7,4.5],[7,13]],()=>{payer.state='outside';payer.g.visible=false;});
     }
     const seat=shop.seats.find(s=>!s.customer),waiting=shop.people.find(p=>p.state==='outside'&&!p.vehicleTrip);
@@ -1926,12 +1929,12 @@
   const tasksKnown=()=>travelTaskStateKnown||!!window.officeTasks?.online?.();
   function updateTeamTravel(dt){
     if(dt<=0)return;
-    const snapshot=mobility.snapshot(),byId=new Map(snapshot.trips.map(t=>[t.id,t]));
+    const snapshot=frameMobility||mobility.snapshot(),byId=new Map(snapshot.trips.map(t=>[t.id,t]));
     for(const a of agents){
       if(!a.vehicleTrip)continue;
       const trip=byId.get(a.vehicleTrip);
       if(!trip){a.vehicleTrip=null;a.vehiclePhase=null;a.g.visible=true;a.rig.figure.visible=true;setPath(a,a.commanded&&a.destination?a.destination:a.desk);continue;}
-      if(!window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),tasksKnown())||!routineOn){mobility.recall(a.n);a.commanded=false;}
+      if(!window.OfficeMobility.canDepart(a.n,frameTasks,tasksKnown())||!routineOn){mobility.recall(a.n);a.commanded=false;}
       a.vehiclePhase=trip.phase;
       if(trip.phase==='walkToVehicle'){
         if(a.floor===1&&a.spot===a.vehicleSpot)mobility.arrive(trip.id,'walkToVehicle');
@@ -1949,11 +1952,12 @@
         else{if(a.destination!==a.desk)setPath(a,a.desk);if(a.spot===a.desk)mobility.arrive(trip.id,'walkToOffice');}
       }
     }
-    if(!routineOn||!tasksKnown()||performance.now()<nextExcursion||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    if(!routineOn||!tasksKnown()||performance.now()<nextExcursion||reduceMotion)return;
     nextExcursion=performance.now()+25000;
-    const a=agents.find(a=>!a.vehicleTrip&&!a.activity&&a.spot===a.desk&&window.OfficeMobility.canDepart(a.n,window.officeTasks.list(),true));
+    const a=agents.find(a=>!a.vehicleTrip&&!a.activity&&a.spot===a.desk&&window.OfficeMobility.canDepart(a.n,frameTasks,true));
     if(!a)return;const kind=travelSerial%2?'motorcycle':'car';if(!environment.audit().loaded.includes(kind))return;
     const id=mobility.request({id:'team-trip-'+(++travelSerial),owner:a.n,kind:'team',vehicle:kind});if(!id)return;
+    // The frame snapshot predates this new trip, so read a fresh one here (excursions are rare).
     const trip=mobility.snapshot().trips.find(t=>t.id===id),bay=environment.layout.parking.find(p=>p.id===trip.parking);
     a.vehicleTrip=id;a.vehiclePhase='walkToVehicle';a.vehicleSpot={x:bay.position[0]+(kind==='car'?1.35:.85),z:bay.position[2],floor:1,f:1,state:'stretch',route:[[7,7],[7,bay.position[2]]]};setPath(a,a.vehicleSpot);a.commanded=false;
   }
@@ -2083,17 +2087,18 @@
     }
     agent.blocked=Math.max(0,(agent.blocked||0)-dt*.5);return false;
   }
+  const agentBefore=new THREE.Vector3(),agentAfter=new THREE.Vector3(),stairDelta=new THREE.Vector3();
   function updateAgent(agent,dt) {
-    const before=agent.g.getWorldPosition(new THREE.Vector3());
+    const before=agent.g.getWorldPosition(agentBefore);
     if(agent.state==='stairs'){
       const trip=agent.stairTrip;let remaining=dt*3.1;
       // Queue behind whoever is just ahead on the same flight, going the same way.
       const ahead=agents.find(o=>o!==agent&&o.state==='stairs'&&o.stairTrip&&o.stairTrip.from===trip.from&&o.stairTrip.to===trip.to&&
         o.stairTrip.points.length<trip.points.length&&o.g.position.distanceTo(agent.g.position)<.85);
       if(ahead&&(agent.queued=(agent.queued||0)+dt)<3)remaining=0;else if(!ahead)agent.queued=0;
-      if(trip.points.length){const d=trip.points[0].clone().sub(agent.g.position);if(Math.hypot(d.x,d.z)>.05){agent.heading=Math.atan2(d.x,d.z);if(Math.abs(wrap(agent.heading-agent.g.rotation.y))>1.3)remaining=0;}}
+      if(trip.points.length){const d=stairDelta.copy(trip.points[0]).sub(agent.g.position);if(Math.hypot(d.x,d.z)>.05){agent.heading=Math.atan2(d.x,d.z);if(Math.abs(wrap(agent.heading-agent.g.rotation.y))>1.3)remaining=0;}}
       while(trip.points.length&&remaining>0){
-        const target=trip.points[0],delta=target.clone().sub(agent.g.position),distance=delta.length();
+        const target=trip.points[0],delta=stairDelta.copy(target).sub(agent.g.position),distance=delta.length();
         if(Math.hypot(delta.x,delta.z)>.001)agent.heading=Math.atan2(delta.x,delta.z);
         if(distance<=remaining){agent.g.position.copy(target);remaining-=distance;trip.points.shift();}
         else{agent.g.position.addScaledVector(delta,remaining/distance);remaining=0;}
@@ -2125,7 +2130,7 @@
     }
     // The walking animation plays only while someone actually covers ground; waiting in a queue or turning on the
     // spot is a standing pose, so nobody appears to walk in place or backwards.
-    const moved=agent.g.getWorldPosition(new THREE.Vector3()).distanceTo(before);
+    const moved=agent.g.getWorldPosition(agentAfter).distanceTo(before);
     agent.stepping=moved>dt*.4?.25:Math.max(0,(agent.stepping||0)-dt);
     const state=agent.state,travelling=state==='walk'||state==='stairs',walking=travelling&&agent.stepping>0,sitting=SIT.has(state)&&!agent.spot?.standing,talking=speaking(agent);
     const partner=companions(agent).sort((a,b)=>agent.g.position.distanceTo(a.g.position)-agent.g.position.distanceTo(b.g.position))[0];
@@ -2207,8 +2212,8 @@
     }
     section.append(label,scope,people,actions);return section;
   }
-  function syncTaskDisplay(agent){
-    const task=window.officeTasks.activeFor(agent.n);
+  function syncTaskDisplay(agent,activeTasks){
+    const task=activeTasks?activeTasks.get(agent.n):window.officeTasks.activeFor(agent.n);
     agent.label.classList.toggle('has-task',!!task);
     const description=`${agent.initials}, ${agent.role}${task?` · In progress: ${task.title}`:''}`;
     if(agent.label.title!==description){agent.label.title=description;agent.label.setAttribute('aria-label',`View ${description}`);}
@@ -2657,6 +2662,11 @@
   };
   loadCustomSlot(customSlotIdx,true);restoreInventoryItems();loadCustomSlot(customSlotIdx,true);renderInventory();
   const keys={};
+  // Dialogs open/close rarely; observe them instead of querying the DOM every frame.
+  let modalOpen=false;
+  const refreshModal=()=>{modalOpen=!!document.querySelector('dialog:modal');};
+  new MutationObserver(refreshModal).observe(document.body,{subtree:true,attributes:true,attributeFilter:['open']});
+  refreshModal();
   addEventListener('keydown',event=>{
     const modalOpen=document.querySelector('dialog:modal');
     if(event.key==='Escape'&&follow&&!modalOpen){stopFollow();return;}
@@ -2758,12 +2768,12 @@
   // Speech bubbles for real task events: a short line on start and finish, and a steady one while an AI agent drafts.
   const SAY={active:'Siap!',blocked:'Ada pertanyaan!',review:'Siap direview','manager-review':'Dikirim ke atasan!',done:'Selesai!'};
   function say(agent,text,seconds=3.5){agent.sayText=text;agent.sayUntil=performance.now()+seconds*1000;}
-  function sayingNow(agent){
+  function sayingNow(agent,activeTasks){
     if(agent.sayUntil>performance.now())return agent.sayText;
-    return window.officeTasks.agentFor(agent.n)&&window.officeTasks.activeFor(agent.n)?'Drafting…':'';
+    return window.officeTasks.agentFor(agent.n)&&(activeTasks?activeTasks.has(agent.n):window.officeTasks.activeFor(agent.n))?'Drafting…':'';
   }
-  function syncBubble(agent){
-    const text=sayingNow(agent);if(agent.sayShown===text)return;agent.sayShown=text;
+  function syncBubble(agent,activeTasks){
+    const text=sayingNow(agent,activeTasks);if(agent.sayShown===text)return;agent.sayShown=text;
     let bubble=agent.label.querySelector('.say');
     if(!text){bubble?.remove();return;}
     if(!bubble){bubble=document.createElement('span');bubble.className='say';bubble.setAttribute('aria-hidden','true');agent.label.append(bubble);}
@@ -2877,8 +2887,10 @@
     if (contextLost) { requestAnimationFrame(frame); return; }
     // Allow slower renderers to keep pace, while limiting jumps after a background-tab pause.
     requestAnimationFrame(frame);const realDt=Math.min(.15,(now-last)/1000);last=now;const dt=paused?0:realDt;simTime+=dt;
+    frameTasks=window.officeTasks?.list?.()||[];activeTaskByAgent=new Map();
+    for(const task of frameTasks)if(task.status==='active'&&!activeTaskByAgent.has(task.assignee))activeTaskByAgent.set(task.assignee,task);
     if(moodBlend<1)moodStep(realDt);
-    if(document.querySelector('dialog:modal')){for(const k in keys)keys[k]=false;}
+    if(modalOpen){for(const k in keys)keys[k]=false;}
     if(transition&&!follow)stepTransition(realDt);
     if(!drag&&cam.spin){cam.theta+=cam.spin*realDt;cam.spin*=Math.pow(.03,realDt);if(Math.abs(cam.spin)<.01)cam.spin=0;}
     const move=realDt*cam.radius*.3,fx=-Math.sin(cam.theta),fz=-Math.cos(cam.theta);
@@ -2891,18 +2903,19 @@
     cam.target.x=Math.max(-25,Math.min(25,cam.target.x));cam.target.z=Math.max(-20,Math.min(20,cam.target.z));
     if(follow){if(keys.arrowleft)follow.yaw+=realDt*1.6;if(keys.arrowright)follow.yaw-=realDt*1.6;if(keys.arrowup)follow.pitch=Math.min(.9,follow.pitch+realDt);if(keys.arrowdown)follow.pitch=Math.max(-1.2,follow.pitch-realDt);}
     else{camera.position.set(cam.target.x+cam.radius*Math.sin(cam.phi)*Math.sin(cam.theta),cam.target.y+cam.radius*Math.cos(cam.phi),cam.target.z+cam.radius*Math.sin(cam.phi)*Math.cos(cam.theta));camera.lookAt(cam.target);camera.updateMatrixWorld();}
-    for(const a of agents){if(!a.vehicleTrip||!['outbound','away','inbound','park','mount','dismount'].includes(a.vehiclePhase))updateAgent(a,dt);if(dt>0&&!a.vehicleTrip)live(a);syncTaskDisplay(a);}
+    for(const a of agents){if(!a.vehicleTrip||!['outbound','away','inbound','park','mount','dismount'].includes(a.vehiclePhase))updateAgent(a,dt);if(dt>0&&!a.vehicleTrip)live(a);syncTaskDisplay(a,activeTaskByAgent);}
     updateTeamTravel(dt);
-    if(dt>0&&routineOn&&!matchMedia('(prefers-reduced-motion: reduce)').matches&&skyline.visible&&simTime>=nextAmbient&&mobility.snapshot().vehicles.filter(v=>v.id.startsWith('ambient-')).length<({low:3,medium:5,high:7,ultra:9}[window.officeGraphics.level()]||3)){nextAmbient=simTime+9;const kind=ambientSerial%3===0?'motorcycle':'car';if(environment.audit().loaded.includes(kind))mobility.requestTraffic({id:'ambient-'+(++ambientSerial),vehicle:kind,lane:ambientSerial%2?'street-east':'street-west'});}
+    const vehicles=frameMobility?frameMobility.vehicles:mobility.snapshot().vehicles;
+    if(dt>0&&routineOn&&!reduceMotion&&skyline.visible&&simTime>=nextAmbient&&vehicles.filter(v=>v.id.startsWith('ambient-')).length<({low:3,medium:5,high:7,ultra:9}[window.officeGraphics.level()]||3)){nextAmbient=simTime+9;const kind=ambientSerial%3===0?'motorcycle':'car';if(environment.audit().loaded.includes(kind))mobility.requestTraffic({id:'ambient-'+(++ambientSerial),vehicle:kind,lane:ambientSerial%2?'street-east':'street-west'});}
     if(skyline.visible)animateSky(dt);
-    mobility.tick(dt);environment.setLevel(window.officeGraphics.level());environment.setCityVisible(skyline.visible);environment.update(mobility.snapshot(),dt);
+    mobility.tick(dt);frameMobility=mobility.snapshot();environment.setLevel(window.officeGraphics.level());environment.setCityVisible(skyline.visible);environment.update(frameMobility,dt);
     stepShop(dt);
     // Keep-visible dashboards: redraw the executive monitors a few times per second while time runs.
     if(dt>0)for(const screen of animatedScreens){if(simTime-screen.last<.45)continue;screen.last=simTime;screen.draw(simTime);screen.texture.needsUpdate=true;}
     // Desk monitors share three animated canvases, so every workstation is alive without per-desk textures.
     if(dt>0)for(const screen of deskScreens){if(simTime-screen.last<.4)continue;screen.last=simTime;screen.draw(simTime);}
     for(const d of doors){const near=agents.some(a=>a.floor===d.floor&&a.state!=='stairs'&&a.g.position.distanceTo(d.center)<1.6);d.open+=((near?1:0)-d.open)*Math.min(1,dt*6);d.pivot.rotation.y=d.base+d.open*1.45;}
-    if(garage){const near=mobility.snapshot().vehicles.some(v=>v.pose[0]>0&&v.pose[0]<16&&v.pose[2]>5&&v.pose[2]<18);garage.open+=((near?1:0)-garage.open)*Math.min(1,dt*4);garage.group.scale.y=Math.max(.015,1-garage.open*.985);}
+    if(garage){const near=frameMobility.vehicles.some(v=>v.pose[0]>0&&v.pose[0]<16&&v.pose[2]>5&&v.pose[2]<18);garage.open+=((near?1:0)-garage.open)*Math.min(1,dt*4);garage.group.scale.y=Math.max(.015,1-garage.open*.985);}
     // Night sparkle: bulbs, halos and lit city windows shimmer a little; the pools of light stay steady.
     if(moodCurrent.night>.05){
       const pulse=(speed,phase)=>.86+.14*Math.sin(simTime*speed+phase);
@@ -2916,7 +2929,9 @@
     if(follow){scene.updateMatrixWorld(true);followCamera(realDt);}
     scene.updateMatrixWorld(true);
     const occupied=[];
-    for(const a of [...agents].sort((a,b)=>Number(b===selected)-Number(a===selected))){
+    const orderedAgents=agents.slice();
+    if(selected){const at=orderedAgents.indexOf(selected);if(at>0){orderedAgents.splice(at,1);orderedAgents.unshift(selected);}}
+    for(const a of orderedAgents){
       a.g.getWorldPosition(world);projected.copy(world);projected.y+=2.65;projected.project(camera);
       const x=(projected.x*.5+.5)*innerWidth,y=(-projected.y*.5+.5)*innerHeight;
       const width=a.initials.length*7+24;
@@ -2927,16 +2942,19 @@
       const clearLabel=activeFloor!==0||a===selected||!occupied.some(p=>Math.abs(x-p.x)<(width+p.width)/2+5&&Math.abs(labelY-p.y)<34);
       const show=clearLabel&&(activeFloor!==0||a.state==='stairs'||a===selected)&&(!compact||representative||a===selected)&&visibleAgent(a)&&a.g.visible&&projected.z<1&&x>width/2&&x<innerWidth-width/2&&labelY>(innerWidth<=1000?230:95)&&y<innerHeight-130;
       a.label.hidden=!show||(follow?.mode==='eyes'&&follow.agent===a);
-      syncBubble(a);
+      syncBubble(a,activeTaskByAgent);
       if(show){a.label.style.transform=`translate(${x}px,${labelY}px) translate(-50%,-100%)`;a.label.style.setProperty('--stem',`${y-labelY+6}px`);occupied.push({x,y:labelY,width});}
     }
     if(selected){
       selected.g.getWorldPosition(world);ring.position.set(world.x,world.y+.07,world.z);ring.visible=!follow&&selected.g.visible&&visibleAgent(selected);
       $('iLocation').textContent=selected.state==='stairs'?`Tangga kiri · ${floorName(selected.stairTrip.from)} ke ${floorName(selected.stairTrip.to)}`:`Lantai ${orderOf(selected.floor)+1} · ${floorName(selected.floor)}`;$('iActivity').textContent=agentStatus(selected);
     }
+    const floorCounts={};
+    for(const a of agents)if(a.state!=='stairs')floorCounts[a.floor]=(floorCounts[a.floor]||0)+1;
     for(const level of ORDER){
-      const count=agents.filter(a=>a.floor===level&&a.state!=='stairs').length;
-      const badge=document.querySelector(`[data-floor="${level}"] .floor-count`);
+      const count=floorCounts[level]||0;
+      let badge=floorBadgeCache.get(level);
+      if(!badge){badge=document.querySelector(`[data-floor="${level}"] .floor-count`);if(badge)floorBadgeCache.set(level,badge);}
       if(badge&&badge.textContent!==String(count)){badge.textContent=String(count);badge.setAttribute('aria-label',`${count} team members on this floor`);}
     }
     renderFrame(realDt);
@@ -2952,7 +2970,9 @@
     renderer.render(scene,camera);thumbs[level]=renderer.domElement.toDataURL('image/png');
     renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
   }
+  const floorBadgeCache=new Map();
   function renderFloorButtons(){
+    floorBadgeCache.clear();
     const stack=document.querySelector('#floors .section-stack');if(!stack)return;
     stack.replaceChildren(...[...ORDER].reverse().map(level=>{
       const button=document.createElement('button');button.dataset.floor=level;button.setAttribute('aria-pressed',String(level===activeFloor));
@@ -3124,6 +3144,7 @@
     visitorTravelAudit:()=>shop.people.map(c=>({state:c.state,mode:c.arrivalMode||'walking-existing',trip:c.vehicleTrip||null})),
     environmentAudit:()=>environment.audit(),
     mobilitySnapshot:()=>mobility.snapshot(),
+    mobilitySnapshotCount:()=>mobility.snapshotCount?.()??0,
     customize:customAPI,
     applyOrg,
     floorRoles:()=>ORDER.map(level=>({level,number:orderOf(level)+1,role:level===1?'lobby':level===2?'dining':level===ROOF?'roof':`work-${level===3?1:level-ROOF+1}`,name:floorName(level)})),
