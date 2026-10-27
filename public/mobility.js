@@ -18,6 +18,9 @@
     }
     const dimensions={car:{length:4.5,width:2.2},motorcycle:{length:2.35,width:1.23}};
     function pose(v){const l=roads.get(v.lane);if(!l)return v.pose;const s=l.segments.find(s=>v.distance<=s.start+s.n)||l.segments.at(-1),t=Math.max(0,Math.min(1,(v.distance-s.start)/s.n));return s.a.map((a,i)=>a+(s.b[i]-a)*t);}
+    // Height of the lane surface at a distance; sampling under both axles lets a long car bridge the
+    // crest and foot of the driveway instead of one end cutting through the flat sections.
+    function heightAt(l,d){const s=l.segments.find(s=>d<=s.start+s.n)||l.segments.at(-1),t=Math.max(0,Math.min(1,(d-s.start)/s.n));return s.a[1]+(s.b[1]-s.a[1])*t;}
     function release(t){if(t.parking&&reserved.get(t.parking)===t.id)reserved.delete(t.parking);for(const [k,id]of locks)if(id===t.id)locks.delete(k);vehicles.delete(t.id);t.phase='complete';trips.delete(t.id);}
     function request({id,owner,kind='team',vehicle='car'}){
       const old=[...trips.values()].find(t=>t.owner===owner&&t.phase!=='complete');if(old)return old.id;
@@ -26,13 +29,13 @@
       const bay=[...bays.values()].find(b=>b.kind===vehicle&&!reserved.has(b.id));if(!bay)return null;
       if(trips.has(id))return null;
       const t={id,owner,kind,vehicle,parking:bay.id,phase:'walkToVehicle',recall:false,retiring:false,awayUntil:0};trips.set(id,t);reserved.set(bay.id,id);
-      vehicles.set(id,{id,owner,kind:vehicle,lane:null,distance:0,speed:0,pose:[...bay.position],heading:bay.heading||0,length:dimensions[vehicle].length,width:dimensions[vehicle].width});return id;
+      vehicles.set(id,{id,owner,kind:vehicle,lane:null,distance:0,speed:0,pose:[...bay.position],heading:bay.heading||0,pitch:0,roll:0,length:dimensions[vehicle].length,width:dimensions[vehicle].width});return id;
     }
     // A new vehicle may only appear when nothing occupies the start of its road (any lane sharing that space).
     const clearAt=(point,len)=>![...vehicles.values()].some(v=>distance(v.pose,point)<(v.length+len)/2+.5);
     function requestVisitor({id,owner,vehicle='car',lane}){if(!roads.has(lane)||!dimensions[vehicle]||!clearAt(roads.get(lane).points[0],dimensions[vehicle].length))return null;const tripId=request({id,owner,kind:'visitor',vehicle});if(!tripId)return null;const t=trips.get(tripId),v=vehicles.get(tripId);t.phase='inbound';v.lane=lane;v.distance=0;v.pose=pose(v);return tripId;}
     function departVisitor(owner){for(const t of trips.values())if(t.owner===owner&&t.phase==='visiting'){t.phase='walkToVehicle';t.leaving=true;}}
-    function requestTraffic({id,vehicle='car',lane}){const l=roads.get(lane);if(!l||!dimensions[vehicle]||vehicles.has(id)||vehicles.size>=limit)return null;const dim=dimensions[vehicle];if(!clearAt(l.points[0],dim.length))return null;trips.set(id,{id,owner:id,kind:'ambient',vehicle,phase:'outbound',recall:false});const v={id,owner:id,kind:vehicle,lane,distance:0,speed:0,heading:0,...dim};v.pose=pose(v);vehicles.set(id,v);return id;}
+    function requestTraffic({id,vehicle='car',lane}){const l=roads.get(lane);if(!l||!dimensions[vehicle]||vehicles.has(id)||vehicles.size>=limit)return null;const dim=dimensions[vehicle];if(!clearAt(l.points[0],dim.length))return null;trips.set(id,{id,owner:id,kind:'ambient',vehicle,phase:'outbound',recall:false});const v={id,owner:id,kind:vehicle,lane,distance:0,speed:0,heading:0,pitch:0,roll:0,...dim};v.pose=pose(v);vehicles.set(id,v);return id;}
     function arrive(id,phase){const t=trips.get(id);if(!t||t.phase!==phase)return false;const v=vehicles.get(id),bay=bays.get(t.parking);
       if(phase==='walkToVehicle')t.phase=t.recall?'walkToOffice':'mount';
       else if(phase==='mount'){if(t.recall)t.phase='dismount';else{t.phase='outbound';v.lane=bay.departLane;v.distance=0;v.pose=pose(v);}}
@@ -78,6 +81,13 @@
         if(closing)speed=0;
         v.speed=speed;v.distance=Math.min(l.length,v.distance+speed*dt);v.pose=pose(v);
         const seg=l.segments.find(s=>v.distance<=s.start+s.n)||l.segments.at(-1);v.heading=Math.atan2(seg.b[0]-seg.a[0],seg.b[2]-seg.a[2]);
+        // Sample the lane under both axles: pitch follows the chord between the wheels, so a car crossing
+        // the driveway crest or foot no longer buries the axle that is still on the flat section.
+        const axle=v.length*.34,front=heightAt(l,Math.min(l.length,v.distance+axle)),rear=heightAt(l,Math.max(0,v.distance-axle));
+        v.pose[1]=(front+rear)/2;v.pitch=Math.atan2(-(front-rear),2*axle);
+        // Roll keeps both sides of the car on the same plane when the lane crosses the ramp diagonally.
+        const dy=seg.b[1]-seg.a[1],dz=seg.b[2]-seg.a[2],run=Math.hypot(seg.b[0]-seg.a[0],seg.b[2]-seg.a[2])||1;
+        const gz=Math.abs(dz)>run*.15?dy/dz:0;v.roll=Math.atan(gz*-Math.sin(v.heading));
         if(v.distance<l.length-1e-7)continue;
         if(nextBlocked||conflictBlocked)continue;
         if(crossing&&ordered.some(approaching)){v.speed=0;continue;}
@@ -85,7 +95,7 @@
         if(t.leaving&&bay&&l.id===bay.exitLane){release(t);continue;}
         if(bay&&l.id===bay.arriveLane){
           if(t.retiring){release(t);continue;}
-          v.lane=null;v.speed=0;v.pose=[...bay.position];v.heading=bay.heading||0;t.phase='dismount';
+          v.lane=null;v.speed=0;v.pose=[...bay.position];v.heading=bay.heading||0;v.pitch=0;v.roll=0;t.phase='dismount';
         }else if(nl){v.lane=next;v.distance=0;if(bay&&l.id===bay.exitLane&&t.phase==='outbound'){t.phase=t.recall?'inbound':'away';t.awayUntil=time+12;}if(t.recall&&t.phase==='away')t.phase='inbound';}
         else release(t);
       }

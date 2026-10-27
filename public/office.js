@@ -346,7 +346,7 @@
   for(let i=0;i<8;i++)cylinder(.17,.17,.13,i%2?CARD:0xb4523a,-3,.2+i*.21,-10.5);
   textPlane('BARBER',-8,-3,7);textPlane('PARKING',7,8.7,8);
   for(const x of [2,7,12]){
-    box(.07,.02,8,CARD,x-2.3,.03,-5);box(4.6,.02,.07,CARD,x,.03,-9);
+    box(.07,.004,8,CARD,x-2.3,.03,-5);box(4.6,.004,.07,CARD,x,.03,-9);
   }
   // Parked vehicles are local detailed CC0 models placed by officeEnvironment.
   textPlane('ENTRANCE',7,11,4);
@@ -894,11 +894,25 @@
     // The office sits on its own lawn, bounded by sidewalks on the two streets.
     // The office lawn is the textured grass plane from officeEnvironment.
     const flat=(w,d,color,x,y,z)=>{const m=box(w,.02,d,color,x,y,z,skyline);m.children.forEach(line=>line.visible=false);return m;};
-    for(const z of [19.8,28.2])flat(290,2.4,SIDEWALK,0,-.89,z);
-    for(const x of [29.8,38.2])flat(2.4,290,SIDEWALK,x,-.89,0);
-    flat(290,6,ASPHALT,0,-.88,24);flat(6,290,ASPHALT,34,-.875,0);
-    // Driveway from the parking entrance down to the street.
-    flat(14,8.5,0xd6d1c6,8.25,-.885,16.75);for(const x of [3,13.5])flat(.2,8.5,LINE,x,-.86,16.75);
+    const WALK=0xeeeae0,CURB=0xd9d4c9,METAL=0x3d4347;
+    // Raised sidewalks with a curb face; the front walk opens at the driveway.
+    const walk=(x,z,w,d)=>box(w,.09,d,WALK,x,-.89,z,skyline);
+    for(const [x0,x1] of [[-145,2.5],[13.5,31],[37,145]])walk((x0+x1)/2,19.8,x1-x0,2.4);
+    for(const [x0,x1] of [[-145,31],[37,145]])walk((x0+x1)/2,28.2,x1-x0,2.4);
+    for(const x of [29.8,38.2])for(const [z0,z1] of [[-145,18.6],[29.4,145]])walk(x,(z0+z1)/2,2.4,z1-z0);
+    const curb=(w,d,x,z)=>box(w,.075,d,CURB,x,-.875,z,skyline);
+    for(const [x0,x1] of [[-145,2.5],[13.5,31],[37,145]])curb(x1-x0,.12,(x0+x1)/2,21.06);
+    for(const [x0,x1] of [[-145,31],[37,145]])curb(x1-x0,.12,(x0+x1)/2,26.94);
+    for(const [z0,z1] of [[-145,21],[27,145]]){curb(.12,z1-z0,31.06,(z0+z1)/2);curb(.12,z1-z0,36.94,(z0+z1)/2);}
+    // Plain asphalt is only a fallback under the textured street, never above the wheels.
+    flat(290,6,ASPHALT,0,-.89,24);flat(6,166,ASPHALT,34,-.89,-62);flat(6,118,ASPHALT,34,-.89,86);
+    // Driveway apron and its paint.
+    flat(14,8.5,0xd6d1c6,8.25,-.885,16.75);
+    // Street paint: edge lines stay clear of the driveway and the crossing.
+    const paint=(w,d,x,z)=>flat(w,d,LINE,x,-.855,z);
+    for(const [x0,x1] of [[-140,2.5],[13.5,29],[39,140]])paint(x1-x0,.12,(x0+x1)/2,21.45);
+    for(const [x0,x1] of [[-140,29],[39,140]])paint(x1-x0,.12,(x0+x1)/2,26.55);
+    for(const [z0,z1] of [[-140,19.5],[28.5,140]]){paint(.12,z1-z0,31.45,(z0+z1)/2);paint(.12,z1-z0,36.55,(z0+z1)/2);}
     for(let i=-140;i<=140;i+=8){if(Math.abs(i-34)>5)flat(3,.25,LINE,i,-.86,24);if(Math.abs(i-24)>5)flat(.25,3,LINE,34,-.86,i);}
     // Zebra crossings at the corner.
     for(let k=0;k<6;k++){flat(.5,5,LINE,27.4-k*.9,-.855,24);flat(5,.5,LINE,34,-.855,17.4-k*.9);}
@@ -916,6 +930,63 @@
       if(rnd()<.35)flat(w*.8,d*.8,0x9fbf73,x,h-.88,z);else if(rnd()<.5)box(w*.35,1.2,d*.35,0xcfc8ba,x,h-.9,z,skyline);
       placed++;
     }
+    // Front garden: clipped hedges and flowers frame the lawn; the office sign faces the street.
+    let flower=0;
+    for(const [x0,x1] of [[-32,-3],[15.6,27.5]]){
+      for(let x=x0;x<x1;x+=4)box(3.95,.5,.55,0x587a50,x+1.85,-.878,17.55,skyline);
+      for(let x=x0+.8;x<x1;x+=1.6){cylinder(.018,.018,.55,0x4d6b45,x,-.878,17.3,skyline);oval(.16,.13,.16,[0xd07a5a,0xe0c05a,0xc95f7d][flower++%3],x,-.33,17.3,skyline);}
+    }
+    {
+      const c=document.createElement('canvas');c.width=512;c.height=160;const ctx=c.getContext('2d');
+      ctx.fillStyle='#fbf8f2';ctx.fillRect(0,0,512,160);ctx.fillStyle='#e8634a';ctx.fillRect(36,32,26,96);
+      ctx.fillStyle='#1e2230';ctx.font='700 58px Archivo, system-ui, sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('KANTOR KITA',86,82);
+      const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+      const panel=new THREE.Mesh(new THREE.PlaneGeometry(3.4,1.06),new THREE.MeshStandardMaterial({map:tex,roughness:.9}));panel.position.set(22,1.08,18.26);
+      skyline.add(panel);
+      for(const dx of [-1.5,1.5])box(.08,2.55,.08,METAL,22+dx,-.878,18.2,skyline);
+      box(3.6,1.16,.06,CARD,22,.5,18.18,skyline);
+    }
+    // Street lights, a bus shelter, benches, bins, a hydrant and a mailbox give the sidewalk a reason to exist.
+    function streetlight(x,z,fx,fz){
+      cylinder(.13,.17,.16,CURB,x,-.80,z,skyline);
+      cylinder(.055,.075,4.28,METAL,x,-.64,z,skyline);
+      if(fx){box(1.4,.06,.06,METAL,x+fx*.7,3.50,z,skyline);box(.3,.1,.22,METAL,x+fx*1.36,3.46,z,skyline);}
+      else{box(.06,.06,1.4,METAL,x,3.50,z+fz*.7,skyline);box(.22,.1,.3,METAL,x,3.46,z+fz*1.36,skyline);}
+    }
+    for(const [x,z,fx,fz] of [[-30,20.35,0,1],[-11,20.35,0,1],[18,20.35,0,1],[27,20.35,0,1],[-22,27.6,0,-1],[4,27.6,0,-1],[26,27.6,0,-1],[30.4,-14,1,0],[37.6,8,-1,0]])streetlight(x,z,fx,fz);
+    {
+      const x=-20,z=20.05,top=-.80;
+      for(const dx of [-2.1,2.1])for(const dz of [-.65,.65])box(.07,2.45,.07,METAL,x+dx,top,z+dz,skyline);
+      box(4.5,.12,1.55,METAL,x,top+2.35,z,skyline);
+      box(4.2,2.05,.05,'glass',x,top+.15,z-.62,skyline);
+      for(const dx of [-2.15,2.15])box(.05,2.05,1.3,'glass',x+dx,top+.15,z,skyline);
+      box(3,.09,.45,BALSA,x,top+.48,z+.05,skyline);
+      box(3,.45,.08,BALSA,x,top+.55,z-.12,skyline);
+      for(const dx of [-1.2,1.2])box(.07,.48,.35,METAL,x+dx,top,z+.05,skyline);
+      cylinder(.04,.04,2.6,METAL,x+2.75,top,z+.45,skyline);
+      box(.5,.7,.05,CARD,x+2.75,top+2.55,z+.45,skyline);
+      box(.38,.1,.06,0x2f6b4f,x+2.75,top+3.0,z+.43,skyline);
+    }
+    function bench(x,z,face){
+      for(const dx of [-.85,.85])box(.08,.46,.5,METAL,x+dx,-.80,z,skyline);
+      box(2,.09,.55,BALSA,x,-.34,z,skyline);
+      box(2,.5,.08,BALSA,x,-.28,z-face*.3,skyline);
+    }
+    bench(-7.5,20.05,1);bench(15.5,20.05,1);bench(-8,27.95,-1);
+    for(const [x,z] of [[-24.5,20.2],[17.5,20.2],[12.5,27.85]])cylinder(.24,.28,.8,0x3f5f4a,x,-.80,z,skyline);
+    {
+      const x=21.5,z=28.0,y=-.80;
+      cylinder(.14,.16,.55,0xb23a2c,x,y,z,skyline);
+      cylinder(.16,.16,.08,CURB,x,y+.55,z,skyline);
+      box(.5,.12,.12,0xb23a2c,x,y+.32,z,skyline);
+    }
+    {
+      const x=6,z=28.0,y=-.80;
+      cylinder(.05,.05,.9,METAL,x,y,z,skyline);
+      box(.6,.5,.4,0x2f4a6b,x,y+.9,z,skyline);
+      box(.5,.06,.05,CARD,x,y+1.02,z+.21,skyline);
+    }
+    for(const x of [2.2,13.8])cylinder(.09,.11,.8,METAL,x,-.80,20.3,skyline);
   }
   const clouds=[];
   {
@@ -932,6 +1003,20 @@
       clouds.push({cloud,speed:1+rnd()*1.5});
     }
   }
+  // A small flock circles the neighbourhood above the roofs, flapping on the simulation clock.
+  const birds=[];
+  {
+    const c=document.createElement('canvas');c.width=64;c.height=32;const ctx=c.getContext('2d');
+    ctx.strokeStyle='#2b3137';ctx.lineWidth=5;ctx.lineCap='round';
+    ctx.beginPath();ctx.moveTo(6,22);ctx.quadraticCurveTo(20,5,32,18);ctx.quadraticCurveTo(44,5,58,22);ctx.stroke();
+    const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;
+    const mat=new THREE.SpriteMaterial({map:tex,transparent:true,depthWrite:false,opacity:.7});
+    for(let i=0;i<9;i++){
+      const sprite=new THREE.Sprite(mat),r=40+i*4,a=i/9*Math.PI*2;
+      sprite.position.set(Math.cos(a)*r,16+(i%3)*2.5,Math.sin(a)*r);sprite.scale.set(2.6,1.3,1);skyline.add(sprite);
+      birds.push({sprite,r,y:16+(i%3)*2.5,phase:i*.8,speed:.05+(i%3)*.012});
+    }
+  }
   const environment=window.officeEnvironment.create({scene,parkingRoot:floors[1],onWarning:status});
   const mobility=window.OfficeMobility.create({...environment.layout,maxTeamAway:2});
   let ambientSerial=0,nextAmbient=2;
@@ -940,6 +1025,7 @@
   function animateSky(dt){
     // Clouds drift slowly around the ring.
     for(const c of clouds){const p=c.cloud.position,r=Math.hypot(p.x,p.z),a=Math.atan2(p.z,p.x)+c.speed*dt/r;p.x=Math.cos(a)*r;p.z=Math.sin(a)*r;}
+    for(const b of birds){const p=b.sprite.position,a=Math.atan2(p.z,p.x)+b.speed*dt;p.x=Math.cos(a)*b.r;p.z=Math.sin(a)*b.r;p.y=b.y+Math.sin(simTime*.8+b.phase)*.7;b.sprite.scale.x=2.6+Math.sin(simTime*7+b.phase)*.18;}
   }
   const rand=(min,max)=>min+Math.random()*(max-min),pick=list=>list[Math.floor(Math.random()*list.length)];
   const shuffle=list=>list.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(p=>p[1]);
@@ -2576,7 +2662,7 @@
     else{camera.position.set(cam.target.x+cam.radius*Math.sin(cam.phi)*Math.sin(cam.theta),cam.target.y+cam.radius*Math.cos(cam.phi),cam.target.z+cam.radius*Math.sin(cam.phi)*Math.cos(cam.theta));camera.lookAt(cam.target);camera.updateMatrixWorld();}
     for(const a of agents){if(!a.vehicleTrip||!['outbound','away','inbound','park','mount','dismount'].includes(a.vehiclePhase))updateAgent(a,dt);if(dt>0&&!a.vehicleTrip)live(a);syncTaskDisplay(a);}
     updateTeamTravel(dt);
-    if(dt>0&&routineOn&&!matchMedia('(prefers-reduced-motion: reduce)').matches&&skyline.visible&&simTime>=nextAmbient&&mobility.snapshot().vehicles.filter(v=>v.id.startsWith('ambient-')).length<({low:2,medium:4,high:6,ultra:8}[window.officeGraphics.level()]||2)){nextAmbient=simTime+9;const kind=ambientSerial%3===0?'motorcycle':'car';if(environment.audit().loaded.includes(kind))mobility.requestTraffic({id:'ambient-'+(++ambientSerial),vehicle:kind,lane:ambientSerial%2?'street-east':'street-west'});}
+    if(dt>0&&routineOn&&!matchMedia('(prefers-reduced-motion: reduce)').matches&&skyline.visible&&simTime>=nextAmbient&&mobility.snapshot().vehicles.filter(v=>v.id.startsWith('ambient-')).length<({low:3,medium:5,high:7,ultra:9}[window.officeGraphics.level()]||3)){nextAmbient=simTime+9;const kind=ambientSerial%3===0?'motorcycle':'car';if(environment.audit().loaded.includes(kind))mobility.requestTraffic({id:'ambient-'+(++ambientSerial),vehicle:kind,lane:ambientSerial%2?'street-east':'street-west'});}
     if(skyline.visible)animateSky(dt);
     mobility.tick(dt);environment.setLevel(window.officeGraphics.level());environment.setCityVisible(skyline.visible);environment.update(mobility.snapshot(),dt);
     stepShop(dt);
