@@ -871,6 +871,15 @@
     for(const x of [-15,15]){
       const lamp=new THREE.Mesh(new THREE.BoxGeometry(.32,.55,.32),lampMaterial);lamp.position.set(x,y+.3,10.5);lights.add(lamp);
     }
+    // Floor name plate over the entrance strip, lit when the evening lights are on.
+    const plate=new THREE.Mesh(new THREE.PlaneGeometry(1.6,.16),new THREE.MeshStandardMaterial({color:0x1a1a1a,emissive:0xffc98a,emissiveIntensity:0.55,side:THREE.DoubleSide}));
+    plate.position.set(0,y+.42,12.28);lights.add(plate);
+    // Small curb lamps at both ends of the entrance, with a short glow so the slab edge reads at night.
+    for(const x of [-16.1,16.1]){
+      const curb=new THREE.Mesh(new THREE.BoxGeometry(.16,.32,.16),new THREE.MeshStandardMaterial({color:0xfff1cf,emissive:0xffc06a,emissiveIntensity:1.6,roughness:.4}));
+      curb.position.set(x,y+.18,11.85);lights.add(curb);
+      const glow=new THREE.PointLight(0xffc47a,0.55,6,1.6);glow.position.set(x,y+.45,11.9);lights.add(glow);points.push(glow);
+    }
   }
   for(const level of ORDER)buildLights(level);
   // Warm wall lamps over the parking door; they only light up after dark.
