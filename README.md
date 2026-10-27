@@ -102,8 +102,14 @@ Buka http://127.0.0.1:3000.
 - Jika Claude gagal (koneksi, key salah, saldo habis), tugas kembali ke antrean dengan pesan error dan tombol **Try again**.
 - Pada kunjungan pertama ke server yang masih kosong, tugas yang tersimpan di browser dipindahkan ke server.
 - Server belum memiliki login, sehingga hanya mendengarkan di 127.0.0.1 (laptop ini). Jangan dibuka ke jaringan sebelum ada autentikasi.
-- `.env` dan `data/` tidak masuk git.
+- `.env` tidak masuk git. Di `data/`, hanya `data/rooms.json` yang di-track supaya tata ruang ikut antar-mesin; `settings.key`, kredensial provider, `org.json`, `team.json`, `workspace.json`/`tasks.json`, `projects/`, dan arsip tetap lokal.
 - Tanpa server (misalnya `python3 -m http.server` atau Live Server), aplikasi tetap berjalan seperti sebelumnya dengan localStorage.
+
+### Sinkronisasi antar-mesin
+
+- `git pull` membawa kode dan `data/rooms.json`. Restart server setelah pull bila ada perubahan di `server/`.
+- Perubahan ruangan dari UI langsung menulis `data/rooms.json`; commit + push agar mesin lain menerima, dan pull sebelum mengubah ruangan di mesin lain. Pada mesin yang sudah punya `data/rooms.json` lokal sebelum file ini di-track, pindahkan file itu sekali sebelum pull pertama.
+- Progress tugas/chat (`data/workspace.json`), organisasi dan PIN (`data/org.json`), konfigurasi agen (`data/team.json`), proyek (`data/projects/`), serta kredensial provider tetap lokal dan tidak ikut git. `GET /api/workspace/export` adalah arsip/backup owner, bukan mekanisme impor penuh: belum ada endpoint impor workspace.
 
 Tugas terlihat langsung di kantor:
 
@@ -124,7 +130,7 @@ Model bawaan adalah `claude-sonnet-5-5`; ganti dengan `ANTHROPIC_MODEL` di `.env
 - **Hubungkan divisi**: klik dua judul divisi untuk menambah atau menghapus jalur kolaborasi (garis ungu putus-putus).
 - **Menonaktifkan** orang yang masih punya tugas terbuka akan diblokir. Panel menawarkan "Pindahkan semua ke…".
 - **Review atasan:** draf staf yang melapor ke atasan di bawah pimpinan puncak melewati satu gerbang persetujuan atasan sebelum review owner; laporan langsung ke pimpinan puncak masuk review owner. Detail tugas menampilkan rantai atasan, tombol **Setujui sebagai atasan** dan **Minta perubahan**; kartu tetap berada di kolom Review, bukan kembali ke antrean. Pengelolaan anggota lokal digabungkan ke bagan/wizard Organisasi yang sama, bukan daftar tim kedua.
-- **Ruang (Lainnya → Ruang):** tambah ruangan dari template, seret posisinya di denah 2D, letakkan furnitur katalog, dan tentukan **pemilik** bila ruangan itu pribadi. Kursi ruangan pribadi hanya dipakai pemiliknya saat rutinitas; pemilik mendapat tombol **Ruang pribadi** di panel detailnya, sementara orang lain tidak pernah memilih kursinya. Lantai kerja tambahan (saat divisi banyak) ikut berperabot: ruang rapat kaca, pantry, lounge, rak pemisah, dan planter, dengan kursi yang benar-benar dipakai rapat dan rehat. Ruangan fokus dan rapat kini berpagar kaca dengan pintu otomatis, kusen jendela putih, dan papan nama di atas pintu. Ruang fokus yang luas (lebar minimal 3,2 m dan dalam 4 m) otomatis ditata sebagai kantor pimpinan: meja di ujung belakang, kursi pemilik menghadap pintu, dua kursi tamu, credenza, lampu lantai, dan tanaman.
+- **Ruang (rail PEKERJAAN):** tambah ruangan dari template, seret posisinya di denah 2D, letakkan furnitur katalog, dan tentukan **pemilik** bila ruangan itu pribadi. Kursi ruangan pribadi hanya dipakai pemiliknya saat rutinitas; pemilik mendapat tombol **Ruang pribadi** di panel detailnya, sementara orang lain tidak pernah memilih kursinya. Lantai kerja tambahan (saat divisi banyak) ikut berperabot: ruang rapat kaca, pantry, lounge, rak pemisah, dan planter, dengan kursi yang benar-benar dipakai rapat dan rehat. Ruangan fokus dan rapat kini berpagar kaca dengan pintu otomatis, kusen jendela putih, dan papan nama di atas pintu. Ruang fokus yang luas (lebar minimal 3,2 m dan dalam 4 m) otomatis ditata sebagai kantor pimpinan: meja di ujung belakang, kursi pemilik menghadap pintu, dua kursi tamu, credenza, lampu lantai, dan monitor dengan dasbor animasi.
 - **Kompatibilitas data tim lama:** jika `data/org.json` belum ada tetapi `data/team.json` ada, server mengonversi daftar anggota, hubungan atasan, model, status agen AI, dan instruksi khusus ke organisasi baru. `team.json` asli tetap dipertahankan sebagai cadangan; data rusak menghentikan startup, bukan diganti diam-diam dengan contoh bawaan. Bila organisasi baru sudah ada, server tidak menimpa organisasi itu dari file tim lama.
 
 **Wizard** muncul sendiri di instalasi baru (belum ada PIN). Wizard juga bisa dibuka dari tombol **Susun ulang**. Langkahnya:
