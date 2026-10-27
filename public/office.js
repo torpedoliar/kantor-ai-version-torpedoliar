@@ -865,7 +865,11 @@
   function buildLights(level){
     const y=floorY(level),lights=new THREE.Group();eveningLights.add(lights);levelLights[level]=lights;
     const strip=new THREE.Mesh(new THREE.BoxGeometry(31,.07,.08),lampMaterial);strip.position.set(0,y+.12,12.15);lights.add(strip);
-    const light=new THREE.PointLight(0xffce8c,2.2,38,1);light.position.set(0,y+3,1);lights.add(light);const points=[light];
+    // One centre lamp leaves the desks dark. Spread warm pools across the floor so night stays readable.
+    const points=[];
+    for(const [x,z,power,reach] of [[0,1,1,30],[-10,-6,.85,20],[10,-6,.85,20],[-8,8,.7,16],[8,8,.7,16]]){
+      const light=new THREE.PointLight(0xffce8c,2.2*power,reach,1.15);light.position.set(x,y+2.6,z);lights.add(light);points.push(light);
+    }
     if(level===1){const extra=new THREE.PointLight(0xffce8c,0,16,1.4);extra.position.set(8,y+2.7,9);lights.add(extra);points.push(extra);}
     lights.userData.points=points;
     for(const x of [-15,15]){
@@ -2776,7 +2780,7 @@
     pagi:{skyFloor:0xb9cad8,skyBuilding:0xc4d2dc,fog:0xc4d2dc,fogDensity:.0024,sunFloor:0xffd8b5,sunBuilding:0xffd8b5,sunI:1.8,sunB:1.9,sunPos:[-44,26,18],ambSky:0xe2eef8,ambGround:0x9a8b76,ambI:1.0,ambB:.8,env:.5,lamps:1.4,point:1.8,night:0,city:0,stars:0,birds:.7,clouds:.7,street:0},
     siang:{skyFloor:0x8c9aa6,skyBuilding:0xa9b6c0,fog:0xa9b6c0,fogDensity:.003,sunFloor:0xffe7c7,sunBuilding:0xffe2bd,sunI:2.2,sunB:2.4,sunPos:[-12,55,25],ambSky:0xdfe9f5,ambGround:0x8a7a66,ambI:1.1,ambB:.9,env:.6,lamps:1.6,point:2.2,night:0,city:0,stars:0,birds:.7,clouds:.85,street:0},
     sore:{skyFloor:0xc79f86,skyBuilding:0xc08e78,fog:0xc08e78,fogDensity:.0028,sunFloor:0xffb377,sunBuilding:0xffb377,sunI:2.4,sunB:2.6,sunPos:[38,15,25],ambSky:0xffd4b2,ambGround:0x6e5648,ambI:.8,ambB:.7,env:.42,lamps:2.0,point:2.4,night:.65,city:.7,stars:0,birds:.5,clouds:.55,street:1.0},
-    malam:{skyFloor:0x141c26,skyBuilding:0x0d141d,fog:0x0d141d,fogDensity:.0032,sunFloor:0x93add8,sunBuilding:0x93add8,sunI:.5,sunB:.6,sunPos:[-30,42,-35],ambSky:0x33445c,ambGround:0x14181e,ambI:.4,ambB:.3,env:.16,lamps:1.6,point:2.8,night:1,city:2.0,stars:1,birds:0,clouds:.12,street:1.8}
+    malam:{skyFloor:0x1c2836,skyBuilding:0x121a26,fog:0x121a26,fogDensity:.0026,sunFloor:0xb7c8e6,sunBuilding:0xb7c8e6,sunI:.85,sunB:.95,sunPos:[-30,42,-35],ambSky:0x5a7090,ambGround:0x2a3038,ambI:.72,ambB:.55,env:.28,lamps:2.4,point:5.2,night:1,city:2.4,stars:1,birds:0,clouds:.12,street:2.2}
   };
   const moodColor=hex=>new THREE.Color(hex);
   const moodLookOf=m=>({skyFloor:moodColor(m.skyFloor),skyBuilding:moodColor(m.skyBuilding),fog:moodColor(m.fog),fogDensity:m.fogDensity,sunColorFloor:moodColor(m.sunFloor),sunColorBuilding:moodColor(m.sunBuilding),sunI:m.sunI,sunB:m.sunB,sunPos:new THREE.Vector3(...m.sunPos),ambSky:moodColor(m.ambSky),ambGround:moodColor(m.ambGround),ambI:m.ambI,ambB:m.ambB,env:m.env,lamps:m.lamps,point:m.point,night:m.night,city:m.city,stars:m.stars,birds:m.birds,clouds:m.clouds,street:m.street});
@@ -2790,7 +2794,7 @@
     for(const [level,lights]of Object.entries(levelLights)){
       lights.visible=buildingView||Number(level)===activeFloor;
       const points=lights.userData.points||[];
-      points.forEach((point,index)=>point.intensity=(buildingView?look.point:look.point*look.night)*(index?0.7:1));
+      points.forEach((point,index)=>point.intensity=(buildingView?look.point:Math.max(look.point*look.night,look.night>.4?look.point*.85:0))*(index?0.7:1));
     }
     lampMaterial.emissiveIntensity=buildingView?look.lamps:look.lamps*look.night;
   }
