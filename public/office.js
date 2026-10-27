@@ -1097,7 +1097,7 @@
   // through the stairs like any built-in place. applyRooms rebuilds them without a page reload.
   let customRooms=[];
   try{const roomsResponse=await fetch('/api/rooms',{cache:'no-store'});if(roomsResponse.ok){const list=await roomsResponse.json();if(Array.isArray(list))customRooms=list.filter(r=>!r.builtIn&&Number.isFinite(r.x)&&Number.isFinite(r.z));}}catch{/* static host: built-in office only */}
-  const roomSpots=[],roomGroups=new Map(),roomDoors=[],roomLabels=[],roomTextureMaps=[];
+  const roomSpots=[],roomBuilt=new Map(),roomDoors=[],roomLabels=[],roomTextureMaps=[];
   const ROOM_RUGS={meeting:0xe6ded0,focus:0xdfe3d6,lounge:0xe8cfc0,pantry:0xb3c0a0,musholla:0xdfe3d6,custom:0xd8cfc0};
   const ROOM_SEAT=0xd9d2c3;
   function roomChair(parent,x,z,f){
@@ -1181,7 +1181,7 @@
         const screen=executiveScreen();
         const panel=new THREE.Mesh(new THREE.PlaneGeometry(.86,.5),new THREE.MeshBasicMaterial({map:screen.texture}));
         panel.position.set(0,.2,-.034);panel.rotation.y=Math.PI;mon.add(panel);
-        animatedScreens.push({group,floor:room.floor,texture:screen.texture,draw:screen.draw,last:-1});
+        animatedScreens.push({group,floor:room.floor,room:room.id,texture:screen.texture,draw:screen.draw,last:-1});
         box(.5,.02,.16,0x2a2b2f,0,.96,deskZ-.15,group); // keyboard within reach
         for(const gx of [-.95,.95])roomChair(group,gx,deskZ+2.9,-1); // guests face the leader
         box(.5,.72,2.2,BALSA,-room.w/2+.32,0,deskZ+1.1,group);
@@ -1227,7 +1227,8 @@
       // The door hinges at the gap and swings inward; the walking grid treats it as open.
       const pivot=new THREE.Group();pivot.position.set(gapLeft,0,front);pivot.userData.walkable=true;group.add(pivot);
       box(doorW-.04,2.12,.05,'glass',doorW/2,0,0,pivot);box(.03,.5,.08,DARK,doorW-.14,1.0,0,pivot);
-      roomDoors.push({pivot,base:0,center:new THREE.Vector3(room.x+gapLeft+doorW/2,0,room.z+front),floor:room.floor,open:0});
+      const doorRecord={pivot,base:0,center:new THREE.Vector3(room.x+gapLeft+doorW/2,0,room.z+front),floor:room.floor,open:0,room:room.id};
+      roomDoors.push(doorRecord);doors.push(doorRecord);
       // Nameplate above the door, readable from outside.
       const c=document.createElement('canvas');c.width=512;c.height=96;const ctx=c.getContext('2d');
       ctx.fillStyle='#fbf8f2';ctx.fillRect(0,0,512,96);ctx.strokeStyle='#2a2622';ctx.lineWidth=4;ctx.strokeRect(2,2,508,92);
@@ -1235,35 +1236,97 @@
       const full=String(room.name).toUpperCase();let label=full;while(ctx.measureText(label).width>480&&label.length>4)label=label.slice(0,-2);
       if(label!==full)label=label.trimEnd()+'…';
       ctx.fillText(label,256,50);
-      const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;roomTextureMaps.push(tex);
+      const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;roomTextureMaps.push({texture:tex,room:room.id});
       const sign=new THREE.Mesh(new THREE.PlaneGeometry(1.1,.21),new THREE.MeshBasicMaterial({map:tex}));
       sign.position.set((gapLeft+gapRight)/2,H+.2,front+.03);group.add(sign);
     }
     for(const item of room.furniture??[])roomFurniture(group,item);
-    roomLabels.push(textPlane(String(room.name).toUpperCase(),room.x,room.z+room.d/2+.7,Math.min(6,room.w),'#5c554b',floors[room.floor]));
+    const roomLabel=textPlane(String(room.name).toUpperCase(),room.x,room.z+room.d/2+.7,Math.min(6,room.w),'#5c554b',floors[room.floor]);
+    roomLabel.userData.roomId=room.id;roomLabels.push({mesh:roomLabel,room:room.id});
     return {group,seats};
   }
   const roomPool=floor=>floor===1?floorBreaks:floor===2?dining:floor===ROOF?roofSpots:hangouts;
-  function applyRooms(list){
-    const removedGroups=new Set(roomGroups.values());
-    for(const group of removedGroups)group.parent?.remove(group);
-    for(const door of roomDoors){const at=doors.indexOf(door);if(at>=0)doors.splice(at,1);}
-    roomDoors.length=0;
-    for(const label of roomLabels){label.parent?.remove(label);label.material?.map?.dispose();label.material?.dispose();label.geometry?.dispose();}
-    roomLabels.length=0;
-    for(const map of roomTextureMaps)map.dispose();
-    roomTextureMaps.length=0;
-    for(let i=animatedScreens.length-1;i>=0;i--)if(removedGroups.has(animatedScreens[i].group)){animatedScreens[i].texture.dispose();animatedScreens.splice(i,1);}
-    for(const spot of roomSpots){const pool=roomPool(spot.floor),i=pool.indexOf(spot);if(i>=0)pool.splice(i,1);const j=prayerSpots.indexOf(spot);if(j>=0)prayerSpots.splice(j,1);}
-    roomSpots.length=0;roomGroups.clear();
-    customRooms=(list||[]).filter(r=>!r.builtIn&&Number.isFinite(r.x)&&Number.isFinite(r.z));
-    const touched=new Set();
-    for(const room of customRooms){
-      if(!floors[room.floor])continue; // a floor the scene does not have cannot host a room
-      const built=buildRoom(room);roomGroups.set(room.id,built.group);
-      for(const spot of built.seats){spot.ownerRoom=room.owner||null;roomSpots.push(spot);if(spot.state==='pray')prayerSpots.push(spot);else roomPool(room.floor).push(spot);}
-      touched.add(room.floor);
+  // A room is only rebuilt when its own definition changes, so an unrelated edit cannot strand
+  // people who are already sitting in another room.
+  const roomSignature=room=>JSON.stringify({name:String(room.name||''),floor:room.floor,type:room.type,x:room.x,z:room.z,w:room.w,d:room.d,capacity:room.capacity,owner:room.owner||null,furniture:(room.furniture||[]).map(item=>[item.kind,item.x,item.z])});
+  const roomLayoutSignature=room=>JSON.stringify({floor:room.floor,type:room.type,x:room.x,z:room.z,w:room.w,d:room.d,capacity:room.capacity,furniture:(room.furniture||[]).map(item=>[item.kind,item.x,item.z])});
+  function removeRoomSpots(roomId){
+    for(let i=roomSpots.length-1;i>=0;i--){
+      const spot=roomSpots[i];if(spot.room!==roomId)continue;
+      const pool=roomPool(spot.floor),at=pool.indexOf(spot);if(at>=0)pool.splice(at,1);
+      const pray=prayerSpots.indexOf(spot);if(pray>=0)prayerSpots.splice(pray,1);
+      roomSpots.splice(i,1);
     }
+  }
+  function removeRoomBuilt(roomId){
+    const built=roomBuilt.get(roomId);if(!built)return;
+    built.group.parent?.remove(built.group);
+    for(let i=roomDoors.length-1;i>=0;i--)if(roomDoors[i].room===roomId){const at=doors.indexOf(roomDoors[i]);if(at>=0)doors.splice(at,1);roomDoors.splice(i,1);}
+    for(let i=roomLabels.length-1;i>=0;i--)if(roomLabels[i].room===roomId){const mesh=roomLabels[i].mesh;mesh.parent?.remove(mesh);mesh.material?.map?.dispose();mesh.material?.dispose();mesh.geometry?.dispose();roomLabels.splice(i,1);}
+    for(let i=roomTextureMaps.length-1;i>=0;i--)if(roomTextureMaps[i].room===roomId){roomTextureMaps[i].texture.dispose();roomTextureMaps.splice(i,1);}
+    for(let i=animatedScreens.length-1;i>=0;i--)if(animatedScreens[i].room===roomId){animatedScreens[i].texture.dispose();animatedScreens.splice(i,1);}
+    removeRoomSpots(roomId);roomBuilt.delete(roomId);
+  }
+  function captureRoomOccupants(roomId){
+    const seats=roomSpots.filter(spot=>spot.room===roomId),saved=[];
+    for(const agent of agents){
+      const spot=agent.spot?.room===roomId?agent.spot:agent.activity?.spot?.room===roomId?agent.activity.spot:agent.destination?.room===roomId?agent.destination:null;
+      if(!spot)continue;const index=seats.indexOf(spot);if(index<0)continue;
+      saved.push({agent,index,seated:agent.spot===spot,destination:agent.destination===spot,activity:agent.activity?.spot===spot});
+    }
+    return saved;
+  }
+  function detachRoomOccupants(roomId){
+    const seats=new Set(roomSpots.filter(spot=>spot.room===roomId));
+    for(const agent of agents){
+      if(!seats.has(agent.spot)&&!seats.has(agent.destination)&&!seats.has(agent.activity?.spot))continue;
+      clearActivity(agent);
+      if(seats.has(agent.spot))agent.spot=null;
+      if(seats.has(agent.destination))agent.destination=agent.desk;
+      setPath(agent,agent.desk);
+    }
+  }
+  function reattachRoomOccupants(saved,built,room){
+    for(const rec of saved){
+      const spot=built.seats[rec.index];if(!spot)continue;
+      spot.ownerRoom=room.owner||null;
+      if(rec.activity&&rec.agent.activity)rec.agent.activity.spot=spot;
+      if(rec.seated||rec.activity)spot.occupant=rec.agent;
+      if(rec.seated){
+        rec.agent.spot=spot;rec.agent.destination=spot;
+        rec.agent.g.position.set(spot.x,0,spot.z);rec.agent.heading=facing(spot);rec.agent.g.rotation.y=rec.agent.heading;
+      }else if(rec.destination)rec.agent.destination=spot;
+    }
+  }
+  function addRoomSeats(room,built){
+    for(const spot of built.seats){spot.ownerRoom=room.owner||null;roomSpots.push(spot);if(spot.state==='pray')prayerSpots.push(spot);else roomPool(room.floor).push(spot);}
+  }
+  function applyRooms(list){
+    const next=(list||[]).filter(room=>!room.builtIn&&Number.isFinite(room.x)&&Number.isFinite(room.z));
+    const nextById=new Map(next.map(room=>[room.id,room])),touched=new Set();
+    // Rebuild only removed or changed rooms. Unchanged rooms keep their group, seats and occupants.
+    for(const [id,built] of [...roomBuilt]){
+      const room=nextById.get(id),signature=room?roomSignature(room):null;
+      if(room&&built.signature===signature)continue;
+      const old=customRooms.find(item=>item.id===id),sameLayout=!!room&&!!old&&roomLayoutSignature(old)===roomLayoutSignature(room);
+      const saved=sameLayout?captureRoomOccupants(id):[];
+      if(!sameLayout)detachRoomOccupants(id);
+      removeRoomBuilt(id);
+      if(old)touched.add(old.floor);
+      if(room)touched.add(room.floor);
+      if(room&&floors[room.floor]){
+        const rebuilt=buildRoom(room);roomBuilt.set(id,{...rebuilt,signature});
+        addRoomSeats(room,rebuilt);
+        if(sameLayout)reattachRoomOccupants(saved,rebuilt,room);
+      }
+    }
+    // A room on a floor that was just created is built now; one on a missing floor waits for that floor.
+    for(const room of next){
+      if(roomBuilt.has(room.id)||!floors[room.floor])continue;
+      const built=buildRoom(room);roomBuilt.set(room.id,{...built,signature:roomSignature(room)});
+      addRoomSeats(room,built);touched.add(room.floor);
+    }
+    customRooms=next;
     // Loose open-floor plants are put away inside a room's footprint; moving or deleting the room brings them back.
     for(const item of hiddenBaseDecor)if(item.parent)item.visible=true;
     hiddenBaseDecor.clear();
@@ -1275,8 +1338,9 @@
         if(Math.abs(at.x-room.x)<room.w/2&&Math.abs(at.z-room.z)<room.d/2){o.visible=false;hiddenBaseDecor.add(o);}
       });
     }
-    // Room furniture joins the collision grid exactly like an edited desk.
-    for(const floor of touched)navGrids[floor]=rasterize(floors[floor],a=>a.userData.walkable||a.userData.agent||a.visible===false);
+    // Room furniture joins the collision grid exactly like an edited desk. Floors whose last room
+    // disappeared are rebuilt too, so their old collision cells do not linger.
+    for(const floor of touched)if(floors[floor])navGrids[floor]=rasterize(floors[floor],a=>a.userData.walkable||a.userData.agent||a.visible===false);
     return customRooms.length;
   }
   applyRooms(customRooms);
@@ -1288,7 +1352,9 @@
       // A furniture model blocks its requested footprint (the space the procedural piece took), not mesh by mesh.
       const isModel=!!o.userData.model;
       if(!isModel&&(!o.isMesh||o.material?.isMeshBasicMaterial))return;
-      for(let a=o;a;a=a.parent){if(skip(a))return;if(!isModel&&a!==o&&a.userData.model)return;}
+      // The floor group itself is hidden while another floor is selected; that must not erase its
+      // dynamic furniture from the grid when a room edit asks for a rebuild.
+      for(let a=o;a&&a!==rootF;a=a.parent){if(skip(a))return;if(!isModel&&a!==o&&a.userData.model)return;}
       if(isModel){const f=o.userData.footprint,c=o.getWorldPosition(new THREE.Vector3()),yaw=new THREE.Euler().setFromQuaternion(o.getWorldQuaternion(new THREE.Quaternion())).y,sw=Math.abs(Math.sin(yaw))>.7;
         const hw=(sw?f.d:f.w)/2,hd=(sw?f.w:f.d)/2;bounds.min.set(c.x-hw,c.y,c.z-hd);bounds.max.set(c.x+hw,c.y+f.h,c.z+hd);}
       else bounds.setFromObject(o);
@@ -1840,7 +1906,10 @@
       const byRoom=new Map();
       for(const s of free){const k=s.room||'seed-meeting';byRoom.set(k,[...(byRoom.get(k)||[]),s]);}
       spots=[...byRoom.values()].find(group=>group.length>=members.length);
-      if(!spots){status(`Tidak ada satu ruangan yang menampung ${members.length} orang. Pilih lebih sedikit orang atau kembalikan yang sedang di sana ke meja.`);return;}
+      if(!spots){
+        const largest=Math.max(0,...[...byRoom.values()].map(group=>group.length));
+        status(`Tidak ada satu ruangan yang menampung ${members.length} orang. Hanya ${largest} tempat tersedia di satu ruangan. Pilih lebih sedikit orang atau kembalikan yang sedang di sana ke meja.`);return;
+      }
     }else if(action!=='work'){
       const pool=action==='lunch'?dining:shuffle([...roofSpots]);
       spots=pool.filter(s=>!reservedByOthers(s,members)&&(!s.ownerRoom||members.some(m=>m.n===s.ownerRoom)));
@@ -2636,6 +2705,8 @@
     ORDER.splice(0,ORDER.length,1,2,...want,ROOF);
     for(const [level,oldY] of previousY){const delta=floorY(level)-oldY;if(delta){facadeLevels[level].children.forEach(o=>o.position.y+=delta);levelLights[level]?.children.forEach(o=>o.position.y+=delta);}}
     for(const level of Object.keys(floors).map(Number).filter(l=>l>ROOF&&!want.includes(l))){
+      // Custom rooms on a removed storey lose their geometry, labels and seats with it.
+      for(const room of customRooms.filter(item=>item.floor===level))removeRoomBuilt(room.id);
       // Seats that lived on a removed storey must not strand the routine pools.
       for(let i=hangouts.length-1;i>=0;i--)if(hangouts[i].floor===level)hangouts.splice(i,1);
       for(let i=roomDoors.length-1;i>=0;i--)if(roomDoors[i].floor===level)roomDoors.splice(i,1);
@@ -2656,6 +2727,9 @@
     buildStairCore();stairCore.traverse(o=>{o.castShadow=false;});prepareFade(stairCore);
     for(const level of ORDER){floors[level].position.y=floorY(level);for(const pad of doorPads)if(pad.parent===floors[level])pad.position.y=-.06;}
     for(const level of want)if(!thumbs[level]&&level!==3)thumbs[level]=thumbs[3];
+    // Rooms on a new storey are built now; rooms whose storey disappeared stay in the list and
+    // return when that storey exists again.
+    applyRooms(customRooms);
   }
   function hideCovered(){
     const desksOn=level=>customItems.filter(o=>o.generated&&o.floor===level);let hidden=0;

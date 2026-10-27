@@ -25,6 +25,10 @@ const api=async(p,opts={},extra={})=>fetch(origin+p,{...opts,headers:{'content-t
     assert.equal((await call('POST','/api/rooms',{name:'Edge',type:'lounge',floor:2,x:15,z:0},owner)).status,400,'outside the floor');
     assert.equal((await call('POST','/api/rooms',{name:'Bad kind',type:'lounge',floor:2,furniture:[{kind:'alien',x:0,z:0}]},owner)).status,400,'unknown furniture');
     assert.equal((await call('POST','/api/rooms',{name:'Bad owner',type:'focus',floor:2,owner:'Tidak Ada'},owner)).status,400,'unknown room owner');
+    assert.equal((await call('POST','/api/rooms',{name:'Too Many',type:'meeting',floor:2,capacity:9},owner)).status,400,'capacity above the eight seats the scene builds is refused');
+    const eight=await call('POST','/api/rooms',{name:'Eight Seats',type:'focus',floor:2,x:0,z:0,capacity:8},owner);
+    assert.equal(eight.status,201,'capacity eight is allowed');
+    assert.equal((await call('DELETE',`/api/rooms/${eight.body.id}?occupants=0`,null,owner)).status,200);
     assert.equal((await call('PATCH','/api/rooms/seed-meeting',{name:'Board Room'},owner)).status,200,'built-ins can be renamed');
     assert.equal((await call('PATCH','/api/rooms/seed-meeting',{type:'lounge'},owner)).status,400,'built-in type locked');
     assert.equal((await call('DELETE','/api/rooms/seed-meeting',null,owner)).status,409,'built-in delete refused');

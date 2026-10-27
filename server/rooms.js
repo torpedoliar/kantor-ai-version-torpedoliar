@@ -11,6 +11,8 @@ const TYPES = {
   custom: {label: 'Custom room', capacity: 4, w: 5, d: 4},
 };
 const FURNITURE = new Set(['table', 'chair', 'sofa', 'board', 'plant']);
+// The 3D scene builds at most eight seats per room; the API and the drawer use the same ceiling.
+const MAX_CAPACITY = 8;
 // Floor slab is 32x25; keep rooms clear of the walls and the stair core on the left.
 const BOUNDS = {x: 15.9, z: 11.5};
 
@@ -57,7 +59,7 @@ function validateRoom(input, rooms, selfId) {
   }
   if (get('capacity') !== undefined) {
     const capacity = num(get('capacity'));
-    if (!Number.isInteger(capacity) || capacity < 1 || capacity > 50) return {ok: false, error: 'Capacity must be 1-50.', code: 'bad'};
+    if (!Number.isInteger(capacity) || capacity < 1 || capacity > MAX_CAPACITY) return {ok: false, error: `Capacity must be 1-${MAX_CAPACITY}.`, code: 'bad'};
     out.capacity = capacity;
   } else if (selfId === null) out.capacity = TYPES[out.type ?? 'custom'].capacity;
   // Size and position come from the template unless given; a type change re-templates them.
@@ -93,4 +95,4 @@ function validateRoom(input, rooms, selfId) {
   return {ok: true, room: out};
 }
 
-module.exports = {SEED, TYPES, FURNITURE: [...FURNITURE], validateRoom};
+module.exports = {SEED, TYPES, FURNITURE: [...FURNITURE], MAX_CAPACITY, validateRoom};

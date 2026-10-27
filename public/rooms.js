@@ -95,6 +95,8 @@
     el('roomName').focus();
   }
 
+  // Moving or resizing a room changes its seats; that is refused while someone is inside.
+  const roomLayoutKey = room => JSON.stringify({floor:room.floor,type:room.type,x:room.x,z:room.z,w:room.w,d:room.d,capacity:room.capacity,furniture:(room.furniture||[]).map(item=>[item.kind,item.x,item.z])});
   const planToCanvas = (x, z) => [PLAN.w / 2 + x * PLAN.scale, PLAN.h / 2 + z * PLAN.scale];
   const canvasToPlan = (px, py) => [Math.round(((px - PLAN.w / 2) / PLAN.scale) * 2) / 2, Math.round(((py - PLAN.h / 2) / PLAN.scale) * 2) / 2];
 
@@ -176,6 +178,14 @@
       : {name: el('roomName').value.trim(), floor: Number(el('roomFloor').value), type: el('roomType').value,
          capacity: Number(el('roomCapacity').value) || 1, owner: el('roomOwner').value || null,
          x: planRoom.x, z: planRoom.z, w: planRoom.w, d: planRoom.d, furniture: planRoom.furniture};
+    if (!locked && editingRoom) {
+      const current = roomsList.find(room => room.id === editingRoom);
+      const occupants = window.officeScene?.roomOccupancy?.()?.[editingRoom] || 0;
+      if (occupants && (!current || roomLayoutKey(current) !== roomLayoutKey(body))) {
+        message(`Ada ${occupants} orang di ${current?.name || 'ruangan ini'}. Suruh kembali kerja dulu sebelum mengubah ukuran, lantai, tipe, kapasitas, atau furnitur.`);
+        return;
+      }
+    }
     try {
       const saved = editingRoom ? await call('PATCH', `/api/rooms/${encodeURIComponent(editingRoom)}`, body) : await call('POST', '/api/rooms', body);
       message(`${saved.name} tersimpan dan kantor 3D diperbarui.`);
