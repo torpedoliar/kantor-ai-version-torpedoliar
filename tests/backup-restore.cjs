@@ -2,7 +2,7 @@
 // and the owner-only import replaces the workspace only when asked.
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process');
 const {createTaskStore}=require('../server/task-store');
-const root=path.join(__dirname,'..'),PORT=43642,origin=`http://127.0.0.1:${PORT}`;
+const root=path.join(__dirname,'..'),PORT=Number(process.env.TEST_PORT||43642),origin=`http://127.0.0.1:${PORT}`;
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-backup-')),key=Buffer.alloc(32,11).toString('base64');
 const run=(script,args)=>new Promise(resolve=>{const child=spawn(process.execPath,[path.join(root,'scripts',script),...args],{cwd:root});let out='',err='';child.stdout.on('data',d=>out+=d);child.stderr.on('data',d=>err+=d);child.on('close',code=>resolve({code,out,err}));});
 function seedData(target){

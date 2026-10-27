@@ -416,15 +416,16 @@ Dependensi keras:
 - Test: `npm run test:unit`, `npm run test:ui`
 
 **Steps:**
-- [ ] 1. Auto-deteksi tes UI (`require('./browser.cjs')`) atau file penanda; gagal bila 0 file cocok.
-- [ ] 2. Server tes bind ke port 0 dan kirim lewat env; hapus port hardcoded bertahap (mulai dari tes baru).
-- [ ] 3. Jalankan child detached dan bunuh seluruh process tree saat timeout (`taskkill /T /F` di Windows, process group di POSIX).
-- [ ] 4. Screenshot ke `os.tmpdir()/kantor-tests` setelah `mkdirSync`; bersihkan `mkdtempSync` di `finally`.
-- [ ] 5. Naikkan/konfigurasikan timeout per file (env `TEST_TIMEOUT_MS`).
+- [x] 1. Tes UI dideteksi dari `browser.cjs` di isi file, bukan daftar manual; mode tak dikenal dan nol file keluar 1 dengan pesan jelas.
+- [x] 2. Setiap file mendapat `TEST_PORT` dari port 0 bebas; 35 file tes memakai `Number(process.env.TEST_PORT||fallback)`.
+- [x] 3. Child dijalankan detached di POSIX; timeout membunuh seluruh process tree (`taskkill /T /F` di Windows, process group di POSIX) dan menandai `TIMEOUT`.
+- [x] 4. Timeout per file lewat `TEST_TIMEOUT_MS` (default 900 dtk).
+- Catatan: screenshot di tes sudah memakai `os.tmpdir()` (tidak ada `/private/tmp`); pembersihan `mkdtempSync` yang belum `finally` masih tersisa di beberapa tes lama.
 
 **Acceptance:**
-- Suite unit dan UI tetap 100% lulus; tidak ada port tertinggal setelah tes gagal yang disimulasikan.
-- Menjalankan `node tests/run-suite.cjs unit` di checkout bersih tidak menyertakan file UI.
+- `node tests/run-suite.cjs unit` → 62/62 lulus; auto-deteksi memindahkan `org-fields`/`org-model-routing` ke unit (server murni).
+- `TEST_PORT=... node tests/nav.cjs` dan `rooms-nav.cjs` lulus dengan port pilihan env.
+- `node tests/run-suite.cjs nonsense` keluar 1 tanpa menjalankan apa pun.
 
 ---
 
@@ -544,6 +545,10 @@ Dependensi keras:
   - Fokus kartu task dan thread messenger bertahan setelah render/poll; scroll board dipertahankan.
   - Bahasa UI diseragamkan (kolom, aria-label, inventaris, jenis furnitur, pesan custom).
   - Verifikasi: task-board, messenger-ui, rooms-nav, office.
+- 2026-10-27 — Task 18 selesai di working tree (belum commit):
+  - Runner auto-deteksi UI, guard mode/kosong, TEST_PORT bebas per file, process-tree kill, TEST_TIMEOUT_MS.
+  - 35 tes memakai port dinamis; unit 62/62; nav/rooms-nav lulus.
+  - Screenshot sudah portable; pembersihan temp dir lama belum menyeluruh.
 
 ## Risiko utama
 

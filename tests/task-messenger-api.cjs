@@ -1,6 +1,6 @@
 // Messenger backend: a real worker question becomes one decision + agent message; answering resumes the task once.
 const assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process');
-const PORT=43552,origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-messenger-'));
+const PORT=Number(process.env.TEST_PORT||43552),origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-messenger-'));
 const calls=[];let replies=[];
 const mock=http.createServer((req,res)=>{let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw||'{}');calls.push(body);res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({choices:[{message:{content:replies.length?replies.shift():'Final draft.'}}]}));});});
 function start(){const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',KANTOR_SETTINGS_KEY:Buffer.alloc(32,4).toString('base64')},stdio:['ignore','pipe','inherit']});

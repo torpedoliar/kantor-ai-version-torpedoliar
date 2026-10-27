@@ -28,7 +28,7 @@ if(linked)assert.equal(code(()=>ws.exportRevision(p.id,rev.id,linked)),'EXPORT_P
 const src=path.join(ws.sourceDir(p.id,rev.id),'index.html');fs.chmodSync(src,0o644);fs.writeFileSync(src,'tampered');
 assert.equal(code(()=>ws.exportRevision(p.id,rev.id,path.join(tmp,'second'))),'SOURCE_CHANGED');assert.equal(fs.existsSync(path.join(tmp,'second','index.html')),false);
 // 5) HTTP route: owner unlock required; export lands in the chosen folder.
-(async()=>{const {spawn}=require('node:child_process'),PORT=43591,origin=`http://127.0.0.1:${PORT}`;
+(async()=>{const {spawn}=require('node:child_process'),PORT=Number(process.env.TEST_PORT||43591),origin=`http://127.0.0.1:${PORT}`;
  const fresh=ws.writeRevision(p.id,{runtime:'static-web',files:[{path:'index.html',content:'<h1>Route</h1>'}],commands:{test:{executable:'node',args:['t.js']}}});
  const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:data,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:''},stdio:['ignore','pipe','inherit']});
  try{await new Promise((r,j)=>{child.stdout.on('data',d=>String(d).includes('Kantor Kita:')&&r());child.on('exit',c=>j(Error('exit '+c)));});

@@ -7,7 +7,7 @@ const base={runtime:'static-web',files:[{path:'index.html',content:'<h1>Kalkulat
   commands:{build:{executable:'node',args:['--version']},test:{executable:'node',args:['--test','test']},start:{executable:'node',args:['server.js']}},acceptanceTests:['2+2=4'],knownLimitations:[]};
 // Server routes: metadata and file download are owner-only and read only validated revisions.
 async function routes(ws,project,rev){
-  const {spawn}=require('node:child_process'),PORT=43581,origin=`http://127.0.0.1:${PORT}`;
+  const {spawn}=require('node:child_process'),PORT=Number(process.env.TEST_PORT||43581),origin=`http://127.0.0.1:${PORT}`;
   const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:''},stdio:['ignore','pipe','inherit']});
   try{
     await new Promise((r,j)=>{child.stdout.on('data',d=>String(d).includes('Kantor Kita:')&&r());child.on('exit',c=>j(Error('exit '+c)));});

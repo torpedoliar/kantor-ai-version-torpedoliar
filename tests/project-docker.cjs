@@ -19,7 +19,7 @@ const manifest={commands:{build:{executable:'node',args:['build.js']},test:{exec
 // environment_unavailable and nothing runs on the host.
 async function serverFlow(){
   const {spawn}=require('node:child_process'),{createProjectWorkspace}=require('../server/project-workspace');
-  const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-docker-server-')),PORT=43597,origin=`http://127.0.0.1:${PORT}`;
+  const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-docker-server-')),PORT=Number(process.env.TEST_PORT||43597),origin=`http://127.0.0.1:${PORT}`;
   const ws=createProjectWorkspace({dataDir}),project=ws.createProject({taskId:'none',environment:'docker'});
   const marker=path.join(tmp,'host-ran.txt');
   const rev=ws.writeRevision(project.id,{runtime:'node-web',files:[{path:'t.js',content:`require('node:fs').writeFileSync(${JSON.stringify(marker)},'host')`}],commands:{test:{executable:'node',args:['t.js']}}});

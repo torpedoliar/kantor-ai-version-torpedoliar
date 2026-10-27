@@ -1,7 +1,7 @@
 // A failing synthesis is bounded: it backs off, stops after KANTOR_SYNTH_ATTEMPTS, and waits for
 // an explicit Coba lagi instead of re-entering wake() forever.
 const assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process');
-const PORT=43554,origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-synth-retry-'));
+const PORT=Number(process.env.TEST_PORT||43554),origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-synth-retry-'));
 let failSynth=true;const calls=[];
 const mock=http.createServer((req,res)=>{let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{const body=JSON.parse(raw||'{}'),text=JSON.stringify(body.messages);calls.push({text});
   if(/MODE: SYNTHESIZE/.test(text)&&failSynth){

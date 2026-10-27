@@ -2,7 +2,7 @@
 // real test evidence, sandboxed separate-origin preview and source download before owner acceptance.
 const assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process');
 const {launch}=require('./browser.cjs');
-const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-app-ui-')),PORT=43611,origin=`http://127.0.0.1:${PORT}`;
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-app-ui-')),PORT=Number(process.env.TEST_PORT||43611),origin=`http://127.0.0.1:${PORT}`;
 const bundle={runtime:'static-web',files:[{path:'index.html',content:'<!doctype html><title>Kalkulator</title><h1>Kalkulator</h1><button onclick="document.querySelector(\'output\').textContent=2+2">Hitung</button><output></output>'},{path:'test.cjs',content:"require('node:test')('2+2=4',()=>require('node:assert/strict').equal(2+2,4));"}],commands:{test:{executable:'node',args:['--test','test.cjs']}},acceptanceTests:['2+2=4'],knownLimitations:['Belum menyimpan riwayat']};
 const mock=http.createServer((req,res)=>{req.resume();req.on('end',()=>{res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify(bundle)}}]}));});});
 const wait=async fn=>{for(let i=0;i<200;i++){const v=await fn();if(v)return v;await new Promise(r=>setTimeout(r,100));}throw Error('timeout');};

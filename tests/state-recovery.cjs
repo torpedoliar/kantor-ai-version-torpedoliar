@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('nod
 const {recoverState}=require('../server/state-recovery');
 const {createOrg}=require('../server/org');
 const {createTaskStore}=require('../server/task-store');
-const PORT=43643,origin=`http://127.0.0.1:${PORT}`;
+const PORT=Number(process.env.TEST_PORT||43643),origin=`http://127.0.0.1:${PORT}`;
 (async()=>{
   // 1. A valid file is snapshotted; a later corrupt file is archived and the snapshot is used.
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-recovery-'));

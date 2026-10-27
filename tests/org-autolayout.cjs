@@ -5,7 +5,7 @@ const {spawn}=require('node:child_process');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {launch}=require('./browser.cjs');
 const skipWizard=async page=>{await page.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1')}catch{}});return page;};
-const PORT=43303,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-autolayout-')),origin=`http://127.0.0.1:${PORT}`;
+const PORT=Number(process.env.TEST_PORT||43303),dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-autolayout-')),origin=`http://127.0.0.1:${PORT}`;
 const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',DRY_RUN_DELAY_MS:'60000'},stdio:['ignore','pipe','inherit']});
 const start=new Promise((resolve,reject)=>{let ready=false;child.stdout.on('data',d=>{if(String(d).includes('Kantor Kita:')){ready=true;resolve();}});child.on('exit',code=>{if(!ready)reject(new Error(`server exited ${code}`));});});
 (async()=>{await start;let browser;try{

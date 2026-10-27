@@ -4,7 +4,7 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
 const {launch}=require('./browser.cjs');
 // Fresh data dirs have no owner PIN; keep the first-run organization wizard out of the way.
 const skipWizard=async page=>{await page.addInitScript(()=>{try{sessionStorage.setItem('kantor-ai.wizardSnoozed','1')}catch{}});return page;};
-const PORT=43260,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-nav-hardening-')),origin=`http://127.0.0.1:${PORT}`;
+const PORT=Number(process.env.TEST_PORT||43260),dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-nav-hardening-')),origin=`http://127.0.0.1:${PORT}`;
 const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',DRY_RUN_DELAY_MS:'20'},stdio:['ignore','pipe','inherit']});
 (async()=>{let browser;try{await new Promise((resolve,reject)=>{let ready=false;child.stdout.on('data',data=>{if(String(data).includes('Kantor Kita:')){ready=true;resolve();}});child.on('exit',code=>{if(!ready)reject(new Error(`server exited ${code}`));});});browser=await launch();const page=await browser.newPage({viewport:{width:1440,height:900}}).then(skipWizard);await page.goto(origin);await page.waitForFunction(()=>window.officeScene);
   await page.click('#bOrg');await page.locator('#railMore').evaluate(node=>node.open=true);await page.click('#bLock');await page.fill('#orgPin','2468');await page.click('#pinSubmit');await page.waitForFunction(()=>document.querySelector('#bLock').textContent==='Terbuka'&&document.querySelector('#orgPanel').textContent.includes('Kak Rani'));assert.equal(await page.locator('#bLock').innerText(),'Terbuka');

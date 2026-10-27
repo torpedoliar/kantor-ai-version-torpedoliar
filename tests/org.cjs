@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
-const PORT=43191,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-org-'));
+const PORT=Number(process.env.TEST_PORT||43191),dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-org-'));
 const origin=`http://127.0.0.1:${PORT}`;
 const start=()=>{
   const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',DRY_RUN_DELAY_MS:'10'},stdio:['ignore','pipe','inherit']});

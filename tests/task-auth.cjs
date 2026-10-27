@@ -3,7 +3,7 @@
 const assert=require('node:assert/strict');
 const {spawn}=require('node:child_process');
 const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
-const PORT=43555,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-task-auth-')),origin=`http://127.0.0.1:${PORT}`;
+const PORT=Number(process.env.TEST_PORT||43555),dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-task-auth-')),origin=`http://127.0.0.1:${PORT}`;
 const server=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:'',KANTOR_SETTINGS_KEY:Buffer.alloc(32,8).toString('base64')},stdio:['ignore','pipe','inherit']});
 const ready=new Promise((resolve,reject)=>{server.stdout.on('data',d=>String(d).includes('Kantor Kita:')&&resolve());server.on('exit',code=>reject(Error('server exit '+code)));});
 (async()=>{await ready;try{

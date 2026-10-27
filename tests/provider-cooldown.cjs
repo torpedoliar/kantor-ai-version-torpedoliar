@@ -1,7 +1,7 @@
 // A 429 with Retry-After rests the provider for the whole office: the task's own retry does not
 // hit it again until the cooldown ends, and the provider's error snippet reaches the owner.
 const assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process');
-const PORT=43556,origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-provider-cooldown-'));
+const PORT=Number(process.env.TEST_PORT||43556),origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-provider-cooldown-'));
 const hits=[];let first=true;
 const mock=http.createServer((req,res)=>{let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{
   hits.push(Date.now());

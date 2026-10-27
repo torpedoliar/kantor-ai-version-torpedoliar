@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process');
 const {createTaskStore}=require('../server/task-store');
-const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-app-recovery-')),PORT=43631;
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-app-recovery-')),PORT=Number(process.env.TEST_PORT||43631);
 const store=createTaskStore({dataDir:dir});
 store.transaction(undefined,d=>{d.tasks.push({id:'app-recovery',title:'App interrupted',assignee:'Kak Rani',division:'marketing',status:'active',phase:'implementing',outputType:'application',brief:'x',result:'',messages:[],version:0,runId:'old'});});
 const child=spawn(process.execPath,[path.join(__dirname,'../server/server.js')],{env:{...process.env,PORT:String(PORT),DATA_DIR:dir,ENV_FILE:'/nonexistent',ANTHROPIC_API_KEY:''},stdio:['ignore','pipe','inherit']});

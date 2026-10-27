@@ -54,6 +54,20 @@ const api=async(p,opts={},extra={})=>fetch(origin+p,{...opts,headers:{'content-t
     await page.click('#bRooms');
     assert.match(await page.locator('#roomsList').innerText(),/Sky Lounge/);
     assert.match(await page.locator('#roomsList').innerText(),/bawaan/);
+    // Renaming a built-in room updates its floor sign, not only the sidebar row.
+    await page.waitForFunction(()=>officeScene.roomLabelText('seed-meeting')==='BOARD ROOM',null,{timeout:5000});
+    // The floor plan is keyboard-operable: arrows nudge 0.1 m, Shift 0.5 m.
+    const skyRow=page.locator('.room-row',{hasText:'Sky Lounge'});
+    await skyRow.getByRole('button',{name:'Ubah'}).click();
+    await page.focus('#roomPlan');
+    const x0=Number(await page.locator('#roomX').inputValue()),z0=Number(await page.locator('#roomZ').inputValue());
+    await page.keyboard.press('ArrowRight');
+    assert.ok(Math.abs(Number(await page.locator('#roomX').inputValue())-x0-.1)<.01,'ArrowRight moves the room 0.1 m');
+    await page.keyboard.down('Shift');await page.keyboard.press('ArrowRight');await page.keyboard.up('Shift');
+    assert.ok(Math.abs(Number(await page.locator('#roomX').inputValue())-x0-.6)<.01,'Shift+ArrowRight moves 0.5 m more');
+    assert.equal(Number(await page.locator('#roomZ').inputValue()),z0);
+    assert.match(await page.locator('#roomsMessage').innerText(),/Posisi ruangan/);
+    await page.click('#roomCancel');
     await page.keyboard.press('Escape');
     await page.waitForFunction(id=>(officeScene.roomOccupancy()[id]||0)>=1,sky.body.id,{timeout:420000,polling:500});
     // Private room: the owner gets a personal-room command; nobody else can be sent there.

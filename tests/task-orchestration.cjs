@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),{spawn}=require('node:child_process');
 const {parsePlan}=require('../server/task-protocol');
 const {seed}=require('../server/org');
-const PORT=43553,origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-orchestration-'));
+const PORT=Number(process.env.TEST_PORT||43553),origin=`http://127.0.0.1:${PORT}`,dir=fs.mkdtempSync(path.join(os.tmpdir(),'kantor-orchestration-'));
 // --- Pure protocol checks against the seed organisation (Koh Wira leads engineering, collaborates via leadership).
 const org=seed(),parent={id:'p',assignee:'Koh Wira',division:'engineering',depth:0};
 const ok=parsePlan(JSON.stringify({assumptions:['web'],acceptance:['2+2=4'],children:[{key:'ui',title:'UI',brief:'b',assignee:'Bagas Pratama Putra'},{key:'api',title:'API',brief:'b',assignee:'Rizky Hakim',dependencyKeys:['ui']}]}),{org,parent});
