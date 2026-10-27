@@ -40,8 +40,12 @@
       }
       g.userData.rider=rider;g.add(rider);
     }
-    function spawn(kind,id,parent){if(!templates.has(kind))return null;const g=templates.get(kind).clone(true);let h=0;for(const c of id)h=(h*31+c.charCodeAt(0))>>>0;
-      g.traverse(o=>{if(!o.isMesh)return;o.castShadow=false;o.receiveShadow=true;if(kind==='car'&&o.material?.name==='ToyCar'){o.material=o.material.clone();o.material.color.setHex(PAINTS[h%PAINTS.length]);owned.add(o.material);}});
+    function spawn(kind,id,parent){if(!templates.has(kind))return null;const body=templates.get(kind).clone(true);let h=0;for(const c of id)h=(h*31+c.charCodeAt(0))>>>0;
+      body.traverse(o=>{if(!o.isMesh)return;o.castShadow=false;o.receiveShadow=true;if(kind==='car'&&o.material?.name==='ToyCar'){o.material=o.material.clone();o.material.color.setHex(PAINTS[h%PAINTS.length]);owned.add(o.material);}});
+      // The ToyCar asset imports nose-on -z while the lane heading is computed from +z: turn the body
+      // inside its instance so the nose leads every trip. Motorcycles already face +z.
+      if(kind==='car')body.rotation.y=Math.PI;
+      const g=new T.Group();g.add(body);
       if(kind==='motorcycle'&&!id.startsWith('parked-'))addRider(g);
       parent.add(g);instances.set(id,g);return g;}
     ready.then(()=>{if(dead)return;

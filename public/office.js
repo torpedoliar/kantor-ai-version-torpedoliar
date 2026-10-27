@@ -366,11 +366,11 @@
   }
   // Sectional garage door across the open parking half; it rolls up when a car is inside or approaching.
   {
-    const width=15.8,group=new THREE.Group();group.position.set(8,3.0,12.75);group.userData.walkable=true;floors[1].add(group);
+    const width=16.2,group=new THREE.Group();group.position.set(8.25,3.0,12.75);group.userData.walkable=true;floors[1].add(group);
     for(let i=0;i<8;i++){const y=-.35-i*.37;box(width,.35,.08,0x6f7a80,0,y,0,group);box(width-.36,.2,.02,0x9aa5aa,0,y+.065,.055,group);}
     box(width+.2,.14,.16,0x2a2e32,0,-2.97,0,group);
-    for(const x of [.06,15.94])box(.14,3.05,.2,0x2a2e32,x,.03,12.78,floors[1]);
-    box(width+.3,.28,.5,0x2a2e32,8,2.78,12.78,floors[1]);
+    for(const x of [.18,16.32])box(.14,3.05,.2,0x2a2e32,x,.03,12.78,floors[1]);
+    box(width+.3,.28,.5,0x2a2e32,8.25,2.78,12.78,floors[1]);
     garage={group,open:0};
   }
   // Parked vehicles are local detailed CC0 models placed by officeEnvironment.
@@ -839,7 +839,7 @@
     glazing(.05,h,12.4,-16.55,y,-6.3,lg);glazing(.05,h,3.6,-16.55,y,10.7,lg);
     for(let x=-16.5;x<=16.51;x+=33/8)for(const z of [-12.55,12.55])if(level!==1||z<0||x<.1)box(.14,h,.14,FRAME,x,y,z,lg);
     // The parking entrance keeps two structural columns and a header beam, wide enough for cars.
-    if(level===1){for(const x of [8.25,16.5])box(.3,h,.3,FRAME,x,y,12.55,lg);box(16.5,.35,.3,FRAME,8.25,y+h-.35,12.55,lg);}
+    if(level===1){for(const x of [0,16.5])box(.3,h,.3,FRAME,x,y,12.55,lg);box(16.5,.35,.3,FRAME,8.25,y+h-.35,12.55,lg);}
     for(let z=-12.5;z<=12.51;z+=25/6)box(.14,h,.14,FRAME,16.55,y,z,lg);
     for(const z of [-12.55,-.1,4.9,8.9,12.55])box(.14,h,.14,FRAME,-16.55,y,z,lg);
     return lg;
@@ -859,16 +859,29 @@
   const lampMaterial=new THREE.MeshStandardMaterial({color:0xffdda0,emissive:0xffbb66,emissiveIntensity:1.6,roughness:.5});
   const streetBulbMaterial=new THREE.MeshStandardMaterial({color:0xfff1cf,emissive:0xffc06a,emissiveIntensity:0,roughness:.4});
   const cityFacadeMats=[];
+  const glowTexture=(()=>{const c=document.createElement('canvas');c.width=128;c.height=128;const g=c.getContext('2d');const grad=g.createRadialGradient(64,64,2,64,64,64);grad.addColorStop(0,'rgba(255,248,220,1)');grad.addColorStop(.25,'rgba(255,214,140,.9)');grad.addColorStop(.6,'rgba(255,185,90,.28)');grad.addColorStop(1,'rgba(255,165,70,0)');g.fillStyle=grad;g.fillRect(0,0,128,128);const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;return tex;})();
+  const streetGlows=[],streetPoints=[],garageNight=[];let garageLampMaterial=null;
   const levelLights={};
   function buildLights(level){
     const y=floorY(level),lights=new THREE.Group();eveningLights.add(lights);levelLights[level]=lights;
     const strip=new THREE.Mesh(new THREE.BoxGeometry(31,.07,.08),lampMaterial);strip.position.set(0,y+.12,12.15);lights.add(strip);
-    const light=new THREE.PointLight(0xffce8c,2.2,38,1);light.position.set(0,y+3,1);lights.add(light);lights.userData.point=light;
+    const light=new THREE.PointLight(0xffce8c,2.2,38,1);light.position.set(0,y+3,1);lights.add(light);const points=[light];
+    if(level===1){const extra=new THREE.PointLight(0xffce8c,0,16,1.4);extra.position.set(8,y+2.7,9);lights.add(extra);points.push(extra);}
+    lights.userData.points=points;
     for(const x of [-15,15]){
       const lamp=new THREE.Mesh(new THREE.BoxGeometry(.32,.55,.32),lampMaterial);lamp.position.set(x,y+.3,10.5);lights.add(lamp);
     }
   }
   for(const level of ORDER)buildLights(level);
+  // Warm wall lamps over the parking door; they only light up after dark.
+  garageLampMaterial=new THREE.MeshStandardMaterial({color:0xfff1cf,emissive:0xffc06a,emissiveIntensity:0,roughness:.4});
+  for(const [x,phase] of [[3.5,0],[12.5,1.7]]){
+    box(.06,.28,.5,DARK,x,2.58,12.85,floors[1]);
+    const globe=new THREE.Mesh(new THREE.BoxGeometry(.26,.28,.18),garageLampMaterial);globe.position.set(x,2.72,13.12);floors[1].add(globe);
+    const light=new THREE.PointLight(0xffc47a,0,11,1.5);light.position.set(x,2.8,13.6);floors[1].add(light);
+    const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexture,color:0xffcf8a,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,fog:false,opacity:0}));sprite.position.set(x,2.74,13.18);sprite.scale.set(2.1,2.1,1);sprite.visible=false;floors[1].add(sprite);
+    garageNight.push({light,sprite,phase});
+  }
   // Parts that fade during camera transitions get their own material copies, so floors keep full opacity.
   function prepareFade(root){root.traverse(o=>{if(!o.material)return;o.material=o.material.clone();o.material.transparent=true;o.userData.fadeMaterial=true;o.userData.baseOpacity=o.material.opacity;});}
   // Removed stair/facade groups own their fade clones, but not cached base or shared model materials.
@@ -1017,8 +1030,15 @@
       cylinder(.055,.075,4.28,METAL,x,-.64,z,skyline);
       if(fx){box(1.4,.06,.06,METAL,x+fx*.7,3.50,z,skyline);box(.3,.1,.22,METAL,x+fx*1.36,3.46,z,skyline);const b=new THREE.Mesh(new THREE.BoxGeometry(.3,.04,.2),streetBulbMaterial);b.position.set(x+fx*1.36,3.42,z);skyline.add(b);}
       else{box(.06,.06,1.4,METAL,x,3.50,z+fz*.7,skyline);box(.22,.1,.3,METAL,x,3.46,z+fz*1.36,skyline);const b=new THREE.Mesh(new THREE.BoxGeometry(.2,.04,.3),streetBulbMaterial);b.position.set(x,3.42,z+fz*1.36);skyline.add(b);}
+      const hx=x+(fx||0)*1.36,hz=z+(fz||0)*1.36;
+      const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTexture,color:0xffcf8a,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,fog:false,opacity:1}));
+      halo.position.set(hx,3.38,hz);halo.scale.set(2.3,2.3,1);halo.visible=false;skyline.add(halo);
+      streetGlows.push({sprite:halo,phase:x*.7+z*.3});
     }
     for(const [x,z,fx,fz] of [[-30,20.35,0,1],[-11,20.35,0,1],[18,20.35,0,1],[27,20.35,0,1],[-22,27.6,0,-1],[4,27.6,0,-1],[26,27.6,0,-1],[30.4,-14,1,0],[37.6,8,-1,0]])streetlight(x,z,fx,fz);
+    for(const [x,z] of [[-11,21.4],[18,21.4],[4,27.4]]){
+      const light=new THREE.PointLight(0xffc98a,0,26,1.4);light.position.set(x,3.2,z);skyline.add(light);streetPoints.push(light);
+    }
     {
       const x=-20,z=20.05,top=-.80;
       for(const dx of [-2.1,2.1])for(const dz of [-.65,.65])box(.07,2.45,.07,METAL,x+dx,top,z+dz,skyline);
@@ -2760,7 +2780,8 @@
     eveningLights.visible=buildingView||look.night>.02;
     for(const [level,lights]of Object.entries(levelLights)){
       lights.visible=buildingView||Number(level)===activeFloor;
-      if(lights.userData.point)lights.userData.point.intensity=buildingView?look.point:look.point*look.night;
+      const points=lights.userData.points||[];
+      points.forEach((point,index)=>point.intensity=(buildingView?look.point:look.point*look.night)*(index?0.7:1));
     }
     lampMaterial.emissiveIntensity=buildingView?look.lamps:look.lamps*look.night;
   }
@@ -2772,6 +2793,10 @@
     ambient.color.copy(m.ambSky);ambient.groundColor.copy(m.ambGround);ambient.intensity=buildingView?m.ambB:m.ambI;
     syncLevelLights(m);
     streetBulbMaterial.emissiveIntensity=m.street;
+    for(const light of streetPoints)light.intensity=buildingView?m.street*1.5:0;
+    for(const g of streetGlows){g.sprite.visible=buildingView&&m.street>.05;g.sprite.material.opacity=Math.min(1,m.street/1.8)*.95;}
+    if(garageLampMaterial)garageLampMaterial.emissiveIntensity=m.night*2.6;
+    for(const g of garageNight){g.light.intensity=m.night*2.4;g.sprite.visible=m.night>.04;g.sprite.material.opacity=m.night*.95;}
     for(const mat of cityFacadeMats)mat.emissiveIntensity=m.city;
     nightSky.visible=m.stars>.02;starMat.opacity=.9*m.stars;moonMat.opacity=.9*m.stars;
     for(const c of clouds){c.sprite.userData.baseOpacity=m.clouds;c.sprite.material.opacity=m.clouds;}
@@ -2831,6 +2856,16 @@
     if(dt>0)for(const screen of deskScreens){if(simTime-screen.last<.4)continue;screen.last=simTime;screen.draw(simTime);}
     for(const d of doors){const near=agents.some(a=>a.floor===d.floor&&a.state!=='stairs'&&a.g.position.distanceTo(d.center)<1.6);d.open+=((near?1:0)-d.open)*Math.min(1,dt*6);d.pivot.rotation.y=d.base+d.open*1.45;}
     if(garage){const near=mobility.snapshot().vehicles.some(v=>v.pose[0]>0&&v.pose[0]<16&&v.pose[2]>5&&v.pose[2]<18);garage.open+=((near?1:0)-garage.open)*Math.min(1,dt*4);garage.group.scale.y=Math.max(.015,1-garage.open*.985);}
+    // Night sparkle: bulbs, halos and lit city windows shimmer a little; the pools of light stay steady.
+    if(moodCurrent.night>.05){
+      const pulse=(speed,phase)=>.86+.14*Math.sin(simTime*speed+phase);
+      streetBulbMaterial.emissiveIntensity=moodCurrent.street*pulse(1.8,0);
+      if(garageLampMaterial)garageLampMaterial.emissiveIntensity=moodCurrent.night*2.6*pulse(1.6,.7);
+      for(const mat of cityFacadeMats)mat.emissiveIntensity=moodCurrent.city*(.85+.15*Math.sin(simTime*1.1));
+      for(const g of garageNight){g.light.intensity=moodCurrent.night*2.4*pulse(1.6,g.phase);g.sprite.material.opacity=moodCurrent.night*.95*pulse(2.1,g.phase);}
+      for(const g of streetGlows)if(g.sprite.visible)g.sprite.material.opacity=.95*Math.min(1,moodCurrent.street/1.8)*pulse(2.2,g.phase);
+      starMat.opacity=.9*moodCurrent.stars*(.88+.12*Math.sin(simTime*1.7));
+    }
     if(follow){scene.updateMatrixWorld(true);followCamera(realDt);}
     scene.updateMatrixWorld(true);
     const occupied=[];
