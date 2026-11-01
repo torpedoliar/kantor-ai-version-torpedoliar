@@ -13,6 +13,7 @@ This repository is a fork of the original Kantor Kita project by Kangkung Mozzar
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
@@ -24,6 +25,12 @@ This repository is a fork of the original Kantor Kita project by Kangkung Mozzar
 - [Security notes](#security-notes)
 - [Full guide](#full-guide)
 - [License and credits](#license-and-credits)
+
+## Screenshots
+
+![Floor 3 workspace at the Medium graphics level](docs/screenshots/office-floor.png)
+
+*Floor 3 workspace at the Medium graphics level*
 
 ## Features
 

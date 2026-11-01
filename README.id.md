@@ -13,6 +13,7 @@ Repositori ini adalah fork dari proyek Kantor Kita asli karya Kangkung Mozzarell
 
 ## Daftar isi
 
+- [Tangkapan layar](#tangkapan-layar)
 - [Fitur](#fitur)
 - [Mulai cepat](#mulai-cepat)
 - [Konfigurasi](#konfigurasi)
@@ -24,6 +25,12 @@ Repositori ini adalah fork dari proyek Kantor Kita asli karya Kangkung Mozzarell
 - [Catatan keamanan](#catatan-keamanan)
 - [Panduan lengkap](#panduan-lengkap)
 - [Lisensi dan kredit](#lisensi-dan-kredit)
+
+## Tangkapan layar
+
+![Ruang kerja lantai 3 pada level grafis Medium](docs/screenshots/office-floor.png)
+
+*Ruang kerja lantai 3 pada level grafis Medium*
 
 ## Fitur
 
